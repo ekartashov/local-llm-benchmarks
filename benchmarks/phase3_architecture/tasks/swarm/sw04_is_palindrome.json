@@ -1,0 +1,6 @@
+{
+  "id": "sw04_is_palindrome",
+  "description": "Palindrome check — fast, lightweight",
+  "system_prompt": "You are a Python expert. Answer concisely with code only.",
+  "user_message": "Write a Python function is_palindrome(s: str) -> bool that returns True if s is a palindrome, ignoring spaces, punctuation, and case. No explanation."
+}

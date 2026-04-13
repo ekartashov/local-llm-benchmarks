@@ -1,0 +1,6 @@
+{
+  "id": "sw02_fizzbuzz",
+  "description": "FizzBuzz — fast, lightweight",
+  "system_prompt": "You are a Python expert. Answer concisely with code only.",
+  "user_message": "Write a Python function fizzbuzz(n) that returns a list of strings 1..n where multiples of 3 are 'Fizz', multiples of 5 are 'Buzz', and multiples of both are 'FizzBuzz'. No explanation."
+}

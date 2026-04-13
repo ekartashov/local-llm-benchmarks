@@ -1,0 +1,7 @@
+{
+  "id": "r10_diagnose_regression",
+  "description": "Diagnose a performance regression — clearly thinker tier",
+  "correct_tier": "thinker",
+  "system_prompt": "You are a principal engineer skilled in systematic root-cause analysis.",
+  "user_message": "After upgrading Pydantic from v1 to v2, our validation throughput dropped by 60%. Profiling shows the slowdown is not in field validators but in model instantiation itself. What are the three most likely root causes of this specific pattern (regression in instantiation, not field validation), and what would you do to confirm each hypothesis? Do not suggest rolling back."
+}

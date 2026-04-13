@@ -1,0 +1,7 @@
+{
+  "id": "r03_write_migration",
+  "description": "Write a database migration script — clearly coder tier",
+  "correct_tier": "coder",
+  "system_prompt": "You are a senior backend engineer. Write production-quality migration scripts.",
+  "user_message": "Write an Alembic migration that adds a non-nullable `status` column (VARCHAR 32, default 'pending') to the `jobs` table, with a backfill step so existing rows get the default. The migration must be safe to run against a live table."
+}

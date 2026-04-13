@@ -1,0 +1,6 @@
+{
+  "id": "sw01_reverse_string",
+  "description": "Reverse a string — fast, lightweight",
+  "system_prompt": "You are a Python expert. Answer concisely with code only.",
+  "user_message": "Write a Python function that reverses a string without using slicing. One function, no explanation."
+}

@@ -1,0 +1,46 @@
+# litellm_config.yaml — LiteLLM proxy configuration for Phase 3 routing tests.
+#
+# This file is mounted read-only into the litellm container at /app/config/.
+# Environment variables are expanded at startup.
+#
+# Model aliases:
+#   coder    → vLLM on GPU 0 (PORT_VLLM_GPU0, default 30000)
+#   thinker  → vLLM on GPU 1 (PORT_VLLM_GPU1, default 30001)
+#
+# To update the coder/thinker model IDs, set CODER_MODEL and THINKER_MODEL
+# environment variables before starting the litellm container.
+
+model_list:
+  - model_name: "coder"
+    litellm_params:
+      model: "openai/coder"
+      api_base: "http://host.containers.internal:30000/v1"
+      api_key: "fake"
+      # Increase timeout for long-running coding tasks
+      timeout: 120
+      stream_timeout: 120
+
+  - model_name: "thinker"
+    litellm_params:
+      model: "openai/thinker"
+      api_base: "http://host.containers.internal:30001/v1"
+      api_key: "fake"
+      timeout: 120
+      stream_timeout: 120
+
+# Router settings: least-busy routes to whichever backend has fewer in-flight
+# requests.  Use "simple-shuffle" for pure round-robin.
+router_settings:
+  routing_strategy: "least-busy"
+  # Retry on transient errors
+  num_retries: 2
+  retry_after: 1
+
+litellm_settings:
+  # Don't forward unknown parameters (vLLM may not accept all OpenAI fields)
+  drop_params: true
+  # Suppress verbose debug output in production runs
+  set_verbose: false
+  # Request/response logging — disable for benchmarks to avoid I/O overhead
+  success_callback: []
+  failure_callback: []

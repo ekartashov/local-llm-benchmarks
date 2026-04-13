@@ -1,0 +1,7 @@
+{
+  "id": "r08_prove_complexity",
+  "description": "Prove algorithm complexity — clearly thinker tier",
+  "correct_tier": "thinker",
+  "system_prompt": "You are an algorithms expert. Provide rigorous proofs.",
+  "user_message": "Prove that the amortized time complexity of N insertions into a dynamic array (doubling strategy) is O(N) total, O(1) amortized per insertion. Use the potential method. Then explain why a 1.5x growth factor achieves the same asymptotic complexity but may be preferable in practice."
+}

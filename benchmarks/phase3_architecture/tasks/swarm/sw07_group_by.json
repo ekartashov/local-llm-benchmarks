@@ -1,0 +1,6 @@
+{
+  "id": "sw07_group_by",
+  "description": "Group list by key function — fast, lightweight",
+  "system_prompt": "You are a Python expert. Answer concisely with code only.",
+  "user_message": "Write a Python function group_by(items: list, key_fn) -> dict that groups items by the result of key_fn. No explanation."
+}

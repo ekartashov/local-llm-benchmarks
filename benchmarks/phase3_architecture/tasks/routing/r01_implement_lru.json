@@ -1,0 +1,7 @@
+{
+  "id": "r01_implement_lru",
+  "description": "Implement an LRU cache — clearly coder tier",
+  "correct_tier": "coder",
+  "system_prompt": "You are a senior Python engineer. Write clean, correct code.",
+  "user_message": "Implement a thread-safe LRU cache in Python with a max_size parameter. Include get(key) and put(key, value) methods. Do not use functools.lru_cache."
+}

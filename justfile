@@ -117,6 +117,22 @@ phase2-spec:
 phase3:
     ./benchmarks/phase3_architecture/run.sh
 
+# Sub-test 3.1: co-resident dual-model (coder GPU 0 + thinker GPU 1)
+phase3-dual:
+    ./benchmarks/phase3_architecture/run_3.1_dual_model.sh
+
+# Sub-test 3.2: LiteLLM routing accuracy (passive — requires both GPUs running)
+phase3-routing:
+    ./benchmarks/phase3_architecture/run_3.2_routing.sh
+
+# Sub-test 3.3: model hot-swap latency
+phase3-swap:
+    ./benchmarks/phase3_architecture/run_3.3_swap_timing.sh
+
+# Sub-test 3.4: parallel swarm throughput
+phase3-swarm:
+    ./benchmarks/phase3_architecture/run_3.4_swarm.sh
+
 # Run full Phase 4 (optimizations)
 phase4:
     ./benchmarks/phase4_optimizations/run.sh

@@ -1,0 +1,6 @@
+{
+  "id": "sw08_merge_dicts",
+  "description": "Deep merge two dicts — fast, lightweight",
+  "system_prompt": "You are a Python expert. Answer concisely with code only.",
+  "user_message": "Write a Python function deep_merge(base: dict, override: dict) -> dict that recursively merges override into base. Nested dicts are merged; other values are overridden. No explanation."
+}

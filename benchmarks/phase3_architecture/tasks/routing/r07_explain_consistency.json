@@ -1,0 +1,7 @@
+{
+  "id": "r07_explain_consistency",
+  "description": "Explain consistency model — clearly thinker tier",
+  "correct_tier": "thinker",
+  "system_prompt": "You are a distributed systems expert. Reason precisely about consistency guarantees.",
+  "user_message": "Explain why eventual consistency in a distributed cache can cause correctness problems in a payment processing system even when each individual node is healthy. What is the weakest consistency model that would be safe for idempotency checks, and why?"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "sw06_binary_search",
+  "description": "Binary search — fast, lightweight",
+  "system_prompt": "You are a Python expert. Answer concisely with code only.",
+  "user_message": "Write a Python function binary_search(arr: list[int], target: int) -> int that returns the index of target in sorted arr, or -1 if not found. Iterative, not recursive. No explanation."
+}

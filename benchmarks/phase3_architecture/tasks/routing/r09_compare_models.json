@@ -1,0 +1,7 @@
+{
+  "id": "r09_compare_models",
+  "description": "Compare two ML architectures — clearly thinker tier",
+  "correct_tier": "thinker",
+  "system_prompt": "You are an ML research engineer. Compare architectures rigorously.",
+  "user_message": "Compare and contrast Mixture-of-Experts (MoE) and dense transformer architectures for local inference on a workstation with two RTX 5090 GPUs (32 GB each, no NVLink). Specifically: under what conditions does MoE win on throughput? When does a dense model win on latency? What is the theoretical reason for each result?"
+}

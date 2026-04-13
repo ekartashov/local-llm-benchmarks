@@ -1,0 +1,7 @@
+{
+  "id": "r04_refactor_class",
+  "description": "Refactor a class to use slots — clearly coder tier",
+  "correct_tier": "coder",
+  "system_prompt": "You are a senior Python engineer specialising in performance.",
+  "user_message": "Refactor this class to use __slots__ and add type annotations. Keep all existing methods unchanged:\n\n```python\nclass Vector3:\n    def __init__(self, x, y, z):\n        self.x = x\n        self.y = y\n        self.z = z\n\n    def magnitude(self):\n        return (self.x**2 + self.y**2 + self.z**2) ** 0.5\n\n    def dot(self, other):\n        return self.x * other.x + self.y * other.y + self.z * other.z\n\n    def __repr__(self):\n        return f'Vector3({self.x}, {self.y}, {self.z})'\n```"
+}

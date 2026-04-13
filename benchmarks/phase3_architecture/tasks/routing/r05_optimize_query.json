@@ -1,0 +1,7 @@
+{
+  "id": "r05_optimize_query",
+  "description": "Optimize a slow SQLAlchemy query — clearly coder tier",
+  "correct_tier": "coder",
+  "system_prompt": "You are a senior backend engineer. Optimize database queries.",
+  "user_message": "This query is causing N+1 problems and is slow on a table with 500K rows. Optimize it:\n\n```python\nusers = session.query(User).all()\nfor user in users:\n    print(user.name, [o.total for o in user.orders])\n```\n\nShow the optimized version using joinedload or selectinload as appropriate."
+}

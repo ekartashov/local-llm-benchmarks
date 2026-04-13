@@ -1,0 +1,6 @@
+{
+  "id": "sw05_flatten_list",
+  "description": "Flatten nested list — fast, lightweight",
+  "system_prompt": "You are a Python expert. Answer concisely with code only.",
+  "user_message": "Write a Python function flatten(nested: list) -> list that recursively flattens a list of arbitrary depth. No explanation."
+}

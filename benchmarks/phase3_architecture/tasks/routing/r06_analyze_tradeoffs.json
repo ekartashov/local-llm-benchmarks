@@ -1,0 +1,7 @@
+{
+  "id": "r06_analyze_tradeoffs",
+  "description": "Analyze architecture trade-offs — clearly thinker tier",
+  "correct_tier": "thinker",
+  "system_prompt": "You are a principal engineer. Reason carefully about architectural decisions.",
+  "user_message": "Analyze the trade-offs between a single large LLM and a multi-tier routing architecture (small fast model + large accurate model) for a coding assistant used by 50 concurrent engineers. Consider: latency, cost, complexity, failure modes, and tail latency. Which approach would you recommend and why?"
+}

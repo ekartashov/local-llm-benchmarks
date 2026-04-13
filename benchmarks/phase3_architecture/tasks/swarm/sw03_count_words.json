@@ -1,0 +1,6 @@
+{
+  "id": "sw03_count_words",
+  "description": "Word frequency counter — fast, lightweight",
+  "system_prompt": "You are a Python expert. Answer concisely with code only.",
+  "user_message": "Write a Python function word_count(text: str) -> dict[str, int] that counts word frequencies, case-insensitive, ignoring punctuation. No explanation."
+}

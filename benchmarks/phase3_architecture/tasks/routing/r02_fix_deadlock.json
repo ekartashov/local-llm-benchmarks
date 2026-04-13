@@ -1,0 +1,7 @@
+{
+  "id": "r02_fix_deadlock",
+  "description": "Fix a threading deadlock — clearly coder tier",
+  "correct_tier": "coder",
+  "system_prompt": "You are a senior Python engineer. Fix bugs concisely.",
+  "user_message": "Fix the deadlock in this code:\n\n```python\nimport threading\n\nlock_a = threading.Lock()\nlock_b = threading.Lock()\n\ndef worker_1():\n    with lock_a:\n        with lock_b:\n            print('worker_1 done')\n\ndef worker_2():\n    with lock_b:\n        with lock_a:\n            print('worker_2 done')\n\nt1 = threading.Thread(target=worker_1)\nt2 = threading.Thread(target=worker_2)\nt1.start()\nt2.start()\nt1.join()\nt2.join()\n```\n\nShow the corrected code only."
+}
