@@ -1,0 +1,35 @@
+{
+  "id": "05_run_command",
+  "description": "Execute a shell command — model must call run_command with command",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Run 'git status' in the /workspace directory and show me the output.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "run_command",
+        "description": "Execute a shell command and return its output.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "Shell command to execute"
+            },
+            "cwd": {
+              "type": "string",
+              "description": "Working directory for the command"
+            }
+          },
+          "required": ["command"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "run_command", "must_include_args": ["command"]}
+  ],
+  "mock_tool_response": "On branch main\nnothing to commit, working tree clean",
+  "difficulty": "simple",
+  "category": "search"
+}

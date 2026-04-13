@@ -1,0 +1,44 @@
+{
+  "id": "16_find_and_fix_bug",
+  "description": "Find a bug using search then fix it with edit_file",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "There is a bug in /workspace/lib/metrics.py where _percentile returns the wrong index for 100th percentile. Find it and fix it.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"}
+          },
+          "required": ["path"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_file",
+        "description": "Replace a string in a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"},
+            "old_str": {"type": "string"},
+            "new_str": {"type": "string"}
+          },
+          "required": ["path", "old_str", "new_str"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "read_file", "must_include_args": ["path"]}
+  ],
+  "mock_tool_response": "def _percentile(values: list[float], pct: int) -> float:\n    if not values:\n        return 0.0\n    sorted_vals = sorted(values)\n    idx = int(len(sorted_vals) * pct / 100)\n    idx = min(idx, len(sorted_vals) - 1)\n    return sorted_vals[idx]\n",
+  "difficulty": "hard",
+  "category": "multi_step"
+}

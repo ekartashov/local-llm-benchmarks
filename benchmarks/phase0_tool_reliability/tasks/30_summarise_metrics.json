@@ -1,0 +1,28 @@
+{
+  "id": "30_summarise_metrics",
+  "description": "Hard: read metrics.json and produce a concise natural-language summary",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user. Think step by step before answering.",
+  "user_message": "Read /workspace/results/phase0_latest/metrics.json and give me a one-paragraph summary of the benchmark results.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"}
+          },
+          "required": ["path"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "read_file", "must_include_args": ["path"]}
+  ],
+  "mock_tool_response": "{\n  \"phase\": \"phase0_tool_reliability\",\n  \"verdict\": \"PASS\",\n  \"metrics\": {\n    \"total\": 30,\n    \"tool_call_success_rate\": 0.967,\n    \"critical_error_rate\": 0.0\n  }\n}",
+  "difficulty": "hard",
+  "category": "multi_step"
+}

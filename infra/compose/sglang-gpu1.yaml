@@ -1,0 +1,33 @@
+services:
+  sglang-gpu1:
+    image: lmsysorg/sglang:latest
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${GPU_1_ID:-1}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+    entrypoint: ["python", "-m", "sglang.launch_server"]
+    command: >
+      --model-path ${MODEL_ID}
+      --port 8000
+      --mem-fraction-static 0.88
+      --context-length ${CTX_LEN:-32768}
+      --tool-call-parser qwen3
+      --enable-torch-compile
+      ${EXTRA_ARGS:-}
+    ports:
+      - "${PORT_SGLANG_GPU1:-30003}:8000"
+    volumes:
+      - ${MODEL_CACHE:-/data/models}:/root/.cache/huggingface
+    shm_size: "4g"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s

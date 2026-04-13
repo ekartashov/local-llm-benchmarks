@@ -1,0 +1,72 @@
+# thresholds.yaml — pass/fail criteria for every benchmark phase.
+# lib/reporter.py reads this to emit PASS / FAIL / INCONCLUSIVE verdicts.
+
+phase0_tool_reliability:
+  tool_call_success_rate:
+    pass: 0.95        # ≥95% of tasks score PASS
+    inconclusive: 0.80
+    # below 0.80 → FAIL
+  critical_error_rate:
+    # DROPPED or FORMAT_ERROR indicates a broken engine parser
+    pass: 0.00        # zero tolerance
+    inconclusive: 0.03
+
+phase1_engine_selection:
+  ttft_ms:
+    pass: 500         # first token within 500 ms at concurrency=1
+    inconclusive: 1000
+  decode_tps:
+    pass: 150         # ≥150 tokens/s decode on MoE model
+    inconclusive: 80
+  prefix_reuse_speedup:
+    # ratio: ttft_with_cache / ttft_cold — lower is better
+    pass: 0.50        # cache cuts TTFT by ≥50%
+    inconclusive: 0.75
+
+phase2_model_selection:
+  # Quality is human-evaluated — reporter checks completion rate only
+  task_completion_rate:
+    pass: 1.00        # all tasks returned a non-empty response
+    inconclusive: 0.90
+  decode_tps:
+    pass: 100
+    inconclusive: 60
+
+phase3_architecture:
+  swap_latency_s:
+    pass: 30          # model hot-swap completes within 30 s (weights page-cached)
+    inconclusive: 60
+  routing_accuracy:
+    pass: 0.95        # LiteLLM routes to correct model ≥95% of the time
+    inconclusive: 0.85
+  swarm_speedup:
+    # wall time ratio: parallel / sequential — lower is better
+    pass: 0.60        # parallel is ≥40% faster
+    inconclusive: 0.85
+
+phase4_optimizations:
+  quant_quality_delta:
+    # perplexity delta vs bf16 baseline — lower is better
+    pass: 0.05        # UD quant within 5% perplexity of bf16
+    inconclusive: 0.10
+  kv_cache_speedup:
+    pass: 1.20        # TurboQuant KV gives ≥20% throughput improvement
+    inconclusive: 1.05
+  spec_decode_speedup:
+    pass: 1.30        # spec decode gives ≥30% speedup on dense model
+    inconclusive: 1.10
+
+phase5_integration:
+  search_filter_reduction:
+    # fraction of tokens eliminated by ripgrep pre-filtering
+    pass: 0.50
+    inconclusive: 0.20
+  mcp_e2e_success_rate:
+    pass: 0.95
+    inconclusive: 0.80
+
+phase6_baselines:
+  # Cloud comparison is informational — no hard pass/fail
+  quality_parity:
+    pass: 0.90        # local model within 10% of cloud on eval rubric
+    inconclusive: 0.75

@@ -1,0 +1,29 @@
+{
+  "id": "27_write_python_module",
+  "description": "Write a new Python module from scratch",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Create a new file /workspace/lib/utils.py with a single function `clamp(value, min_val, max_val)` that clamps a float between min and max.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "Write content to a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"},
+            "content": {"type": "string"}
+          },
+          "required": ["path", "content"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "write_file", "must_include_args": ["path", "content"]}
+  ],
+  "mock_tool_response": "File written successfully.",
+  "difficulty": "simple",
+  "category": "file_write"
+}

@@ -1,0 +1,29 @@
+{
+  "id": "22_count_lines",
+  "description": "Count lines in a file using run_command",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "How many lines does /workspace/lib/client.py have?",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "run_command",
+        "description": "Execute a shell command.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {"type": "string"},
+            "cwd": {"type": "string"}
+          },
+          "required": ["command"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "run_command", "must_include_args": ["command"]}
+  ],
+  "mock_tool_response": "144 /workspace/lib/client.py",
+  "difficulty": "simple",
+  "category": "search"
+}

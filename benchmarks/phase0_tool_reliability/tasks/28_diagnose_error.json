@@ -1,0 +1,43 @@
+{
+  "id": "28_diagnose_error",
+  "description": "Hard: diagnose an error from a log file by reading it, then propose a fix",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user. Think carefully.",
+  "user_message": "Read /workspace/results/debug_run/bench.log and identify what caused the benchmark to fail.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"}
+          },
+          "required": ["path"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search",
+        "description": "Search for patterns in files.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {"type": "string"},
+            "path": {"type": "string"}
+          },
+          "required": ["query"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "read_file", "must_include_args": ["path"]}
+  ],
+  "mock_tool_response": "2026-04-14 10:30:01 ERROR ConnectionRefusedError: [Errno 111] Connection refused\n2026-04-14 10:30:01 ERROR Endpoint http://localhost:30000/v1 is not reachable.\nBenchmark aborted after 0/30 tasks.",
+  "difficulty": "hard",
+  "category": "multi_step"
+}

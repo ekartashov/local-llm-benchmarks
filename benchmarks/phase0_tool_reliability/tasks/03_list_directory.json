@@ -1,0 +1,31 @@
+{
+  "id": "03_list_directory",
+  "description": "List directory contents — model must call list_dir with a path",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "List all files in the /workspace directory.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "list_dir",
+        "description": "List files and directories at the given path.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Directory path to list"
+            }
+          },
+          "required": ["path"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "list_dir", "must_include_args": ["path"]}
+  ],
+  "mock_tool_response": "CLAUDE.md\npyproject.toml\nlib/\nconfig/\nbenchmarks/",
+  "difficulty": "simple",
+  "category": "file_read"
+}

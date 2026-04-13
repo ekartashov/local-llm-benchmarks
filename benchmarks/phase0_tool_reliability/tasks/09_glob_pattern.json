@@ -1,0 +1,35 @@
+{
+  "id": "09_glob_pattern",
+  "description": "Find files matching a glob pattern",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Find all YAML files anywhere under /workspace.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "glob",
+        "description": "Find files matching a glob pattern.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Glob pattern, e.g. '**/*.yaml'"
+            },
+            "root": {
+              "type": "string",
+              "description": "Root directory to search from"
+            }
+          },
+          "required": ["pattern"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "glob", "must_include_args": ["pattern"]}
+  ],
+  "mock_tool_response": "config/models.yaml\nconfig/thresholds.yaml\ninfra/compose/vllm-gpu0.yaml",
+  "difficulty": "simple",
+  "category": "search"
+}

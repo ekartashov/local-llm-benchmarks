@@ -1,0 +1,30 @@
+{
+  "id": "26_search_by_file_type",
+  "description": "Search only within shell scripts",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Find all shell scripts in /workspace that use 'set -euo pipefail'.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "search",
+        "description": "Search file contents for a pattern.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {"type": "string"},
+            "path": {"type": "string"},
+            "file_pattern": {"type": "string"}
+          },
+          "required": ["query"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "search", "must_include_args": ["query"]}
+  ],
+  "mock_tool_response": "infra/scripts/deploy.sh:3: set -euo pipefail\ninfra/scripts/teardown.sh:3: set -euo pipefail",
+  "difficulty": "simple",
+  "category": "search"
+}

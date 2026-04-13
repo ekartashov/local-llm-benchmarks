@@ -1,0 +1,59 @@
+{
+  "id": "19_multi_tool_refactor",
+  "description": "Refactoring task: read multiple files to understand context before editing",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "I want to rename the `ok` property in BenchResult to `succeeded`. Read the relevant files first, then make the change.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"}
+          },
+          "required": ["path"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search",
+        "description": "Search for a pattern in files.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {"type": "string"},
+            "path": {"type": "string"}
+          },
+          "required": ["query"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_file",
+        "description": "Edit a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"},
+            "old_str": {"type": "string"},
+            "new_str": {"type": "string"}
+          },
+          "required": ["path", "old_str", "new_str"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "search", "must_include_args": ["query"]}
+  ],
+  "mock_tool_response": "lib/metrics.py:39:     def ok(self) -> bool:\nlib/client.py: (no uses of .ok)\nlib/scorer.py:125: if not r.ok:",
+  "difficulty": "hard",
+  "category": "multi_step"
+}

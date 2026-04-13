@@ -1,0 +1,39 @@
+{
+  "id": "04_search_files",
+  "description": "Search for files by pattern — model must call search with query",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Find all Python files in /workspace that contain the word 'import'.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "search",
+        "description": "Search file contents for a pattern.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search pattern or keyword"
+            },
+            "path": {
+              "type": "string",
+              "description": "Directory to search in"
+            },
+            "file_pattern": {
+              "type": "string",
+              "description": "Glob pattern to filter files (e.g. '*.py')"
+            }
+          },
+          "required": ["query"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "search", "must_include_args": ["query"]}
+  ],
+  "mock_tool_response": "lib/client.py:1: import asyncio\nlib/metrics.py:1: import time",
+  "difficulty": "simple",
+  "category": "search"
+}

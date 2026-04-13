@@ -1,0 +1,41 @@
+# Containerfile.bench — benchmark runner container image.
+#
+# This image runs the Python benchmark harness (benchmarks/, lib/).
+# It does NOT run inference engines — those run in separate containers
+# accessed over HTTP. Build with:
+#
+#   podman build -f infra/Containerfile.bench -t local-llm-bench:latest .
+#
+# Run with the repo bind-mounted (see CLAUDE.md for the claude-box wrapper):
+#   podman run --rm -it -v $(pwd):/workspace:rw,z local-llm-bench:latest bash
+
+FROM python:3.12-slim-bookworm
+
+LABEL org.opencontainers.image.description="local-llm-benchmarks runner"
+
+# System deps: curl for health checks, git for version info
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        git \
+        bc \
+        && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast Python package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /workspace
+
+# Copy only dependency manifests first so layer is cached unless deps change
+COPY pyproject.toml ./
+
+# Install production + dev deps
+RUN uv sync --extra dev --no-install-project
+
+# Copy source
+COPY . .
+
+# Install the project itself (editable so /workspace edits take effect immediately)
+RUN uv pip install -e . --no-deps
+
+# Default: drop to bash; individual benchmarks call python -m benchmarks.phaseN.bench
+CMD ["bash"]

@@ -1,0 +1,33 @@
+services:
+  llamacpp-gpu0:
+    image: ghcr.io/ggerganov/llama.cpp:server-cuda
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${GPU_0_ID:-0}
+    command: >
+      --model /models/${MODEL_FILE}
+      --port 8000
+      --host 0.0.0.0
+      --n-gpu-layers 99
+      --ctx-size ${CTX_LEN:-32768}
+      --parallel 4
+      --cont-batching
+      --flash-attn
+      --jinja
+      ${EXTRA_ARGS:-}
+    ports:
+      - "${PORT_LLAMACPP_GPU0:-30004}:8000"
+    volumes:
+      - ${MODEL_CACHE:-/data/models}:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s

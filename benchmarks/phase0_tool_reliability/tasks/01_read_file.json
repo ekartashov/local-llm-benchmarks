@@ -1,0 +1,31 @@
+{
+  "id": "01_read_file",
+  "description": "Simple file read — model must call read_file with a path argument",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Please read the file at /workspace/README.md and tell me its contents.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read the contents of a file at the given path.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Absolute or relative path to the file"
+            }
+          },
+          "required": ["path"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "read_file", "must_include_args": ["path"]}
+  ],
+  "mock_tool_response": "# README\nThis is the project README.",
+  "difficulty": "simple",
+  "category": "file_read"
+}

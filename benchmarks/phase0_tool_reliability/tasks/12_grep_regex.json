@@ -1,0 +1,30 @@
+{
+  "id": "12_grep_regex",
+  "description": "Search with a regex pattern to find class definitions",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Find all class definitions in /workspace/lib/ using a regex.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "search",
+        "description": "Search file contents with a regex pattern.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {"type": "string", "description": "Regex pattern to search for"},
+            "path": {"type": "string"},
+            "file_pattern": {"type": "string"}
+          },
+          "required": ["query"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "search", "must_include_args": ["query"]}
+  ],
+  "mock_tool_response": "lib/client.py:15: class BenchClient:\nlib/metrics.py:10: class BenchResult:\nlib/scorer.py:13: class ToolCallScore:",
+  "difficulty": "medium",
+  "category": "search"
+}

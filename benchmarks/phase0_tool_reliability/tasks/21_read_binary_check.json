@@ -1,0 +1,28 @@
+{
+  "id": "21_read_binary_check",
+  "description": "Read a file and check if it is a valid Python module",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Read /workspace/lib/__init__.py and confirm it is a valid Python module.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"}
+          },
+          "required": ["path"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "read_file", "must_include_args": ["path"]}
+  ],
+  "mock_tool_response": "# lib package",
+  "difficulty": "simple",
+  "category": "file_read"
+}

@@ -1,0 +1,29 @@
+{
+  "id": "13_write_json",
+  "description": "Write structured JSON to a file",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Write a JSON file at /tmp/config.json with keys 'engine' set to 'vllm' and 'gpu' set to 'gpu0'.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "Write content to a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"},
+            "content": {"type": "string"}
+          },
+          "required": ["path", "content"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "write_file", "must_include_args": ["path", "content"]}
+  ],
+  "mock_tool_response": "File written successfully.",
+  "difficulty": "simple",
+  "category": "file_write"
+}

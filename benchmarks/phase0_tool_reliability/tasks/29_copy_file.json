@@ -1,0 +1,43 @@
+{
+  "id": "29_copy_file",
+  "description": "Copy a file by reading it then writing to a new path",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Copy /workspace/config/thresholds.yaml to /tmp/thresholds_backup.yaml.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"}
+          },
+          "required": ["path"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "Write content to a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"},
+            "content": {"type": "string"}
+          },
+          "required": ["path", "content"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "read_file", "must_include_args": ["path"]}
+  ],
+  "mock_tool_response": "phase0_tool_reliability:\n  tool_call_success_rate:\n    pass: 0.95\n",
+  "difficulty": "medium",
+  "category": "multi_step"
+}

@@ -1,0 +1,29 @@
+{
+  "id": "14_run_tests",
+  "description": "Run the test suite — model must call run_command to invoke pytest",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Run the pytest test suite in /workspace and report if tests pass.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "run_command",
+        "description": "Execute a shell command and return its output.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {"type": "string"},
+            "cwd": {"type": "string"}
+          },
+          "required": ["command"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "run_command", "must_include_args": ["command"]}
+  ],
+  "mock_tool_response": "============================= test session starts ==============================\ncollected 12 items\n\ntests/test_scorer.py ...... PASSED\ntests/test_metrics.py ...... PASSED\n============================== 12 passed in 0.43s ==============================",
+  "difficulty": "simple",
+  "category": "search"
+}

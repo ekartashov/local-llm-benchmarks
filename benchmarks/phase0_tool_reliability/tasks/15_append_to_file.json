@@ -1,0 +1,43 @@
+{
+  "id": "15_append_to_file",
+  "description": "Append a line to an existing file",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Append the line '# End of file' to /workspace/config/hardware.env.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"}
+          },
+          "required": ["path"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "Write (overwrite) a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"},
+            "content": {"type": "string"}
+          },
+          "required": ["path", "content"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "read_file", "must_include_args": ["path"]}
+  ],
+  "mock_tool_response": "export GPU_0_ID=0\nexport GPU_1_ID=1\n",
+  "difficulty": "medium",
+  "category": "multi_step"
+}

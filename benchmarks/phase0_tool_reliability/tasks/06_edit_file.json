@@ -1,0 +1,39 @@
+{
+  "id": "06_edit_file",
+  "description": "Edit a specific portion of a file — model must call edit_file with path, old_str, new_str",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "In /workspace/config/hardware.env, change the default MODEL_CACHE from '/data/models' to '/mnt/models'.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_file",
+        "description": "Replace a specific string in a file with a new string.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Path to the file to edit"
+            },
+            "old_str": {
+              "type": "string",
+              "description": "Exact string to find and replace"
+            },
+            "new_str": {
+              "type": "string",
+              "description": "Replacement string"
+            }
+          },
+          "required": ["path", "old_str", "new_str"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "edit_file", "must_include_args": ["path", "old_str", "new_str"]}
+  ],
+  "mock_tool_response": "Edit applied successfully.",
+  "difficulty": "medium",
+  "category": "file_write"
+}

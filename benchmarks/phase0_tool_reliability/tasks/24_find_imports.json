@@ -1,0 +1,30 @@
+{
+  "id": "24_find_imports",
+  "description": "Find all external library imports across the lib/ directory",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "List all the third-party libraries imported in /workspace/lib/ (not standard library).",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "search",
+        "description": "Search for patterns in files.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {"type": "string"},
+            "path": {"type": "string"},
+            "file_pattern": {"type": "string"}
+          },
+          "required": ["query"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "search", "must_include_args": ["query"]}
+  ],
+  "mock_tool_response": "lib/client.py:10: from openai import AsyncOpenAI\nlib/scorer.py:9: from pydantic import BaseModel\nlib/tool_tasks.py:9: from pydantic import BaseModel",
+  "difficulty": "medium",
+  "category": "search"
+}

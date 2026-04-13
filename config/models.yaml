@@ -1,0 +1,86 @@
+# models.yaml — registry of all models used across benchmark phases.
+# Fields:
+#   hf_repo:      HuggingFace repo id (used for huggingface-cli download)
+#   quant:        quantization label
+#   format:       awq | gguf | bf16
+#   vram_gb:      estimated VRAM usage at default context (single GPU)
+#   ctx_default:  default --max-model-len to pass to the engine
+#   engines:      engines known to support this model
+#   notes:        known issues or workarounds
+
+models:
+
+  # ── Primary coder (MoE, daily driver candidate) ───────────────────────────
+  qwen35_35b_a3b_awq:
+    hf_repo: Qwen/Qwen3.5-35B-A3B-AWQ
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 22
+    ctx_default: 114688
+    engines: [vllm, sglang]
+    notes: >
+      Use --tool-call-parser qwen3_coder on vLLM.
+      Chat template may be broken on HF — use barubary's fixed template.
+      vLLM PR #39055 (think+tool drop) must be merged before using with reasoning.
+
+  qwen35_35b_a3b_gguf:
+    hf_repo: unsloth/Qwen3.5-35B-A3B-GGUF
+    file: Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf
+    quant: GGUF-Q4_K_XL (Unsloth UD)
+    format: gguf
+    vram_gb: 23
+    ctx_default: 32768
+    engines: [llamacpp]
+    notes: >
+      Unsloth UD quant — higher quality than standard Q4_K_M.
+      Do NOT test spec decode (llama.cpp PR #20075).
+
+  # ── Coder variant (30B MoE) ───────────────────────────────────────────────
+  qwen3_coder_30b_awq:
+    hf_repo: QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 20
+    ctx_default: 65536
+    engines: [vllm, sglang]
+
+  # ── Peak / frontier coder (dense 80B — single GPU won't fit, needs swap) ──
+  qwen3_coder_next:
+    hf_repo: Qwen/Qwen3-Coder-Next
+    quant: bf16
+    format: bf16
+    vram_gb: 160   # too large for single GPU — load in GGUF Q4 split or skip
+    ctx_default: 32768
+    engines: [vllm]
+    notes: >
+      Only viable as GGUF on llamacpp with full GPU offload (--n-gpu-layers 99).
+      CPU inference is 5x slower than expected (llama.cpp issue #19480).
+
+  # ── Thinker models ────────────────────────────────────────────────────────
+  qwen35_27b:
+    hf_repo: Qwen/Qwen3.5-27B
+    quant: bf16
+    format: bf16
+    vram_gb: 28
+    ctx_default: 32768
+    engines: [vllm, sglang]
+    notes: Dense — viable for speculative decoding target. Test in Phase 2.5 / 4.3.
+
+  deepseek_r1_32b:
+    hf_repo: deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+    quant: bf16
+    format: bf16
+    vram_gb: 30
+    ctx_default: 32768
+    engines: [vllm, sglang]
+    notes: Dense — viable for speculative decoding. Competing thinker vs Qwen3.5-27B.
+
+  # ── Coding assistant alternative ──────────────────────────────────────────
+  devstral:
+    hf_repo: mistralai/Devstral-Small-2505
+    quant: bf16
+    format: bf16
+    vram_gb: 24
+    ctx_default: 32768
+    engines: [vllm]
+    notes: Phase 2.4 — verify tool-call reliability before committing.

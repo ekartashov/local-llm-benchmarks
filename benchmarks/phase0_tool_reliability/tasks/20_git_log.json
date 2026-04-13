@@ -1,0 +1,29 @@
+{
+  "id": "20_git_log",
+  "description": "Show recent git commits using run_command",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Show me the last 5 commits in /workspace using git log.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "run_command",
+        "description": "Execute a shell command.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {"type": "string"},
+            "cwd": {"type": "string"}
+          },
+          "required": ["command"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "run_command", "must_include_args": ["command"]}
+  ],
+  "mock_tool_response": "9a056d3 chore: initial repo setup with CLAUDE.md and project conventions",
+  "difficulty": "simple",
+  "category": "search"
+}

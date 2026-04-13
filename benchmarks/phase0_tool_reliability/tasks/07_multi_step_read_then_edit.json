@@ -1,0 +1,44 @@
+{
+  "id": "07_multi_step_read_then_edit",
+  "description": "Multi-step: read a file first, then apply an edit. First call must be read_file.",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user. Always read a file before editing it.",
+  "user_message": "Update the version in /workspace/pyproject.toml from '0.1.0' to '0.2.0'.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read the contents of a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string", "description": "File path to read"}
+          },
+          "required": ["path"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_file",
+        "description": "Replace a string in a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"},
+            "old_str": {"type": "string"},
+            "new_str": {"type": "string"}
+          },
+          "required": ["path", "old_str", "new_str"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "read_file", "must_include_args": ["path"]}
+  ],
+  "mock_tool_response": "[project]\nname = \"local-llm-benchmarks\"\nversion = \"0.1.0\"\n",
+  "difficulty": "medium",
+  "category": "multi_step"
+}

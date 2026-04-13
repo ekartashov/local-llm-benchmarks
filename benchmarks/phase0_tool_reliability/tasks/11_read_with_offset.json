@@ -1,0 +1,30 @@
+{
+  "id": "11_read_with_offset",
+  "description": "Read a file with line offset — model should pass offset/limit args",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Read lines 50 through 100 of /workspace/lib/client.py.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file, optionally with offset and limit.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"},
+            "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed)"},
+            "limit": {"type": "integer", "description": "Maximum number of lines to read"}
+          },
+          "required": ["path"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "read_file", "must_include_args": ["path"]}
+  ],
+  "mock_tool_response": "50\t    async with await self._client.chat.completions.create(**kwargs) as stream:",
+  "difficulty": "medium",
+  "category": "file_read"
+}

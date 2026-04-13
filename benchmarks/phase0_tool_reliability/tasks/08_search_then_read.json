@@ -1,0 +1,44 @@
+{
+  "id": "08_search_then_read",
+  "description": "Multi-step: search for a function, then read the file containing it.",
+  "system_prompt": "You are a coding assistant. Use the provided tools to help the user.",
+  "user_message": "Find where the BenchClient class is defined and read that file.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "search",
+        "description": "Search file contents for a pattern.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {"type": "string"},
+            "path": {"type": "string"},
+            "file_pattern": {"type": "string"}
+          },
+          "required": ["query"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file by path.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"}
+          },
+          "required": ["path"]
+        }
+      }
+    }
+  ],
+  "expected_tool_calls": [
+    {"name": "search", "must_include_args": ["query"]}
+  ],
+  "mock_tool_response": "lib/client.py:15: class BenchClient:",
+  "difficulty": "medium",
+  "category": "multi_step"
+}
