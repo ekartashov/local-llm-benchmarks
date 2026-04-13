@@ -49,9 +49,25 @@ precache:
 
 # ── Phase runners ─────────────────────────────────────────────────────────────
 
-# Run full Phase 0 (tool-call reliability) — BLOCKER
+# Run full Phase 0 sequence: 0.4 → 0.1 → 0.2 → 0.3 (if needed) — BLOCKER
 phase0:
-    ./benchmarks/phase0_tool_reliability/run.sh
+    ./benchmarks/phase0_tool_reliability/run_phase0_sequence.sh
+
+# Sub-test 0.4: chat template verification (run FIRST — fast gate)
+phase0-verify:
+    ./benchmarks/phase0_tool_reliability/run_0.4_chat_template.sh
+
+# Sub-test 0.1: Qwen3.5-35B-A3B on vLLM (primary)
+phase0-vllm:
+    ./benchmarks/phase0_tool_reliability/run_0.1_vllm.sh
+
+# Sub-test 0.2: Qwen3.5-35B-A3B on SGLang
+phase0-sglang:
+    ./benchmarks/phase0_tool_reliability/run_0.2_sglang.sh
+
+# Sub-test 0.3: Qwen3-Coder-Next on llamacpp (fallback — only if 0.1 fails)
+phase0-fallback:
+    ./benchmarks/phase0_tool_reliability/run_0.3_fallback.sh
 
 # Run full Phase 1 (engine selection)
 phase1:
