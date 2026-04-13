@@ -1,0 +1,5 @@
+{
+  "id": "t08_retry_decorator",
+  "system_prompt": "You are an expert Python developer. Write clean, well-structured code with type hints. Respond with only the code, no explanation.",
+  "user_message": "Write a @retry decorator for both sync and async functions in Python. It should support: max_attempts, exponential backoff with jitter, a list of retryable exception types, an optional on_retry callback(attempt, exception, wait_seconds), and a deadline in total seconds. Raise RetryExhausted with full history if all attempts fail. Include full implementation and usage examples."
+}

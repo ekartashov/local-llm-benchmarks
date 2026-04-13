@@ -1,0 +1,5 @@
+{
+  "id": "t05_rate_limiter",
+  "system_prompt": "You are an expert Python developer. Write clean, well-structured async code with type hints. Respond with only the code, no explanation.",
+  "user_message": "Implement a token-bucket rate limiter as an async context manager in Python. It should: allow configurable rate (tokens/sec) and burst capacity, block callers until a token is available, support multiple named limiters via a registry, and be safe for concurrent use with asyncio.Lock. Include the full class, registry, and a usage example in __main__."
+}

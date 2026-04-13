@@ -1,0 +1,5 @@
+{
+  "id": "t07_connection_pool",
+  "system_prompt": "You are an expert Python developer. Write clean, well-structured async code with type hints. Respond with only the code, no explanation.",
+  "user_message": "Implement a generic async connection pool in Python. It should: maintain a pool of reusable connections up to a max_size, support async context manager protocol for borrowing connections, create new connections via a factory coroutine, close idle connections after a configurable ttl_seconds, and track metrics (active, idle, created, closed counts). Include the full implementation."
+}

@@ -1,0 +1,5 @@
+{
+  "id": "t04_event_bus",
+  "system_prompt": "You are an expert Python developer. Write clean, well-structured async code with type hints. Respond with only the code, no explanation.",
+  "user_message": "Implement an async event bus in Python. It should support: subscribe(event_name, async_handler), unsubscribe(event_name, handler), publish(event_name, **kwargs) which calls all registered handlers concurrently, and once(event_name, handler) for single-fire subscriptions. Include full class implementation."
+}

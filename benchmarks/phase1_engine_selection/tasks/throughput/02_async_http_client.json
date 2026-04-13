@@ -1,0 +1,5 @@
+{
+  "id": "t02_async_http_client",
+  "system_prompt": "You are an expert Python developer. Write clean, well-structured async code with type hints. Respond with only the code, no explanation.",
+  "user_message": "Write an async HTTP client wrapper around httpx.AsyncClient that: supports GET and POST methods, has configurable timeout and retries with exponential backoff, logs request duration, and raises a custom HttpClientError on 4xx/5xx responses. Include full class and exception definitions."
+}

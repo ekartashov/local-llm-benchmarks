@@ -1,0 +1,5 @@
+{
+  "id": "t10_cli_arg_parser",
+  "system_prompt": "You are an expert Python developer. Write clean, well-structured code with type hints. Respond with only the code, no explanation.",
+  "user_message": "Write a CLI argument parser for a hypothetical 'deploy' tool with three subcommands: 'up' (start a service), 'down' (stop a service), and 'status' (check service health). Each subcommand has its own flags. 'up' takes --service (required), --replicas (int, default 1), --env (repeatable key=value pairs). 'down' takes --service and --force (bool flag). 'status' takes --service and --format (choices: table, json, yaml). Use argparse, include full implementation and a main() entry point."
+}

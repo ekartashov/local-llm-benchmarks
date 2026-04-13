@@ -1,0 +1,5 @@
+{
+  "id": "t01_lru_cache",
+  "system_prompt": "You are an expert Python developer. Write clean, well-structured code with type hints. Respond with only the code, no explanation.",
+  "user_message": "Implement a generic LRU cache class in Python using an OrderedDict. It should support get(key), put(key, value), and have a configurable max capacity. Include the full class with __init__, get, put, and a __repr__ method."
+}

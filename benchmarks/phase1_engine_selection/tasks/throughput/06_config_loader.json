@@ -1,0 +1,5 @@
+{
+  "id": "t06_config_loader",
+  "system_prompt": "You are an expert Python developer. Write clean, well-structured code with type hints. Respond with only the code, no explanation.",
+  "user_message": "Write a layered configuration loader in Python that merges settings from: defaults dict, a YAML file, environment variables (with a prefix like APP_), and runtime overrides. Use pydantic BaseSettings or a custom approach. Support nested keys using double-underscore as separator in env vars (e.g. APP_DB__HOST=localhost maps to config.db.host). Include full implementation and a sample config schema."
+}

@@ -1,0 +1,5 @@
+{
+  "id": "t09_structured_logger",
+  "system_prompt": "You are an expert Python developer. Write clean, well-structured code with type hints. Respond with only the code, no explanation.",
+  "user_message": "Implement a structured JSON logger in Python as a drop-in replacement for the stdlib logging module. It should: emit log records as JSON lines to stdout, support standard levels (DEBUG through CRITICAL), include timestamp, level, logger name, message, and any extra kwargs as fields, support context variables via contextvars (e.g. request_id), and have a get_logger(name) factory. Include full implementation."
+}

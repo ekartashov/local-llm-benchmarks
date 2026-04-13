@@ -1,0 +1,5 @@
+{
+  "id": "t03_dataclass_validator",
+  "system_prompt": "You are an expert Python developer. Write clean, well-structured code with type hints. Respond with only the code, no explanation.",
+  "user_message": "Write a Python decorator @validated that validates dataclass fields at runtime. It should check: int fields are within an optional range, str fields match an optional regex pattern, and list fields have an optional max length. Use a companion @field_constraint(min=, max=, pattern=, max_len=) decorator to annotate fields. Show a complete working example with a User dataclass."
+}

@@ -69,9 +69,25 @@ phase0-sglang:
 phase0-fallback:
     ./benchmarks/phase0_tool_reliability/run_0.3_fallback.sh
 
-# Run full Phase 1 (engine selection)
+# Run full Phase 1 sequence (1.1→1.2→1.3→1.4)
 phase1:
-    ./benchmarks/phase1_engine_selection/run.sh
+    ./benchmarks/phase1_engine_selection/run_phase1_sequence.sh
+
+# Sub-test 1.1: vLLM vs SGLang throughput at concurrency=4
+phase1-throughput:
+    ./benchmarks/phase1_engine_selection/run_1.1_throughput.sh
+
+# Sub-test 1.2: SGLang prefix reuse (RadixAttention)
+phase1-sglang-prefix:
+    ./benchmarks/phase1_engine_selection/run_1.2_sglang_prefix.sh
+
+# Sub-test 1.3: vLLM prefix caching
+phase1-vllm-prefix:
+    ./benchmarks/phase1_engine_selection/run_1.3_vllm_prefix.sh
+
+# Sub-test 1.4: llama.cpp throughput baseline
+phase1-llamacpp:
+    ./benchmarks/phase1_engine_selection/run_1.4_llamacpp.sh
 
 # Run full Phase 2 (model selection)
 phase2:
