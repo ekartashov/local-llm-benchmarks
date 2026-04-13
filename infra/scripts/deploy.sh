@@ -73,12 +73,12 @@ echo "[deploy] Engine=${ENGINE}  GPU=${GPU}  Model=${MODEL_ID}  Port=${PORT}  CT
 # ── Tear down any existing container on this port ─────────────────────────────
 # Use project name derived from compose file to avoid cross-project collisions.
 PROJECT_NAME="bench-${ENGINE}-${GPU}"
-docker compose -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" down --remove-orphans 2>/dev/null || true
+podman compose -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" down --remove-orphans 2>/dev/null || true
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 export MODEL_ID CTX_LEN EXTRA_ARGS
 
-docker compose -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" up -d
+podman compose -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" up -d
 
 HEALTH_URL="http://localhost:${PORT}/health"
 echo "[deploy] Waiting for ${HEALTH_URL} ..."

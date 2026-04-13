@@ -20,9 +20,9 @@ declare -a STACKS=(
 for entry in "${STACKS[@]}"; do
     compose_file="${REPO_ROOT}/${entry%%:*}"
     project="${entry##*:}"
-    if docker compose -f "${compose_file}" -p "${project}" ps -q 2>/dev/null | grep -q .; then
+    if podman compose -f "${compose_file}" -p "${project}" ps -q 2>/dev/null | grep -q .; then
         echo "[teardown] Stopping ${project}..."
-        docker compose -f "${compose_file}" -p "${project}" down --remove-orphans
+        podman compose -f "${compose_file}" -p "${project}" down --remove-orphans
     fi
 done
 

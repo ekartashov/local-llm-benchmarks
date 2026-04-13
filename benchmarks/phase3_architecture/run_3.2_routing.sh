@@ -47,7 +47,7 @@ export PORT_LITELLM
 export CODER_MODEL THINKER_MODEL
 export PORT_VLLM_GPU0 PORT_VLLM_GPU1
 
-docker compose \
+podman compose \
     -f infra/compose/litellm.yaml \
     -p bench-litellm \
     up -d
@@ -71,7 +71,7 @@ python -m benchmarks.phase3_architecture.bench \
 
 echo ""
 echo "=== Stopping LiteLLM proxy ==="
-docker compose -f infra/compose/litellm.yaml -p bench-litellm down 2>/dev/null || true
+podman compose -f infra/compose/litellm.yaml -p bench-litellm down 2>/dev/null || true
 
 python -m lib.reporter "${RESULTS_DIR}" --thresholds config/thresholds.yaml
 cat "${RESULTS_DIR}/summary.md"

@@ -93,7 +93,7 @@ local-llm-benchmarks/
 
 ### Container orchestration
 
-All inference engines run as **rootless podman containers** via `docker compose` (podman-compose backend). Never install vLLM/SGLang/llama.cpp on the host. Always use the deploy script — never raw podman commands.
+All inference engines run as **rootless podman containers** via `podman compose`. Never install vLLM/SGLang/llama.cpp on the host. Always use the deploy script — never raw podman commands. Scripts use `podman compose`, not `docker compose`.
 
 **GPU isolation**: Use `NVIDIA_VISIBLE_DEVICES` in compose files, not `CUDA_VISIBLE_DEVICES`.
 
