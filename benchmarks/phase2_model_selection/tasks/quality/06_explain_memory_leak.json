@@ -1,0 +1,6 @@
+{
+  "id": "q06_explain_memory_leak",
+  "description": "Identify and explain a memory leak in Python",
+  "system_prompt": "You are an expert Python developer specialising in performance and memory. Explain the root cause concisely and show the fix.",
+  "user_message": "This server leaks memory under load. Explain why and fix it:\n\n```python\nimport asyncio\nfrom typing import Callable\n\nclass EventBus:\n    _handlers: dict[str, list[Callable]] = {}  # class variable\n\n    def subscribe(self, event: str, handler: Callable) -> None:\n        if event not in self._handlers:\n            self._handlers[event] = []\n        self._handlers[event].append(handler)\n\n    def publish(self, event: str, data: object) -> None:\n        for handler in self._handlers.get(event, []):\n            handler(data)\n\n# Per-request usage:\nasync def handle_request(request_id: int):\n    bus = EventBus()\n    bus.subscribe('done', lambda d: print(f'request {request_id} done: {d}'))\n    # ... process request ...\n    bus.publish('done', {'status': 'ok'})\n    # bus goes out of scope here\n```"
+}

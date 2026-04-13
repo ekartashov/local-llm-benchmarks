@@ -1,0 +1,6 @@
+{
+  "id": "q09_write_tests",
+  "description": "Write comprehensive pytest tests for a given function",
+  "system_prompt": "You are an expert Python developer. Write thorough pytest tests. Cover happy path, edge cases, and error cases. Use fixtures where appropriate.",
+  "user_message": "Write pytest tests for this function:\n\n```python\ndef parse_duration(s: str) -> float:\n    \"\"\"\n    Parse a human duration string into seconds.\n    Examples: '1h30m', '90s', '2h', '1d12h', '500ms'\n    Raises ValueError on invalid input.\n    \"\"\"\n    import re\n    pattern = r'(?:(\\d+)d)?(?:(\\d+)h)?(?:(\\d+)m)?(?:(\\d+)s)?(?:(\\d+)ms)?'\n    m = re.fullmatch(pattern, s.strip())\n    if not m or not any(m.groups()):\n        raise ValueError(f'Cannot parse duration: {s!r}')\n    d, h, mi, sec, ms = (int(x or 0) for x in m.groups())\n    return d * 86400 + h * 3600 + mi * 60 + sec + ms / 1000\n```"
+}

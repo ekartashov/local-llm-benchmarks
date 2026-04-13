@@ -1,0 +1,6 @@
+{
+  "id": "th07_explain_output_diff",
+  "description": "Explain why two equivalent-looking Python expressions produce different results",
+  "system_prompt": "You are a Python expert. Explain the root cause precisely and completely, including the CPython internals involved.",
+  "user_message": "Explain why these two snippets produce different output:\n\nSnippet A:\n```python\nfuncs = [lambda: i for i in range(5)]\nprint([f() for f in funcs])  # [4, 4, 4, 4, 4]\n```\n\nSnippet B:\n```python\nfuncs = [lambda i=i: i for i in range(5)]\nprint([f() for f in funcs])  # [0, 1, 2, 3, 4]\n```\n\nThen explain why this also produces [4, 4, 4, 4, 4] and how to fix it:\n\n```python\nimport asyncio\n\nasync def make_tasks():\n    tasks = []\n    for i in range(5):\n        async def coro():\n            return i\n        tasks.append(asyncio.create_task(coro()))\n    return await asyncio.gather(*tasks)\n\nprint(asyncio.run(make_tasks()))  # [4, 4, 4, 4, 4]\n```"
+}

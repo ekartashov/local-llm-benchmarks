@@ -89,9 +89,29 @@ phase1-vllm-prefix:
 phase1-llamacpp:
     ./benchmarks/phase1_engine_selection/run_1.4_llamacpp.sh
 
-# Run full Phase 2 (model selection)
+# Run full Phase 2 sequence (2.1→2.2→2.3→2.4→2.5)
 phase2:
-    ./benchmarks/phase2_model_selection/run.sh
+    ./benchmarks/phase2_model_selection/run_phase2_sequence.sh
+
+# Sub-test 2.1: coder quality — Qwen3.5-35B vs Qwen3-Coder-30B
+phase2-coder:
+    ./benchmarks/phase2_model_selection/run_2.1_coder_quality.sh
+
+# Sub-test 2.2: thinker — Qwen3.5-27B vs DeepSeek-R1-32B
+phase2-thinker:
+    ./benchmarks/phase2_model_selection/run_2.2_thinker.sh
+
+# Sub-test 2.3: peak mode — Coder-Next vs daily driver
+phase2-peak:
+    ./benchmarks/phase2_model_selection/run_2.3_peak.sh
+
+# Sub-test 2.4: Devstral tool-call reliability
+phase2-devstral:
+    ./benchmarks/phase2_model_selection/run_2.4_devstral.sh
+
+# Sub-test 2.5: dense + spec-decode vs MoE speed
+phase2-spec:
+    ./benchmarks/phase2_model_selection/run_2.5_spec_decode.sh
 
 # Run full Phase 3 (architecture)
 phase3:

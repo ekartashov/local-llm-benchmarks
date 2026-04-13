@@ -1,0 +1,6 @@
+{
+  "id": "q03_implement_from_tests",
+  "description": "Implement a class so all provided tests pass",
+  "system_prompt": "You are an expert Python developer. Implement the class so all tests pass. Show only the implementation, not the tests.",
+  "user_message": "Implement `RingBuffer` so the following tests pass:\n\n```python\ndef test_ring_buffer():\n    rb = RingBuffer(capacity=3)\n    assert rb.is_empty()\n    assert not rb.is_full()\n\n    rb.push(1); rb.push(2); rb.push(3)\n    assert rb.is_full()\n    assert rb.peek() == 1\n\n    # Overwrite oldest on overflow\n    rb.push(4)\n    assert rb.pop() == 2\n    assert rb.pop() == 3\n    assert rb.pop() == 4\n    assert rb.is_empty()\n\n    # Iterate without consuming\n    rb.push(10); rb.push(20)\n    assert list(rb) == [10, 20]\n    assert not rb.is_empty()\n```"
+}

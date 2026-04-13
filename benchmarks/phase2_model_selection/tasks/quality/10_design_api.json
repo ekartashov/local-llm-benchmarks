@@ -1,0 +1,6 @@
+{
+  "id": "q10_design_api",
+  "description": "Design a REST API with proper error handling and pagination",
+  "system_prompt": "You are a senior backend engineer. Design and implement a clean FastAPI endpoint. Include models, error handling, and pagination.",
+  "user_message": "Implement a FastAPI endpoint `GET /repos/{owner}/{repo}/commits` that:\n- Returns paginated commit history (page + per_page query params, default 30, max 100)\n- Each commit has: sha, message, author name+email, timestamp, files_changed count\n- Returns 404 if repo doesn't exist\n- Returns 400 if per_page > 100\n- Includes Link header for next/prev pagination (GitHub-style)\n- Uses Pydantic response models\n\nUse a fake in-memory data store. Show complete implementation."
+}

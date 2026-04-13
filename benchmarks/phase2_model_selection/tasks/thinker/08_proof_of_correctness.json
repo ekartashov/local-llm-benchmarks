@@ -1,0 +1,6 @@
+{
+  "id": "th08_proof_of_correctness",
+  "description": "Prove or disprove correctness of a concurrent algorithm",
+  "system_prompt": "You are an expert in concurrent programming and formal reasoning. Think through all possible interleavings carefully.",
+  "user_message": "Is this double-checked locking implementation correct in Python? Prove or disprove:\n\n```python\nimport threading\n\nclass Singleton:\n    _instance = None\n    _lock = threading.Lock()\n\n    @classmethod\n    def get_instance(cls):\n        if cls._instance is None:          # check 1\n            with cls._lock:\n                if cls._instance is None:  # check 2\n                    cls._instance = cls()  # create\n        return cls._instance\n```\n\nSpecifically:\n1. Is this safe in CPython with the GIL? Why?\n2. Is this safe in a hypothetical GIL-free Python (e.g. PEP 703 nogil build)? Why?\n3. Is `_instance = cls()` atomic? What exactly is the memory model risk?\n4. If it IS broken, show a concrete execution trace that produces incorrect behaviour.\n5. Show a corrected version if needed."
+}

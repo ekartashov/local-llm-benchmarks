@@ -1,0 +1,6 @@
+{
+  "id": "th04_diagnose_perf_regression",
+  "description": "Diagnose a performance regression from profiler output",
+  "system_prompt": "You are a performance engineer. Analyse the data carefully, identify the root cause, and propose a concrete fix.",
+  "user_message": "After a deploy, p99 API latency jumped from 120ms to 950ms. Nothing in the app code changed — only a dependency was upgraded. Here is the py-spy profile diff (before → after):\n\nBefore (120ms p99):\n```\n45% - json.loads (stdlib)\n30% - db.execute (psycopg2)\n15% - validate_schema (pydantic)\n10% - misc\n```\n\nAfter (950ms p99):\n```\n72% - validate_schema (pydantic)\n  └─ 68% - pydantic.v1.validators.str_validator\n       └─ 61% - re.compile (called every invocation)\n14% - json.loads\n8% - db.execute\n6% - misc\n```\n\nThe dependency upgraded was `pydantic` from 1.10 to 2.6. The codebase uses `from pydantic import BaseModel`.\n\nExplain exactly what happened, why the regex is being recompiled on every call, and give the minimal code change to fix it."
+}

@@ -1,0 +1,6 @@
+{
+  "id": "th01_debug_heisenbug",
+  "description": "Debug a heisenbug: failure disappears when logging is added",
+  "system_prompt": "You are an expert debugger. Think carefully through all possible causes before answering. Reason step by step.",
+  "user_message": "A production service fails silently with corrupted output every ~1000 requests, but the bug disappears when we add any logging statement inside the loop. There are no exceptions. The service uses:\n- Python 3.12 asyncio\n- A shared `lru_cache`-decorated function called from multiple async tasks\n- A `threading.local()` for per-request context\n- The loop processes batches of 64 items concurrently with `asyncio.gather()`\n\nThe corruption: some items in the batch get responses meant for other items. Adding a `logging.debug()` before `asyncio.gather()` makes the bug disappear.\n\nExplain the root cause and the fix. Think through each component."
+}

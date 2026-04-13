@@ -1,0 +1,6 @@
+{
+  "id": "q08_optimize_query",
+  "description": "Identify and fix N+1 query problem in SQLAlchemy ORM code",
+  "system_prompt": "You are a senior backend engineer. Identify the N+1 problem, show the EXPLAIN output difference, and fix it with eager loading.",
+  "user_message": "This endpoint is slow (200ms → 8s under load). Find and fix the N+1 query:\n\n```python\nfrom sqlalchemy.orm import Session\nfrom models import User, Post, Comment\n\ndef get_dashboard(db: Session, user_ids: list[int]) -> list[dict]:\n    users = db.query(User).filter(User.id.in_(user_ids)).all()\n    result = []\n    for user in users:\n        posts = db.query(Post).filter(Post.user_id == user.id).all()\n        post_data = []\n        for post in posts:\n            comments = db.query(Comment).filter(Comment.post_id == post.id).all()\n            post_data.append({\n                'title': post.title,\n                'comment_count': len(comments),\n                'latest_comment': comments[-1].body if comments else None\n            })\n        result.append({'user': user.name, 'posts': post_data})\n    return result\n```"
+}

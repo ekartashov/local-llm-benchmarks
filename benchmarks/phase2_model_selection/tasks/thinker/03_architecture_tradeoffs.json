@@ -1,0 +1,6 @@
+{
+  "id": "th03_architecture_tradeoffs",
+  "description": "Evaluate architectural tradeoffs for a high-throughput system",
+  "system_prompt": "You are a principal engineer. Reason through each option's tradeoffs systematically before giving a recommendation.",
+  "user_message": "We're building a system that fans out LLM requests to multiple local GPU workers. Choose between these three architectures and justify your choice:\n\nA) Central queue (Redis) + worker processes polling it\nB) Push-based: a router process holds all connections and pushes work directly to idle workers\nC) Sidecar model: each GPU worker runs its own HTTP server; a Nginx upstream routes by least-connections\n\nConstraints:\n- 4 GPU workers, each processing ~150 t/s\n- Peak load: 20 concurrent requests, each ~2000 tokens\n- P99 TTFT target: < 800ms\n- The router itself must not be a bottleneck\n- Workers can crash and must be handled gracefully\n- No Kubernetes — bare metal with systemd\n\nFor each option: analyse latency, failure modes, operational complexity, and scalability. Then recommend one and explain what you'd monitor in production."
+}

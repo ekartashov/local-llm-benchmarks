@@ -1,0 +1,6 @@
+{
+  "id": "q04_code_review",
+  "description": "Find all bugs and security issues in a Flask endpoint",
+  "system_prompt": "You are a senior software engineer doing a code review. List every bug, security vulnerability, and design flaw. Be specific and concise.",
+  "user_message": "Review this Flask endpoint:\n\n```python\nfrom flask import Flask, request\nimport sqlite3, os, subprocess\n\napp = Flask(__name__)\nDB = sqlite3.connect('users.db')  # module-level connection\n\n@app.route('/user')\ndef get_user():\n    name = request.args.get('name')\n    rows = DB.execute(f\"SELECT * FROM users WHERE name = '{name}'\").fetchall()\n    return str(rows)\n\n@app.route('/run', methods=['POST'])\ndef run_command():\n    cmd = request.json.get('cmd')\n    out = subprocess.check_output(cmd, shell=True)\n    return out\n\n@app.route('/file')\ndef read_file():\n    path = request.args.get('path', '.')\n    return open(os.path.join('/var/data', path)).read()\n\n@app.route('/user', methods=['POST'])\ndef create_user():\n    data = request.json\n    DB.execute(f\"INSERT INTO users VALUES ('{data['name']}', '{data['password']}')\"\n    DB.commit()\n    return 'ok'\n```"
+}

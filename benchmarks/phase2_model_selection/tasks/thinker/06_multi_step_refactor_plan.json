@@ -1,0 +1,6 @@
+{
+  "id": "th06_multi_step_refactor_plan",
+  "description": "Plan a safe incremental refactor of a critical module",
+  "system_prompt": "You are a senior engineer planning a large refactor. Think carefully about sequencing, risk, and how to keep the system working throughout. Be specific and concrete.",
+  "user_message": "The `BenchClient` class in our codebase currently handles three concerns: HTTP connection management, metric collection (TTFT/decode-tps), and raw response serialisation. We want to split it into:\n1. `HttpClient` — pure HTTP, no metrics\n2. `MetricsCollector` — wraps any client, instruments calls\n3. `RawStore` — saves responses to disk\n\nConstraints:\n- 15 call sites across 8 files use `BenchClient` directly\n- Tests exist for `BenchClient` and must keep passing throughout the refactor\n- We cannot do a big-bang rewrite — each step must be releasable\n- No external dependencies can be added\n\nPlan the refactor as a numbered sequence of steps. For each step: what changes, how to verify it works, and what the risk is if something goes wrong. The plan should leave the system in a working state after every step."
+}

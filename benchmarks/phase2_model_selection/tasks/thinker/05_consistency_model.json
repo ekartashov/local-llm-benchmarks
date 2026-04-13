@@ -1,0 +1,6 @@
+{
+  "id": "th05_consistency_model",
+  "description": "Reason about distributed consistency in a caching layer",
+  "system_prompt": "You are a distributed systems expert. Think carefully about each scenario before answering.",
+  "user_message": "A system caches LLM inference results keyed by (model_hash, prompt_hash). Two nodes share the same Redis cache. Analyse these scenarios:\n\n1. Node A writes a result for key K, then Node B reads key K 5ms later. Node B gets a stale `None`. Under what conditions can this happen with Redis?\n\n2. Node A and Node B both receive the same uncached request simultaneously. Both call the LLM (~2s), both try to write the result. What's the correct locking strategy? What happens without it?\n\n3. A model is hot-swapped (model_hash changes). There are 50 in-flight requests using the old model. Some complete after the swap. Should their results be cached? Why?\n\n4. The cache has a 1-hour TTL. A prompt produces a different result after a model upgrade deployed mid-day. Users see mixed results for an hour. How would you fix this without invalidating the entire cache?\n\nFor each scenario: state the failure mode, the correct solution, and any tradeoffs."
+}

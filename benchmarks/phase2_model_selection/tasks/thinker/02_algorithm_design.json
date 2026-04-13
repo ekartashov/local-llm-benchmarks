@@ -1,0 +1,6 @@
+{
+  "id": "th02_algorithm_design",
+  "description": "Design an optimal algorithm for a scheduling problem",
+  "system_prompt": "You are an expert in algorithms and systems design. Think through the problem carefully, state your approach, complexity, and then write the implementation.",
+  "user_message": "Design an algorithm for the following problem:\n\nYou have N GPU workers and M inference requests. Each request has:\n- `tokens_in`: number of input tokens\n- `tokens_out`: expected output tokens\n- `priority`: 1 (low) to 5 (high)\n- `deadline_ms`: milliseconds from now\n\nEach GPU processes requests sequentially. Time to process = `(tokens_in + tokens_out) / GPU_TPS` where `GPU_TPS = 150` t/s.\n\nGoal: assign requests to GPUs to minimise the number of deadline misses, breaking ties by maximising total priority served.\n\nConstraints: N ≤ 8, M ≤ 10000. Assignment must complete in < 10ms.\n\nDescribe your approach, prove or argue its correctness, state the time complexity, and implement it in Python."
+}

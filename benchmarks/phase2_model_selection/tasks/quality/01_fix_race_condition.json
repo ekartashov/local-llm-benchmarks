@@ -1,0 +1,6 @@
+{
+  "id": "q01_fix_race_condition",
+  "description": "Fix a subtle asyncio race condition in a shared counter",
+  "system_prompt": "You are an expert Python developer. Identify and fix the bug. Show only the corrected code.",
+  "user_message": "This code has a race condition. Fix it:\n\n```python\nimport asyncio\n\nclass Counter:\n    def __init__(self):\n        self.value = 0\n\n    async def increment(self):\n        current = self.value\n        await asyncio.sleep(0)  # yield to event loop\n        self.value = current + 1\n\nasync def main():\n    counter = Counter()\n    await asyncio.gather(*[counter.increment() for _ in range(1000)])\n    print(counter.value)  # prints ~50, not 1000\n\nasyncio.run(main())\n```"
+}

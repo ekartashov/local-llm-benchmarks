@@ -1,0 +1,6 @@
+{
+  "id": "q07_write_migration",
+  "description": "Write a safe zero-downtime DB migration adding a NOT NULL column",
+  "system_prompt": "You are a senior backend engineer. Write the migration steps as SQL and explain the zero-downtime strategy. Be specific about ordering.",
+  "user_message": "Write a zero-downtime migration that adds `last_login TIMESTAMP NOT NULL DEFAULT NOW()` to a `users` table that has 50 million rows. The table is under constant write load. Provide: (1) the migration SQL steps in the correct order, (2) explanation of why each step is safe, (3) the rollback plan."
+}
