@@ -6,7 +6,7 @@
 #   (b) determine if any tool-call issues seen in 0.1 are engine-specific
 #
 # If this FAILS → eliminates SGLang for this model in Phase 1.
-# SGLang uses --tool-call-parser qwen3 (not qwen3_coder) — different parser name.
+# SGLang uses --tool-call-parser qwen3_coder (same as vLLM for this model family).
 # SGLang context is capped at 32768 for safety; raise if testing longer contexts.
 #
 # Usage:
@@ -35,7 +35,7 @@ CTX_LEN=32768   # conservative; SGLang's MoE prefix cache benefits shorter conte
 QUANT="AWQ-INT4"
 
 # SGLang uses a different parser name than vLLM
-EXTRA_ENGINE_ARGS="--tool-call-parser qwen3"
+EXTRA_ENGINE_ARGS="--tool-call-parser qwen3_coder"
 
 PHASE="phase0_tool_reliability"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
