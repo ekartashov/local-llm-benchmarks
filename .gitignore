@@ -3,17 +3,14 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.venv
 dist/
 .pytest_cache/
 .ruff_cache/
 .pyright/
 
-# Benchmark results (large, machine-specific)
-results/*/raw/
-results/**/metrics.json
-results/**/bench.log
-# Keep summary.md files for reference
-!results/**/.gitkeep
+# Benchmark results — all run output is local-only; keep summaries at repo root
+results/
 
 # Env / secrets
 config/hardware.env
