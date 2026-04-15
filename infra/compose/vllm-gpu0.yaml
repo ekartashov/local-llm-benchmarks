@@ -4,6 +4,7 @@ services:
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=${GPU_0_ID:-0}
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
     command: >
       --model ${MODEL_ID}

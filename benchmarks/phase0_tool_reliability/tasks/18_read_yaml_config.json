@@ -22,7 +22,7 @@
   "expected_tool_calls": [
     {"name": "read_file", "must_include_args": ["path"]}
   ],
-  "mock_tool_response": "models:\n  qwen35_35b_a3b_awq:\n    hf_repo: Qwen/Qwen3.5-35B-A3B-AWQ\n    quant: AWQ-INT4\n    vram_gb: 22\n    ctx_default: 114688\n",
+  "mock_tool_response": "models:\n  qwen35_35b_a3b_awq:\n    hf_repo: QuantTrio/Qwen3.5-35B-A3B-AWQ\n    quant: AWQ-INT4\n    vram_gb: 22\n    ctx_default: 114688\n",
   "difficulty": "simple",
   "category": "file_read"
 }

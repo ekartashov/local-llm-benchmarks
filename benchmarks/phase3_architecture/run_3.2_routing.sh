@@ -20,7 +20,7 @@ PHASE="phase3_3.2_routing"
 RESULTS_DIR="results/${PHASE}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "${RESULTS_DIR}/raw"
 
-CODER_MODEL="${CODER_MODEL:-Qwen/Qwen3.5-35B-A3B-AWQ}"
+CODER_MODEL="${CODER_MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
 THINKER_MODEL="${THINKER_MODEL:-Qwen/Qwen3.5-27B}"
 
 echo "======================================================================"

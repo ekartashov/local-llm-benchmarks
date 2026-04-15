@@ -18,7 +18,7 @@ source "${REPO_ROOT}/config/hardware.env"
 # ── Configurable defaults ──────────────────────────────────────────────────────
 ENGINE="${ENGINE:-vllm}"
 GPU="${GPU:-gpu0}"
-MODEL="${MODEL:-Qwen/Qwen3.5-35B-A3B-AWQ}"
+MODEL="${MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
 CTX_LEN="${CTX_LEN:-114688}"
 QUANT="${QUANT:-AWQ-INT4}"
 EXTRA_ENGINE_ARGS="${EXTRA_ENGINE_ARGS:---tool-call-parser qwen3_coder}"

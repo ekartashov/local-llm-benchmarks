@@ -23,7 +23,7 @@ PHASE="phase3_3.3_swap"
 RESULTS_DIR="results/${PHASE}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "${RESULTS_DIR}/raw"
 
-MODEL_A="${MODEL_A:-Qwen/Qwen3.5-35B-A3B-AWQ}"
+MODEL_A="${MODEL_A:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
 MODEL_B="${MODEL_B:-Qwen/Qwen3.5-27B}"
 SWAP_ROUNDS="${SWAP_ROUNDS:-5}"
 CTX_LEN="${CTX_LEN:-32768}"

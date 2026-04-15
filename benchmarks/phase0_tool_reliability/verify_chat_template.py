@@ -128,7 +128,7 @@ async def probe_multi_turn_tool_call(client: BenchClient, model: str) -> ProbeRe
             "Multi-turn tool call rendering is broken. "
             "The Qwen3.5 HF chat template has a known bug in multi-turn rendering. "
             "Fix: use barubary's patched chat template "
-            "(https://huggingface.co/Qwen/Qwen3.5-35B-A3B-AWQ/discussions/1) "
+            "(https://huggingface.co/QuantTrio/Qwen3.5-35B-A3B-AWQ/discussions/1) "
             "or the Unsloth March 2026 GGUF which includes the fix."
         ),
     )

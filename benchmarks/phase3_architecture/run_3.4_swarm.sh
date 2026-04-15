@@ -20,7 +20,7 @@ PHASE="phase3_3.4_swarm"
 RESULTS_DIR="results/${PHASE}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "${RESULTS_DIR}/raw"
 
-CODER_MODEL="${CODER_MODEL:-Qwen/Qwen3.5-35B-A3B-AWQ}"
+CODER_MODEL="${CODER_MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
 CTX_LEN="${CTX_LEN:-32768}"
 CONCURRENCY="${CONCURRENCY:-8}"
 MAX_TOKENS="${MAX_TOKENS:-256}"

@@ -4,6 +4,7 @@ services:
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=${GPU_0_ID:-0}
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     command: >
       --model /models/${MODEL_FILE}
       --port 8000

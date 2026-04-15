@@ -4,6 +4,7 @@ services:
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=${GPU_1_ID:-1}
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
     entrypoint: ["python", "-m", "sglang.launch_server"]
     command: >

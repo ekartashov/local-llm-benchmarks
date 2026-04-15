@@ -28,7 +28,7 @@ source "${REPO_ROOT}/config/hardware.env"
 ENGINE="vllm"
 GPU="gpu0"
 DENSE_MODEL="Qwen/Qwen3.5-27B"
-MOE_MODEL="Qwen/Qwen3.5-35B-A3B-AWQ"
+MOE_MODEL="QuantTrio/Qwen3.5-35B-A3B-AWQ"
 DRAFT_MODEL="${DRAFT_MODEL:-Qwen/Qwen3.5-1.5B-Instruct}"
 CTX_LEN=32768
 SKIP_SPEC="${SKIP_SPEC:-0}"

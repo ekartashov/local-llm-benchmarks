@@ -69,7 +69,7 @@ echo " Engine: ${ENGINE} / ${GPU}"
 echo "=========================================================="
 
 QWEN35_RESULTS="$(_run_quality \
-    "Qwen/Qwen3.5-35B-A3B-AWQ" "AWQ-INT4" "Qwen3.5-35B-A3B-AWQ" \
+    "QuantTrio/Qwen3.5-35B-A3B-AWQ" "AWQ-INT4" "Qwen3.5-35B-A3B-AWQ" \
     "--tool-call-parser qwen3_coder --reasoning-parser qwen3")"
 
 CODER30_RESULTS=""

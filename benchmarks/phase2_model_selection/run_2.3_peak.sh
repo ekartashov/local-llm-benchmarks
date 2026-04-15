@@ -22,7 +22,7 @@ source "${REPO_ROOT}/config/hardware.env"
 GPU="gpu0"
 CTX_LEN=32768
 MODEL_FILE="${MODEL_FILE:-Qwen3-Coder-Next-Q4_K_M.gguf}"
-DAILY_DRIVER_MODEL="${DAILY_DRIVER_MODEL:-Qwen/Qwen3.5-35B-A3B-AWQ}"
+DAILY_DRIVER_MODEL="${DAILY_DRIVER_MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
 DAILY_DRIVER_QUANT="${DAILY_DRIVER_QUANT:-AWQ-INT4}"
 DAILY_DRIVER_ARGS="${DAILY_DRIVER_ARGS:---tool-call-parser qwen3_coder --reasoning-parser qwen3}"
 

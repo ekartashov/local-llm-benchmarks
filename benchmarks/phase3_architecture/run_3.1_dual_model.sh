@@ -23,7 +23,7 @@ RESULTS_DIR="results/${PHASE}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "${RESULTS_DIR}/raw"
 
 # ── Models (edit to Phase 2 winners) ─────────────────────────────────────────
-CODER_MODEL="${CODER_MODEL:-Qwen/Qwen3.5-35B-A3B-AWQ}"
+CODER_MODEL="${CODER_MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
 THINKER_MODEL="${THINKER_MODEL:-Qwen/Qwen3.5-27B}"
 CTX_LEN="${CTX_LEN:-32768}"
 MAX_TOKENS="${MAX_TOKENS:-1024}"

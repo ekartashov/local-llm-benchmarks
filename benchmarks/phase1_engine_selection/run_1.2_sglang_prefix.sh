@@ -20,7 +20,7 @@ source "${REPO_ROOT}/config/hardware.env"
 
 ENGINE="sglang"
 GPU="gpu0"
-MODEL="${MODEL:-Qwen/Qwen3.5-35B-A3B-AWQ}"
+MODEL="${MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
 CTX_LEN=32768
 QUANT="AWQ-INT4"
 EXTRA_ENGINE_ARGS="--tool-call-parser qwen3"

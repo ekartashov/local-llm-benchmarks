@@ -40,14 +40,14 @@ Usage:
         --endpoint http://localhost:30100/v1 \\
         --tasks benchmarks/phase3_architecture/tasks/routing/ \\
         --results-dir results/phase3_3.2_routing_20260414 \\
-        --coder-model-id "Qwen/Qwen3.5-35B-A3B-AWQ" \\
+        --coder-model-id "QuantTrio/Qwen3.5-35B-A3B-AWQ" \\
         --thinker-model-id "Qwen/Qwen3.5-27B"
 
     # Swap-timing mode
     python -m benchmarks.phase3_architecture.bench \\
         --mode swap-timing \\
         --engine vllm --gpu gpu0 \\
-        --model Qwen/Qwen3.5-35B-A3B-AWQ \\
+        --model QuantTrio/Qwen3.5-35B-A3B-AWQ \\
         --swap-target Qwen/Qwen3.5-27B \\
         --swap-rounds 5 \\
         --results-dir results/phase3_3.3_swap_20260414
