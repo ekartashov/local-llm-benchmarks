@@ -25,10 +25,59 @@ Inter:  NO NVLink — PCIe x8/x8 bifurcation
 OS:     Linux (kernel 6.x, rootless podman, NVIDIA container toolkit)
 ```
 
+## Python environment
+
+**There are two separate Python contexts. Do not confuse them.**
+
+### 1. Host — running benchmark scripts
+
+Benchmark scripts (`run_*.sh`) call `python3 -m benchmarks...` and must be run
+on the **host** with the `hf` pyenv virtualenv active:
+
+```bash
+pyenv activate hf
+# Now python3, pytest, ruff, pyright, and the hf CLI are all on PATH.
+```
+
+The `.venv` symlink in the repo root points to this same env:
+```
+.venv -> /home/cassini/.pyenv/versions/3.12.7/envs/hf
+```
+So `source .venv/bin/activate` works too, but `pyenv activate hf` is canonical.
+
+First-time setup (installs repo deps into the hf venv):
+```bash
+pyenv activate hf
+uv sync          # or: pip install -e .
+```
+
+### 2. Claude container — editing/searching code
+
+Claude runs inside a rootless Podman container (see CLAUDE.local.md). The host
+`hf` venv and `/home/cassini` are **not mounted** — Claude cannot activate it
+or run scripts against the live GPU. All Claude does is read/write repo files.
+Scripts that deploy containers, run bench.py, etc. must be run by the **human**
+on the host terminal.
+
+### HuggingFace model downloads (host only)
+
+```bash
+pyenv activate hf
+HF_HOME=/srv/ai/models hf download QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ
+# For gated repos:
+HF_TOKEN=hf_... HF_HOME=/srv/ai/models hf download mistralai/Devstral-Small-2505
+```
+
+Do NOT use a Python container for downloads — `pip install huggingface_hub` in a
+throwaway container has repeated friction (PATH, HOME, token forwarding). The
+host `hf` venv already has everything needed.
+
 ## Development commands
 
 ```bash
-# Install Python deps (use uv inside the container)
+# (All commands run on host with pyenv activate hf)
+
+# Install / sync deps
 uv sync
 
 # Lint and format
@@ -43,14 +92,9 @@ pytest
 
 # Run a single test file
 pytest benchmarks/phase0_tool_reliability/tests/test_scorer.py -v
-
-# Task runner (wraps the common deploy/bench/teardown sequences)
-just phase0          # full phase 0 run
-just debug task=01_read_file  # single task debug run
-just compare results/phase0_A/ results/phase0_B/
 ```
 
-Shell scripts are run directly:
+Shell scripts are run directly from the repo root on the host:
 ```bash
 ./infra/scripts/deploy.sh vllm gpu0 Qwen/Qwen3.5-35B-A3B-AWQ --ctx 114688
 ./infra/scripts/teardown.sh
