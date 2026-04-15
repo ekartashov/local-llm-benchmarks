@@ -48,7 +48,7 @@ So `source .venv/bin/activate` works too, but `pyenv activate hf` is canonical.
 First-time setup (installs repo deps into the hf venv):
 ```bash
 pyenv activate hf
-uv sync          # or: pip install -e .
+pip install -e ".[dev]"
 ```
 
 ### 2. Claude container — editing/searching code
@@ -78,7 +78,7 @@ host `hf` venv already has everything needed.
 # (All commands run on host with pyenv activate hf)
 
 # Install / sync deps
-uv sync
+pip install -e ".[dev]"
 
 # Lint and format
 ruff check .
