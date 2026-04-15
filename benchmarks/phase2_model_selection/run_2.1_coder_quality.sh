@@ -47,10 +47,10 @@ _run_quality() {
     local port_var="PORT_VLLM_GPU0"
     [[ "${ENGINE}" == "sglang" ]] && port_var="PORT_SGLANG_GPU0"
 
-    echo ""
-    echo "── ${label} ──────────────────────────────────────────────────────────"
+    echo "" >&2
+    echo "── ${label} ──────────────────────────────────────────────────────────" >&2
     "${REPO_ROOT}/infra/scripts/deploy.sh" "${ENGINE}" "${GPU}" "${model}" \
-        --ctx "${ctx}" ${extra_args}
+        --ctx "${ctx}" ${extra_args} >&2
 
     local port="${!port_var}"
     python3 -m benchmarks.phase2_model_selection.bench \
@@ -68,9 +68,9 @@ _run_quality() {
         --thresholds "${REPO_ROOT}/config/thresholds.yaml" \
         --max-tokens 1024 \
         --notes "Sub-test 2.1: coder quality comparison" \
-        2>&1 | tee "${results_dir}/bench.log" || true
+        2>&1 | tee "${results_dir}/bench.log" >&2 || true
 
-    "${REPO_ROOT}/infra/scripts/teardown.sh"
+    "${REPO_ROOT}/infra/scripts/teardown.sh" >&2
     echo "${results_dir}"
 }
 
