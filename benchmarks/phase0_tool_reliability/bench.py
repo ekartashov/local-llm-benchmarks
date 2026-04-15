@@ -51,6 +51,20 @@ async def _get_engine_version(base_url: str) -> str:
     return "unknown"
 
 
+async def _get_served_model(base_url: str) -> str:
+    """Return the first model ID from /v1/models, or 'default' on failure."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{base_url}/models")
+            if r.status_code == 200:
+                data = r.json().get("data", [])
+                if data:
+                    return data[0]["id"]
+    except Exception:
+        pass
+    return "default"
+
+
 async def run_task(
     client: BenchClient,
     task: ToolTask,
@@ -86,6 +100,11 @@ async def main_async(args: argparse.Namespace) -> None:
 
     client = BenchClient(base_url=args.endpoint, results_dir=results_dir)
     engine_version = await _get_engine_version(args.endpoint)
+
+    # Auto-detect model if caller left the default placeholder.
+    if args.model == "default":
+        args.model = await _get_served_model(args.endpoint)
+        console.print(f"Model    : {args.model} [dim](auto-detected)[/dim]")
 
     sem = asyncio.Semaphore(args.concurrency)
     scored_results: list[ScoredResult] = []

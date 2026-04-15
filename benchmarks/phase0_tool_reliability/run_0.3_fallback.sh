@@ -23,6 +23,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
+# Activate project venv if present (installs openai, httpx, etc.)
+VENV="${REPO_ROOT}/.venv"
+if [[ -f "${VENV}/bin/python3" ]]; then
+    # shellcheck source=/dev/null
+    source "${VENV}/bin/activate"
+fi
+
 ENGINE="llamacpp"
 GPU="gpu0"
 # llamacpp uses MODEL_FILE (filename inside MODEL_CACHE), not the HF repo
@@ -66,7 +73,7 @@ export MODEL_FILE
 ENDPOINT="http://localhost:${PORT_LLAMACPP_GPU0}/v1"
 
 # ── Bench ──────────────────────────────────────────────────────────────────────
-python -m benchmarks.phase0_tool_reliability.bench \
+python3 -m benchmarks.phase0_tool_reliability.bench \
     --endpoint "${ENDPOINT}" \
     --results-dir "${RESULTS_DIR}" \
     --tasks "${REPO_ROOT}/benchmarks/phase0_tool_reliability/tasks/" \

@@ -18,6 +18,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
+# Activate project venv if present (installs openai, httpx, etc.)
+VENV="${REPO_ROOT}/.venv"
+if [[ -f "${VENV}/bin/python3" ]]; then
+    # shellcheck source=/dev/null
+    source "${VENV}/bin/activate"
+fi
+
 ENGINE="${ENGINE:-vllm}"
 GPU="${GPU:-gpu0}"
 MODEL="${MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
@@ -55,7 +62,7 @@ esac
 ENDPOINT="http://localhost:${PORT}/v1"
 
 # ── Run probes ─────────────────────────────────────────────────────────────────
-python -m benchmarks.phase0_tool_reliability.verify_chat_template \
+python3 -m benchmarks.phase0_tool_reliability.verify_chat_template \
     --endpoint "${ENDPOINT}" \
     --results-dir "${RESULTS_DIR}" \
     2>&1 | tee "${RESULTS_DIR}/probe.log"

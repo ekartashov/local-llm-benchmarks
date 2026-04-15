@@ -20,14 +20,24 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
+# Activate project venv if present (installs openai, httpx, etc.)
+# Create once with: python3.12 -m venv .venv && source .venv/bin/activate && pip install -e .
+VENV="${REPO_ROOT}/.venv"
+if [[ -f "${VENV}/bin/python3" ]]; then
+    # shellcheck source=/dev/null
+    source "${VENV}/bin/activate"
+fi
+
 ENGINE="vllm"
 GPU="gpu0"
 MODEL="QuantTrio/Qwen3.5-35B-A3B-AWQ"
-CTX_LEN=114688
+CTX_LEN=16384   # Engine reports max viable at this GPU util is ~26400; 16384 ensures KV fits
 QUANT="AWQ-INT4"
 
 # Critical flags — do not remove without checking bug status in CLAUDE.md
-EXTRA_ENGINE_ARGS="--tool-call-parser qwen3_coder --reasoning-parser qwen3"
+# --enforce-eager: skip CUDA graph capture (graphs for batch 1–512 exhaust remaining
+#   VRAM after 22 GiB AWQ model load on 32 GB GPU; trade-off is ~10% slower decode).
+EXTRA_ENGINE_ARGS="--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enforce-eager"
 
 PHASE="phase0_tool_reliability"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
@@ -49,8 +59,9 @@ echo "=================================================="
 ENDPOINT="http://localhost:${PORT_VLLM_GPU0}/v1"
 
 # ── Bench ──────────────────────────────────────────────────────────────────────
-python -m benchmarks.phase0_tool_reliability.bench \
+python3 -m benchmarks.phase0_tool_reliability.bench \
     --endpoint "${ENDPOINT}" \
+    --model "${MODEL}" \
     --results-dir "${RESULTS_DIR}" \
     --tasks "${REPO_ROOT}/benchmarks/phase0_tool_reliability/tasks/" \
     --engine "${ENGINE}" \
