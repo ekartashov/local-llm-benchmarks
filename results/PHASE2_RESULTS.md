@@ -79,5 +79,5 @@ CTX: 32768, max_tokens: 8192, gpu_memory_utilization: 0.90
 ## Remaining Phase 2 sub-tests
 
 - **2.3** — Peak mode: Coder-Next vs Coder-30B (requires GGUF on llamacpp; 160B bf16 doesn't fit single GPU)
-- **2.4** — Devstral tool-call reliability
+- **2.4** — Devstral: ELIMINATED. OOM (30.39 GiB, needs ~32 GiB bf16). Even if quantized: lower quality than 30B-AWQ, minimal reasoning. Not worth pursuing.
 - **2.5** — Dense + spec-decode vs MoE (speed comparison on thinker path)
