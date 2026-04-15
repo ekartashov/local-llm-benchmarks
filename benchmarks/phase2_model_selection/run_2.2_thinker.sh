@@ -39,14 +39,15 @@ _run_thinker() {
     local port_var="PORT_VLLM_GPU0"
     [[ "${ENGINE}" == "sglang" ]] && port_var="PORT_SGLANG_GPU0"
 
-    echo ""
-    echo "── ${label} ──────────────────────────────────────────────────────────"
+    echo "" >&2
+    echo "── ${label} ──────────────────────────────────────────────────────────" >&2
     "${REPO_ROOT}/infra/scripts/deploy.sh" "${ENGINE}" "${GPU}" "${model}" \
-        --ctx "${CTX_LEN}" ${extra_args}
+        --ctx "${CTX_LEN}" ${extra_args} >&2
 
     local port="${!port_var}"
-    python -m benchmarks.phase2_model_selection.bench \
+    python3 -m benchmarks.phase2_model_selection.bench \
         --endpoint "http://localhost:${port}/v1" \
+        --model "${model}" \
         --results-dir "${results_dir}" \
         --tasks "${TASKS}" \
         --mode quality \
@@ -60,9 +61,9 @@ _run_thinker() {
         --thresholds "${REPO_ROOT}/config/thresholds.yaml" \
         --max-tokens 2048 \
         --notes "Sub-test 2.2: thinker quality comparison" \
-        2>&1 | tee "${results_dir}/bench.log" || true
+        2>&1 | tee "${results_dir}/bench.log" >&2 || true
 
-    "${REPO_ROOT}/infra/scripts/teardown.sh"
+    "${REPO_ROOT}/infra/scripts/teardown.sh" >&2
     echo "${results_dir}"
 }
 
@@ -85,7 +86,7 @@ fi
 echo ""
 echo "── Speed comparison ────────────────────────────────────────────────────"
 if [[ -n "${R1_RESULTS}" ]]; then
-    python -m lib.reporter compare "${QWEN_RESULTS}" "${R1_RESULTS}" \
+    python3 -m lib.reporter compare "${QWEN_RESULTS}" "${R1_RESULTS}" \
         --key decode_tps_mean || true
 fi
 

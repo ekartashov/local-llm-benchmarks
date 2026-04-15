@@ -36,8 +36,9 @@ echo "=========================================================="
 "${REPO_ROOT}/infra/scripts/deploy.sh" "${ENGINE}" "${GPU}" "${MODEL}" \
     --ctx "${CTX_LEN}" ${EXTRA_ENGINE_ARGS}
 
-python -m benchmarks.phase2_model_selection.bench \
+python3 -m benchmarks.phase2_model_selection.bench \
     --endpoint "http://localhost:${PORT_VLLM_GPU0}/v1" \
+    --model "${MODEL}" \
     --results-dir "${RESULTS_DIR}" \
     --tasks "${TASKS}" \
     --mode tool-reliability \

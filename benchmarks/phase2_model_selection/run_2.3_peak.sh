@@ -42,8 +42,9 @@ echo "── Daily driver: ${DAILY_DRIVER_MODEL} ──────────�
 "${REPO_ROOT}/infra/scripts/deploy.sh" vllm "${GPU}" "${DAILY_DRIVER_MODEL}" \
     --ctx "${CTX_LEN}" ${DAILY_DRIVER_ARGS}
 
-python -m benchmarks.phase2_model_selection.bench \
+python3 -m benchmarks.phase2_model_selection.bench \
     --endpoint "http://localhost:${PORT_VLLM_GPU0}/v1" \
+    --model "${DAILY_DRIVER_MODEL}" \
     --results-dir "${DD_RESULTS}" \
     --tasks "${TASKS}" \
     --mode quality \
@@ -82,8 +83,9 @@ export MODEL_FILE
     --ctx "${CTX_LEN}" \
     --n-gpu-layers 99 --flash-attn --jinja
 
-python -m benchmarks.phase2_model_selection.bench \
+python3 -m benchmarks.phase2_model_selection.bench \
     --endpoint "http://localhost:${PORT_LLAMACPP_GPU0}/v1" \
+    --model "${MODEL_FILE}" \
     --results-dir "${CN_RESULTS}" \
     --tasks "${TASKS}" \
     --mode quality \
@@ -103,7 +105,7 @@ python -m benchmarks.phase2_model_selection.bench \
 
 echo ""
 echo "── Speed comparison ────────────────────────────────────────────────────"
-python -m lib.reporter compare "${DD_RESULTS}" "${CN_RESULTS}" \
+python3 -m lib.reporter compare "${DD_RESULTS}" "${CN_RESULTS}" \
     --key decode_tps_mean || true
 
 echo ""

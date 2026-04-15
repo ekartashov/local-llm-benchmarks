@@ -43,13 +43,14 @@ _run_throughput() {
     local results_dir="${REPO_ROOT}/results/phase2_2.5_${safe_label}_${TIMESTAMP}"
     mkdir -p "${results_dir}/raw"
 
-    echo ""
-    echo "── ${label} ──────────────────────────────────────────────────────────"
+    echo "" >&2
+    echo "── ${label} ──────────────────────────────────────────────────────────" >&2
     "${REPO_ROOT}/infra/scripts/deploy.sh" "${ENGINE}" "${GPU}" "${model}" \
-        --ctx "${CTX_LEN}" ${extra_args}
+        --ctx "${CTX_LEN}" ${extra_args} >&2
 
-    python -m benchmarks.phase2_model_selection.bench \
+    python3 -m benchmarks.phase2_model_selection.bench \
         --endpoint "http://localhost:${PORT_VLLM_GPU0}/v1" \
+        --model "${model}" \
         --results-dir "${results_dir}" \
         --tasks "${TASKS}" \
         --mode spec-decode \
@@ -63,9 +64,9 @@ _run_throughput() {
         --thresholds "${REPO_ROOT}/config/thresholds.yaml" \
         --max-tokens 512 \
         --notes "Sub-test 2.5: spec decode comparison" \
-        2>&1 | tee "${results_dir}/bench.log" || true
+        2>&1 | tee "${results_dir}/bench.log" >&2 || true
 
-    "${REPO_ROOT}/infra/scripts/teardown.sh"
+    "${REPO_ROOT}/infra/scripts/teardown.sh" >&2
     echo "${results_dir}"
 }
 
@@ -97,12 +98,12 @@ fi
 # ── Comparison ─────────────────────────────────────────────────────────────────
 echo ""
 echo "── Speed comparison (MoE vs Dense vs Dense+spec) ────────────────────────"
-python -m lib.reporter compare "${MOE_RESULTS}" "${DENSE_RESULTS}" \
+python3 -m lib.reporter compare "${MOE_RESULTS}" "${DENSE_RESULTS}" \
     --key decode_tps_mean || true
 
 if [[ -n "${SPEC_RESULTS}" ]]; then
     echo ""
-    python -m lib.reporter compare "${DENSE_RESULTS}" "${SPEC_RESULTS}" \
+    python3 -m lib.reporter compare "${DENSE_RESULTS}" "${SPEC_RESULTS}" \
         --key decode_tps_mean || true
 
     # Compute speedup ratio

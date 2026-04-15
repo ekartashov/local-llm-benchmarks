@@ -55,6 +55,7 @@ _run_quality() {
     local port="${!port_var}"
     python3 -m benchmarks.phase2_model_selection.bench \
         --endpoint "http://localhost:${port}/v1" \
+        --model "${model}" \
         --results-dir "${results_dir}" \
         --tasks "${TASKS}" \
         --mode quality \
