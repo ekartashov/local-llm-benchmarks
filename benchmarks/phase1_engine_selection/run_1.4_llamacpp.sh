@@ -21,11 +21,15 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
-# Activate project venv if present
-VENV="${REPO_ROOT}/.venv"
-if [[ -f "${VENV}/bin/python3" ]]; then
+# Activate Python environment: try .venv symlink, then pyenv hf, then fail loud.
+if [[ -f "${REPO_ROOT}/.venv/bin/python3" ]]; then
     # shellcheck source=/dev/null
-    source "${VENV}/bin/activate"
+    source "${REPO_ROOT}/.venv/bin/activate"
+elif command -v pyenv &>/dev/null && pyenv activate hf 2>/dev/null; then
+    : # activated via pyenv hf
+elif ! python3 -c "import openai" &>/dev/null 2>&1; then
+    echo "[ERROR] No Python env with openai found. Run: pyenv activate hf" >&2
+    exit 1
 fi
 
 ENGINE="llamacpp"
