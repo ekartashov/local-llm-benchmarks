@@ -18,6 +18,8 @@ phase1_engine_selection:
   decode_tps_mean:
     pass: 150         # ≥150 tokens/s decode on MoE model
     inconclusive: 80
+
+phase1_prefix_cache:
   prefix_reuse_speedup:
     # ratio: ttft_with_cache / ttft_cold — lower is better
     pass: 0.50        # cache cuts TTFT by ≥50%

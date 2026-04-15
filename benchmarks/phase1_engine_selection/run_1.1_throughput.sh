@@ -31,10 +31,15 @@ fi
 MODEL="${MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
 # 16384: after loading 22 GiB AWQ model, only ~0.57 GiB remains for KV cache on 32 GB GPU.
 # Engine reports max viable context ~26400; 16384 is conservative and safe.
+# For 30B model (15.74 GiB), use CTX_LEN=32768 — plenty of VRAM headroom.
 CTX_LEN="${CTX_LEN:-16384}"
 QUANT="${QUANT:-AWQ-INT4}"
 CONCURRENCY="${CONCURRENCY:-4}"   # concurrent requests — stress test
 SKIP_SGLANG="${SKIP_SGLANG:-0}"
+# EXTRA_ENGINE_ARGS: override the vLLM flags.
+# Default includes --enforce-eager (required for 35B: only 510 MiB free after model load).
+# For 30B (11+ GiB free), override: EXTRA_ENGINE_ARGS="--tool-call-parser qwen3_coder"
+EXTRA_ENGINE_ARGS="${EXTRA_ENGINE_ARGS:---tool-call-parser qwen3_coder --reasoning-parser qwen3 --enforce-eager}"
 
 TASKS_DIR="${REPO_ROOT}/benchmarks/phase1_engine_selection/tasks/throughput"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
@@ -78,7 +83,7 @@ echo " Concurrency: ${CONCURRENCY}"
 echo "=========================================="
 
 VLLM_RESULTS="$(_run_engine vllm gpu0 PORT_VLLM_GPU0 \
-    "--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enforce-eager" \
+    "${EXTRA_ENGINE_ARGS}" \
     "vllm")"
 
 SGLANG_RESULTS=""

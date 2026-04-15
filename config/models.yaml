@@ -62,23 +62,59 @@ models:
       CPU inference is 5x slower than expected (llama.cpp issue #19480).
 
   # ── Thinker models ────────────────────────────────────────────────────────
+  # NOTE: bf16 variants of 27B/32B models DO NOT fit in 32 GB GDDR7.
+  #   Qwen3.5-27B bf16 = ~50 GiB weights (27B × 2 bytes), OOMs at 30.5 GiB loaded.
+  #   R1-32B bf16 = ~60 GiB weights (32B × 2 bytes), OOMs at 30.6 GiB loaded.
+  #   GPU has 31.33 GiB usable VRAM. AWQ INT4 is required (~13-16 GiB).
+
   qwen35_27b:
     hf_repo: Qwen/Qwen3.5-27B
     quant: bf16
     format: bf16
-    vram_gb: 28
+    vram_gb: 50   # CORRECTED: bf16 27B = ~50 GiB — does NOT fit in 32 GB GPU
     ctx_default: 32768
     engines: [vllm, sglang]
-    notes: Dense — viable for speculative decoding target. Test in Phase 2.5 / 4.3.
+    notes: >
+      bf16 DOES NOT FIT in 32 GB. Confirmed OOM at 30.5 GiB loaded (needs ~50 GiB total).
+      Use AWQ INT4 variant instead (~13 GiB). See qwen35_27b_awq below.
+
+  qwen35_27b_awq:
+    hf_repo: QuantTrio/Qwen3.5-27B-AWQ
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 14
+    ctx_default: 32768
+    engines: [vllm]
+    notes: >
+      AWQ INT4 — loads 19.78 GiB. Hybrid SSM/transformer (Qwen3_5ForConditionalGeneration,
+      GDN/FLA layers). Default vLLM CUDA graph profiling OOMs: 51 batch sizes need 1.53 GiB
+      but only 1.11 GiB free. Fix: --max-num-seqs 1 limits profiling to 1 batch size (0.04 GiB
+      actual), CUDA graphs active. CONFIRMED 76 t/s at max-num-seqs=1 (Phase 2.2, 2026-04-15).
+      Use --tool-call-parser qwen3_coder --reasoning-parser qwen3 --max-num-seqs 1 on vLLM.
+      Do NOT use --enforce-eager (cuts speed to 24 t/s).
+      361k downloads/month. Same QuantTrio quantizer as qwen3_coder_30b_awq.
 
   deepseek_r1_32b:
     hf_repo: deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
     quant: bf16
     format: bf16
-    vram_gb: 30
+    vram_gb: 60   # CORRECTED: bf16 32B = ~60 GiB — does NOT fit in 32 GB GPU
     ctx_default: 32768
     engines: [vllm, sglang]
-    notes: Dense — viable for speculative decoding. Competing thinker vs Qwen3.5-27B.
+    notes: >
+      bf16 DOES NOT FIT in 32 GB. Confirmed OOM at 30.6 GiB loaded (needs ~60 GiB total).
+      Use AWQ INT4 variant instead (~16 GiB). See deepseek_r1_32b_awq below.
+
+  deepseek_r1_32b_awq:
+    hf_repo: casperhansen/deepseek-r1-distill-qwen-32b-awq
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 16
+    ctx_default: 32768
+    engines: [vllm]
+    notes: >
+      AWQ INT4 — fits in 32 GB with ~15 GiB headroom.
+      Architecture: Qwen2ForCausalLM. Use --reasoning-parser deepseek_r1 on vLLM.
 
   # ── Coding assistant alternative ──────────────────────────────────────────
   devstral:

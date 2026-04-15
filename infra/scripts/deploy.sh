@@ -108,6 +108,12 @@ COMMON=(
 
 case "${ENGINE}" in
     vllm)
+        # Only add --enable-auto-tool-choice when --tool-call-parser is present.
+        # vLLM 0.19 raises TypeError if --enable-auto-tool-choice is set without a parser.
+        VLLM_TOOL_ARGS=()
+        for _a in "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
+            [[ "$_a" == "--tool-call-parser" ]] && VLLM_TOOL_ARGS=(--enable-auto-tool-choice) && break
+        done
         CMD=(
             "${COMMON[@]}"
             -v "${MODEL_CACHE}:/root/.cache/huggingface:z"
@@ -116,7 +122,7 @@ case "${ENGINE}" in
             --port 8000
             --gpu-memory-utilization 0.90
             --max-model-len "${CTX_LEN}"
-            --enable-auto-tool-choice
+            "${VLLM_TOOL_ARGS[@]+"${VLLM_TOOL_ARGS[@]}"}"
             "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
         )
         ;;
