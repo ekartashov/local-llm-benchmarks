@@ -12,10 +12,10 @@ phase0_tool_reliability:
     inconclusive: 0.03
 
 phase1_engine_selection:
-  ttft_ms:
+  ttft_p50_ms:
     pass: 500         # first token within 500 ms at concurrency=1
     inconclusive: 1000
-  decode_tps:
+  decode_tps_mean:
     pass: 150         # ≥150 tokens/s decode on MoE model
     inconclusive: 80
   prefix_reuse_speedup:
@@ -28,7 +28,7 @@ phase2_model_selection:
   task_completion_rate:
     pass: 1.00        # all tasks returned a non-empty response
     inconclusive: 0.90
-  decode_tps:
+  decode_tps_mean:
     pass: 100
     inconclusive: 60
 
