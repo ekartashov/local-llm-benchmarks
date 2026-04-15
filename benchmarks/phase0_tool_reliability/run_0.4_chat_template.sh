@@ -32,12 +32,13 @@ fi
 ENGINE="${ENGINE:-vllm}"
 GPU="${GPU:-gpu0}"
 MODEL="${MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
-CTX_LEN="${CTX_LEN:-32768}"   # smaller context — just probing, not production run
+CTX_LEN="${CTX_LEN:-16384}"   # probe context — 32768 OOMs on 32 GB after 22 GiB AWQ load without enforce-eager
 
 # vLLM flags critical for this model (see CLAUDE.md known bugs table)
 # --reasoning-parser qwen3  : separates <think> tokens from tool-call tokens (PR #39055 workaround)
 # --tool-call-parser qwen3_coder : correct parser for this model family
-EXTRA_ENGINE_ARGS="${EXTRA_ENGINE_ARGS:---tool-call-parser qwen3_coder --reasoning-parser qwen3}"
+# --enforce-eager : skip CUDA graph capture (graphs exhaust remaining VRAM after 22 GiB model load)
+EXTRA_ENGINE_ARGS="${EXTRA_ENGINE_ARGS:---tool-call-parser qwen3_coder --reasoning-parser qwen3 --enforce-eager}"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 RESULTS_DIR="${REPO_ROOT}/results/phase0_0.4_chat_template_${TIMESTAMP}"
@@ -68,6 +69,7 @@ ENDPOINT="http://localhost:${PORT}/v1"
 # ── Run probes ─────────────────────────────────────────────────────────────────
 python3 -m benchmarks.phase0_tool_reliability.verify_chat_template \
     --endpoint "${ENDPOINT}" \
+    --model "${MODEL}" \
     --results-dir "${RESULTS_DIR}" \
     2>&1 | tee "${RESULTS_DIR}/probe.log"
 

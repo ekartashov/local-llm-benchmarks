@@ -50,6 +50,55 @@ mkdir -p "${SEQ_DIR}"
 declare -A VERDICTS
 declare -A RESULT_DIRS
 
+_write_summary() {
+    local summary="${SEQ_DIR}/phase0_sequence_summary.md"
+    {
+        echo "# Phase 0 Sequence Summary"
+        echo ""
+        echo "**Timestamp:** ${TIMESTAMP}"
+        echo ""
+        echo "| Sub-test | Description | Verdict |"
+        echo "|----------|-------------|---------|"
+        echo "| 0.4 | Chat template verification | ${VERDICTS[0.4]:-N/A} |"
+        echo "| 0.1 | Qwen3.5-35B-A3B on vLLM (primary) | ${VERDICTS[0.1]:-N/A} |"
+        echo "| 0.2 | Qwen3.5-35B-A3B on SGLang | ${VERDICTS[0.2]:-N/A} |"
+        echo "| 0.3 | Qwen3-Coder-Next on llamacpp (fallback) | ${VERDICTS[0.3]:-N/A} |"
+        echo ""
+        # Determine overall outcome and next step
+        if [[ "${VERDICTS[0.1]:-}" == "PASS" ]]; then
+            echo "## Overall: PASS"
+            echo ""
+            echo "**Winner:** Qwen3.5-35B-A3B-AWQ on vLLM"
+            echo ""
+            echo "**Next step:** Run Phase 1 (engine selection)"
+            echo "\`\`\`bash"
+            echo "just phase1"
+            echo "\`\`\`"
+            if [[ "${VERDICTS[0.2]:-}" == "PASS" ]]; then
+                echo ""
+                echo "SGLang also passed — Phase 1.1 (vLLM vs SGLang throughput) is a valid comparison."
+            elif [[ "${VERDICTS[0.2]:-}" == "FAIL" ]]; then
+                echo ""
+                echo "SGLang failed Phase 0 — **eliminate SGLang from Phase 1**. Run vLLM-only Phase 1."
+            fi
+        elif [[ "${VERDICTS[0.3]:-}" == "PASS" ]]; then
+            echo "## Overall: PASS (via fallback)"
+            echo ""
+            echo "**Winner:** Qwen3-Coder-Next (GGUF Q4) on llama.cpp"
+            echo ""
+            echo "**Next step:** Update Phase 1 scripts to use llamacpp, then run Phase 1."
+        else
+            echo "## Overall: FAIL"
+            echo ""
+            echo "Both primary (0.1) and fallback (0.3) failed."
+            echo "Investigate raw/ outputs in the results directories above."
+        fi
+    } > "${summary}"
+    echo ""
+    echo "--- Phase 0 Sequence Summary ---"
+    cat "${summary}"
+}
+
 _run_sub_test() {
     local label="$1"
     local script="$2"
@@ -118,53 +167,4 @@ else
 fi
 
 # ── Write sequence summary ─────────────────────────────────────────────────────
-_write_summary() {
-    local summary="${SEQ_DIR}/phase0_sequence_summary.md"
-    {
-        echo "# Phase 0 Sequence Summary"
-        echo ""
-        echo "**Timestamp:** ${TIMESTAMP}"
-        echo ""
-        echo "| Sub-test | Description | Verdict |"
-        echo "|----------|-------------|---------|"
-        echo "| 0.4 | Chat template verification | ${VERDICTS[0.4]:-N/A} |"
-        echo "| 0.1 | Qwen3.5-35B-A3B on vLLM (primary) | ${VERDICTS[0.1]:-N/A} |"
-        echo "| 0.2 | Qwen3.5-35B-A3B on SGLang | ${VERDICTS[0.2]:-N/A} |"
-        echo "| 0.3 | Qwen3-Coder-Next on llamacpp (fallback) | ${VERDICTS[0.3]:-N/A} |"
-        echo ""
-        # Determine overall outcome and next step
-        if [[ "${VERDICTS[0.1]:-}" == "PASS" ]]; then
-            echo "## Overall: PASS"
-            echo ""
-            echo "**Winner:** Qwen3.5-35B-A3B-AWQ on vLLM"
-            echo ""
-            echo "**Next step:** Run Phase 1 (engine selection)"
-            echo "\`\`\`bash"
-            echo "just phase1"
-            echo "\`\`\`"
-            if [[ "${VERDICTS[0.2]:-}" == "PASS" ]]; then
-                echo ""
-                echo "SGLang also passed — Phase 1.1 (vLLM vs SGLang throughput) is a valid comparison."
-            elif [[ "${VERDICTS[0.2]:-}" == "FAIL" ]]; then
-                echo ""
-                echo "SGLang failed Phase 0 — **eliminate SGLang from Phase 1**. Run vLLM-only Phase 1."
-            fi
-        elif [[ "${VERDICTS[0.3]:-}" == "PASS" ]]; then
-            echo "## Overall: PASS (via fallback)"
-            echo ""
-            echo "**Winner:** Qwen3-Coder-Next (GGUF Q4) on llama.cpp"
-            echo ""
-            echo "**Next step:** Update Phase 1 scripts to use llamacpp, then run Phase 1."
-        else
-            echo "## Overall: FAIL"
-            echo ""
-            echo "Both primary (0.1) and fallback (0.3) failed."
-            echo "Investigate raw/ outputs in the results directories above."
-        fi
-    } > "${summary}"
-    echo ""
-    echo "--- Phase 0 Sequence Summary ---"
-    cat "${summary}"
-}
-
 _write_summary
