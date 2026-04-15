@@ -63,11 +63,27 @@ class BenchClient:
                         first_chunk = False
 
                     delta = chunk.choices[0].delta if chunk.choices else None
+
+                    # Capture usage before any early-continue — the usage-only
+                    # chunk has choices=[] so delta would be None below.
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        usage = {
+                            "prompt_tokens": chunk.usage.prompt_tokens or 0,
+                            "completion_tokens": chunk.usage.completion_tokens or 0,
+                        }
+
                     if delta is None:
                         continue
 
                     if delta.content:
                         content_parts.append(delta.content)
+
+                    # vLLM reasoning parser puts <think> tokens in reasoning_content
+                    # (a non-standard field surfaced via model_extra). Capture it so
+                    # token counts and decode_tps are accurate even in thinking mode.
+                    reasoning = (delta.model_extra or {}).get("reasoning_content") if hasattr(delta, "model_extra") else None
+                    if reasoning:
+                        content_parts.append(reasoning)
 
                     # Accumulate tool call deltas
                     if delta.tool_calls:
@@ -86,13 +102,6 @@ class BenchClient:
                                     tool_call_chunks[idx]["function"]["arguments"] += (
                                         tc.function.arguments
                                     )
-
-                    # Capture usage if present in the chunk
-                    if hasattr(chunk, "usage") and chunk.usage:
-                        usage = {
-                            "prompt_tokens": chunk.usage.prompt_tokens or 0,
-                            "completion_tokens": chunk.usage.completion_tokens or 0,
-                        }
 
             result.latency_ms = sw.elapsed_ms()
             result.raw_text = "".join(content_parts)

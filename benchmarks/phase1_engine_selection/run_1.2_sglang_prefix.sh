@@ -18,12 +18,23 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
+# Activate project venv if present
+VENV="${REPO_ROOT}/.venv"
+if [[ -f "${VENV}/bin/python3" ]]; then
+    # shellcheck source=/dev/null
+    source "${VENV}/bin/activate"
+fi
+
 ENGINE="sglang"
 GPU="gpu0"
 MODEL="${MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
-CTX_LEN=32768
+CTX_LEN=16384
 QUANT="AWQ-INT4"
-EXTRA_ENGINE_ARGS="--tool-call-parser qwen3"
+# SGLang uses qwen3_coder (not qwen3) for Qwen3.5 MoE tool calling.
+# --quantization awq_marlin: forces awq_marlin loading path which handles
+# per-expert weight tensors (experts.N.w2.weight) vs the default qwen3_5 loader
+# which expects fused experts.w2_weight tensors (KeyError if missing).
+EXTRA_ENGINE_ARGS="--tool-call-parser qwen3_coder --quantization awq_marlin"
 
 TASKS_DIR="${REPO_ROOT}/benchmarks/phase1_engine_selection/tasks/prefix_cache"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
@@ -39,7 +50,7 @@ echo "============================================="
 "${REPO_ROOT}/infra/scripts/deploy.sh" "${ENGINE}" "${GPU}" "${MODEL}" \
     --ctx "${CTX_LEN}" ${EXTRA_ENGINE_ARGS}
 
-python -m benchmarks.phase1_engine_selection.bench \
+python3 -m benchmarks.phase1_engine_selection.bench \
     --endpoint "http://localhost:${PORT_SGLANG_GPU0}/v1" \
     --results-dir "${RESULTS_DIR}" \
     --tasks "${TASKS_DIR}" \

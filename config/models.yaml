@@ -16,12 +16,17 @@ models:
     quant: AWQ-INT4
     format: awq
     vram_gb: 22
-    ctx_default: 114688
-    engines: [vllm, sglang]
+    ctx_default: 16384   # 32 GB GPU: only ~0.57 GiB free after model load; max viable ~26400
+    engines: [vllm]      # SGLang: KeyError on w2_weight — MoE AWQ weight-map bug in current image
     notes: >
-      Use --tool-call-parser qwen3_coder on vLLM.
+      Use --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enforce-eager on vLLM.
+      --enforce-eager required: CUDA graph profiling (51 batch sizes) OOMs on 32 GB after 22 GiB model.
+      SGLang PERMANENTLY INCOMPATIBLE: lmsysorg/sglang:latest qwen3_5.py load_weights() expects fused
+      experts.w2_weight tensor but QuantTrio stores per-expert experts.N.w2.weight tensors.
+      Neither --quantization awq_marlin nor any other runtime flag fixes this — it is a code bug in
+      SGLang's qwen3_5.py:1662 weight loader. Patch required. Skip all SGLang tests for this model.
       Chat template may be broken on HF — use barubary's fixed template.
-      vLLM PR #39055 (think+tool drop) must be merged before using with reasoning.
+      vLLM PR #39055 (think+tool drop) workaround: --reasoning-parser qwen3.
 
   qwen35_35b_a3b_gguf:
     hf_repo: unsloth/Qwen3.5-35B-A3B-GGUF

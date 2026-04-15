@@ -230,6 +230,19 @@ async def main_async(args: argparse.Namespace) -> None:
     client = BenchClient(base_url=args.endpoint, results_dir=results_dir)
     engine_version = await _get_engine_version(args.endpoint)
 
+    # Auto-detect model if caller left the default placeholder.
+    if args.model == "default":
+        try:
+            async with httpx.AsyncClient(timeout=5) as hc:
+                r = await hc.get(f"{args.endpoint}/models")
+                if r.status_code == 200:
+                    data = r.json().get("data", [])
+                    if data:
+                        args.model = data[0]["id"]
+                        console.print(f"Model      : {args.model} [dim](auto-detected)[/dim]")
+        except Exception:
+            pass
+
     # ── Run ────────────────────────────────────────────────────────────────────
     extra_metrics: dict[str, Any] = {}
 

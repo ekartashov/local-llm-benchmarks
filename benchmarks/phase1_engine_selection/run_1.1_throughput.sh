@@ -17,8 +17,17 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
+# Activate project venv if present
+VENV="${REPO_ROOT}/.venv"
+if [[ -f "${VENV}/bin/python3" ]]; then
+    # shellcheck source=/dev/null
+    source "${VENV}/bin/activate"
+fi
+
 MODEL="${MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
-CTX_LEN="${CTX_LEN:-32768}"
+# 16384: after loading 22 GiB AWQ model, only ~0.57 GiB remains for KV cache on 32 GB GPU.
+# Engine reports max viable context ~26400; 16384 is conservative and safe.
+CTX_LEN="${CTX_LEN:-16384}"
 QUANT="${QUANT:-AWQ-INT4}"
 CONCURRENCY="${CONCURRENCY:-4}"   # concurrent requests — stress test
 SKIP_SGLANG="${SKIP_SGLANG:-0}"
@@ -31,13 +40,14 @@ _run_engine() {
     local results_dir="${REPO_ROOT}/results/phase1_1.1_${label}_${TIMESTAMP}"
     mkdir -p "${results_dir}/raw"
 
-    echo ""
-    echo "── ${label} ────────────────────────────────────────────────────────"
+    # All diagnostic output → stderr so only the final results_dir path goes to stdout.
+    echo "" >&2
+    echo "── ${label} ────────────────────────────────────────────────────────" >&2
     "${REPO_ROOT}/infra/scripts/deploy.sh" "${engine}" "${gpu}" "${MODEL}" \
-        --ctx "${CTX_LEN}" ${extra_args}
+        --ctx "${CTX_LEN}" ${extra_args} >&2
 
     local port="${!port_var}"
-    python -m benchmarks.phase1_engine_selection.bench \
+    python3 -m benchmarks.phase1_engine_selection.bench \
         --endpoint "http://localhost:${port}/v1" \
         --results-dir "${results_dir}" \
         --tasks "${TASKS_DIR}" \
@@ -51,9 +61,9 @@ _run_engine() {
         --extra-args "${extra_args}" \
         --thresholds "${REPO_ROOT}/config/thresholds.yaml" \
         --notes "Sub-test 1.1: throughput (concurrency=${CONCURRENCY})" \
-        2>&1 | tee "${results_dir}/bench.log" || true
+        2>&1 | tee "${results_dir}/bench.log" >&2 || true
 
-    "${REPO_ROOT}/infra/scripts/teardown.sh"
+    "${REPO_ROOT}/infra/scripts/teardown.sh" >&2
     echo "${results_dir}"
 }
 
@@ -64,13 +74,17 @@ echo " Concurrency: ${CONCURRENCY}"
 echo "=========================================="
 
 VLLM_RESULTS="$(_run_engine vllm gpu0 PORT_VLLM_GPU0 \
-    "--tool-call-parser qwen3_coder --reasoning-parser qwen3" \
+    "--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enforce-eager" \
     "vllm")"
 
 SGLANG_RESULTS=""
 if [[ "${SKIP_SGLANG}" != "1" ]]; then
+    # Phase 1.1 is a pure throughput test (no tool calls) — no tool-call-parser needed.
+    # --quantization awq_marlin: QuantTrio checkpoint stores per-expert tensors
+    # (experts.N.w2.weight); SGLang default loader expects fused experts.w2_weight
+    # and hits KeyError. awq_marlin path handles per-expert format correctly.
     SGLANG_RESULTS="$(_run_engine sglang gpu0 PORT_SGLANG_GPU0 \
-        "--tool-call-parser qwen3" \
+        "--quantization awq_marlin" \
         "sglang")"
 fi
 
@@ -78,7 +92,7 @@ fi
 echo ""
 echo "── Comparison ──────────────────────────────────────────────────────────"
 if [[ -n "${SGLANG_RESULTS}" ]]; then
-    python -m lib.reporter compare "${VLLM_RESULTS}" "${SGLANG_RESULTS}" \
+    python3 -m lib.reporter compare "${VLLM_RESULTS}" "${SGLANG_RESULTS}" \
         --key decode_tps_mean
 else
     echo "(SGLang skipped — vLLM-only run)"

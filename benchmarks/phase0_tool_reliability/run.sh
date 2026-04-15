@@ -15,13 +15,22 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
+# Activate project venv if present
+VENV="${REPO_ROOT}/.venv"
+if [[ -f "${VENV}/bin/python3" ]]; then
+    # shellcheck source=/dev/null
+    source "${VENV}/bin/activate"
+fi
+
 # ── Configurable defaults ──────────────────────────────────────────────────────
 ENGINE="${ENGINE:-vllm}"
 GPU="${GPU:-gpu0}"
 MODEL="${MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
-CTX_LEN="${CTX_LEN:-114688}"
+# 16384: after loading 22 GiB AWQ model, only ~0.57 GiB remains for KV cache.
+# --enforce-eager skips CUDA graph profiling which also OOMs at this VRAM budget.
+CTX_LEN="${CTX_LEN:-16384}"
 QUANT="${QUANT:-AWQ-INT4}"
-EXTRA_ENGINE_ARGS="${EXTRA_ENGINE_ARGS:---tool-call-parser qwen3_coder}"
+EXTRA_ENGINE_ARGS="${EXTRA_ENGINE_ARGS:---tool-call-parser qwen3_coder --reasoning-parser qwen3 --enforce-eager}"
 CONCURRENCY="${CONCURRENCY:-1}"
 
 # ── Select port ────────────────────────────────────────────────────────────────
@@ -58,8 +67,9 @@ echo "=============================================="
 ENDPOINT="http://localhost:${PORT}/v1"
 
 # ── Bench ──────────────────────────────────────────────────────────────────────
-python -m benchmarks.phase0_tool_reliability.bench \
+python3 -m benchmarks.phase0_tool_reliability.bench \
     --endpoint "${ENDPOINT}" \
+    --model "${MODEL}" \
     --results-dir "${RESULTS_DIR}" \
     --tasks "${REPO_ROOT}/benchmarks/phase0_tool_reliability/tasks/" \
     --engine "${ENGINE}" \

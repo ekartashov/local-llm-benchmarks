@@ -21,6 +21,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
+# Activate project venv if present
+VENV="${REPO_ROOT}/.venv"
+if [[ -f "${VENV}/bin/python3" ]]; then
+    # shellcheck source=/dev/null
+    source "${VENV}/bin/activate"
+fi
+
 ENGINE="llamacpp"
 GPU="gpu0"
 MODEL_FILE="${MODEL_FILE:-Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf}"
@@ -45,7 +52,7 @@ echo "============================================="
 GGUF_PATH="${MODEL_CACHE}/${MODEL_FILE}"
 if [[ ! -f "${GGUF_PATH}" ]]; then
     echo "ERROR: GGUF not found at ${GGUF_PATH}" >&2
-    echo "Run: huggingface-cli download unsloth/Qwen3.5-35B-A3B-GGUF --include '${MODEL_FILE}' --cache-dir ${MODEL_CACHE}" >&2
+    echo "Run: hf download unsloth/Qwen3.5-35B-A3B-GGUF --include '${MODEL_FILE}' --local-dir ${MODEL_CACHE}" >&2
     exit 1
 fi
 
@@ -53,7 +60,7 @@ export MODEL_FILE
 "${REPO_ROOT}/infra/scripts/deploy.sh" "${ENGINE}" "${GPU}" "" \
     --ctx "${CTX_LEN}" ${EXTRA_ENGINE_ARGS}
 
-python -m benchmarks.phase1_engine_selection.bench \
+python3 -m benchmarks.phase1_engine_selection.bench \
     --endpoint "http://localhost:${PORT_LLAMACPP_GPU0}/v1" \
     --results-dir "${RESULTS_DIR}" \
     --tasks "${TASKS_DIR}" \
@@ -77,7 +84,7 @@ VLLM_RESULTS="$(ls -td "${REPO_ROOT}/results/phase1_1.1_vllm_"* 2>/dev/null | he
 if [[ -n "${VLLM_RESULTS}" ]]; then
     echo ""
     echo "── Comparison vs vLLM (1.1) ─────────────────────────────────────────────"
-    python -m lib.reporter compare "${VLLM_RESULTS}" "${RESULTS_DIR}" \
+    python3 -m lib.reporter compare "${VLLM_RESULTS}" "${RESULTS_DIR}" \
         --key decode_tps_mean || true
 fi
 

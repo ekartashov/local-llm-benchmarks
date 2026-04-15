@@ -17,14 +17,23 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
+# Activate project venv if present
+VENV="${REPO_ROOT}/.venv"
+if [[ -f "${VENV}/bin/python3" ]]; then
+    # shellcheck source=/dev/null
+    source "${VENV}/bin/activate"
+fi
+
 ENGINE="vllm"
 GPU="gpu0"
 MODEL="${MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
-CTX_LEN=32768
+CTX_LEN=16384
 QUANT="AWQ-INT4"
 
-# --enable-chunked-prefill activates automatic prefix caching in vLLM
-EXTRA_ENGINE_ARGS="--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-chunked-prefill"
+# --enable-prefix-caching: activates KV-cache reuse for shared prefixes (distinct from
+#   --enable-chunked-prefill which enables batched prefill and is on by default in v0.19).
+# --enforce-eager: required on 32 GB GPU after 22 GiB model load (CUDA graph profiling OOMs).
+EXTRA_ENGINE_ARGS="--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-prefix-caching --enforce-eager"
 
 TASKS_DIR="${REPO_ROOT}/benchmarks/phase1_engine_selection/tasks/prefix_cache"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
@@ -40,7 +49,7 @@ echo "============================================="
 "${REPO_ROOT}/infra/scripts/deploy.sh" "${ENGINE}" "${GPU}" "${MODEL}" \
     --ctx "${CTX_LEN}" ${EXTRA_ENGINE_ARGS}
 
-python -m benchmarks.phase1_engine_selection.bench \
+python3 -m benchmarks.phase1_engine_selection.bench \
     --endpoint "http://localhost:${PORT_VLLM_GPU0}/v1" \
     --results-dir "${RESULTS_DIR}" \
     --tasks "${TASKS_DIR}" \
@@ -73,7 +82,7 @@ SGLANG_PREFIX_RESULTS="$(ls -td "${REPO_ROOT}/results/phase1_1.2_sglang_prefix_"
 if [[ -n "${SGLANG_PREFIX_RESULTS}" ]]; then
     echo ""
     echo "── Comparison vs SGLang (1.2) ──────────────────────────────────────────"
-    python -m lib.reporter compare "${RESULTS_DIR}" "${SGLANG_PREFIX_RESULTS}" \
+    python3 -m lib.reporter compare "${RESULTS_DIR}" "${SGLANG_PREFIX_RESULTS}" \
         --key prefix_reuse_speedup || true
 fi
 

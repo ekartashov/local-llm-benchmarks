@@ -75,8 +75,15 @@ def _metric_rows(metrics: dict[str, Any], phase_thresholds: dict[str, Any]) -> l
         if not isinstance(value, (int, float)):
             continue
         spec = phase_thresholds.get(key, {})
-        pass_val = spec.get("pass", "—")
-        threshold_str = f"≥{pass_val}" if isinstance(pass_val, (int, float)) else "—"
+        pass_val = spec.get("pass")
+        incon_val = spec.get("inconclusive")
+        if pass_val is None:
+            threshold_str = "—"
+        else:
+            # lower-is-better when pass < inconclusive (e.g. ratios, error rates)
+            lower_is_better = incon_val is not None and pass_val < incon_val
+            op = "≤" if lower_is_better else "≥"
+            threshold_str = f"{op}{pass_val}"
         rows.append(f"| {key} | {value:.4g} | {threshold_str} |")
     return rows
 
@@ -117,19 +124,38 @@ def generate_summary(results_dir: Path, thresholds: dict[str, Any]) -> str:
     ]
     lines.extend(_metric_rows(metrics, phase_thresholds))
 
-    # Per-task breakdown (phase0 style)
+    # Per-task breakdown — format differs by phase
     per_task: list[dict[str, Any]] = metrics.get("per_task", [])
     if per_task:
-        lines += [
-            "",
-            "## Per-task results",
-            "",
-            "| Task ID | Score | Reason |",
-            "|---------|-------|--------|",
-        ]
-        for t in per_task:
-            reason = t.get("reason", "").replace("|", "\\|")
-            lines.append(f"| {t['task_id']} | {t['score']} | {reason} |")
+        first = per_task[0]
+        if "score" in first:
+            # Phase 0 style: tool-call scoring
+            lines += [
+                "",
+                "## Per-task results",
+                "",
+                "| Task ID | Score | Reason |",
+                "|---------|-------|--------|",
+            ]
+            for t in per_task:
+                reason = t.get("reason", "").replace("|", "\\|")
+                lines.append(f"| {t['task_id']} | {t.get('score', '?')} | {reason} |")
+        elif "speedup_ratio" in first:
+            # Phase 1 prefix-cache style
+            lines += [
+                "",
+                "## Per-task results",
+                "",
+                "| Task ID | Cold TTFT (ms) | Warm TTFT (ms) | Ratio |",
+                "|---------|---------------|----------------|-------|",
+            ]
+            for t in per_task:
+                lines.append(
+                    f"| {t['task_id']} "
+                    f"| {t.get('ttft_cold_ms', 0):.0f} "
+                    f"| {t.get('ttft_warm_ms', 0):.0f} "
+                    f"| {t.get('speedup_ratio', 0):.3f} |"
+                )
 
     if notes:
         lines += ["", "## Notes", "", notes]
@@ -188,33 +214,30 @@ def compare(dir_a: Path, dir_b: Path, key: str = "tool_call_success_rate") -> No
 
 def main(argv: list[str] | None = None) -> None:
     import argparse
+    import sys as _sys
 
-    parser = argparse.ArgumentParser(description="Report or compare benchmark results")
-    subparsers = parser.add_subparsers(dest="cmd")
+    raw = argv if argv is not None else _sys.argv[1:]
 
-    # Default: generate summary for a results dir
-    parser.add_argument("results_dir", nargs="?", help="Results directory containing metrics.json")
+    # Dispatch on first non-flag token so positional results_dir doesn't
+    # collide with argparse subparser matching.
+    if raw and raw[0] == "compare":
+        sub = argparse.ArgumentParser(description="Compare two result directories")
+        sub.add_argument("cmd")  # consume "compare"
+        sub.add_argument("dir_a")
+        sub.add_argument("dir_b")
+        sub.add_argument("--key", default="tool_call_success_rate")
+        args = sub.parse_args(raw)
+        compare(Path(args.dir_a), Path(args.dir_b), args.key)
+        return
+
+    parser = argparse.ArgumentParser(description="Generate summary from a results directory")
+    parser.add_argument("results_dir", help="Results directory containing metrics.json")
     parser.add_argument(
         "--thresholds",
         default="config/thresholds.yaml",
         help="Path to thresholds.yaml",
     )
-
-    # compare subcommand
-    sub = subparsers.add_parser("compare", help="Compare two result directories")
-    sub.add_argument("dir_a")
-    sub.add_argument("dir_b")
-    sub.add_argument("--key", default="tool_call_success_rate")
-
-    args = parser.parse_args(argv)
-
-    if args.cmd == "compare":
-        compare(Path(args.dir_a), Path(args.dir_b), args.key)
-        return
-
-    if not args.results_dir:
-        parser.print_help()
-        sys.exit(1)
+    args = parser.parse_args(raw)
 
     thresholds_path = Path(args.thresholds)
     thresholds: dict[str, Any] = {}
