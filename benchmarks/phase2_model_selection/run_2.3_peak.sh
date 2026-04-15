@@ -22,9 +22,10 @@ source "${REPO_ROOT}/config/hardware.env"
 GPU="gpu0"
 CTX_LEN=32768
 MODEL_FILE="${MODEL_FILE:-Qwen3-Coder-Next-Q4_K_M.gguf}"
-DAILY_DRIVER_MODEL="${DAILY_DRIVER_MODEL:-QuantTrio/Qwen3.5-35B-A3B-AWQ}"
+# Phase 2.1 winner: 30B-AWQ at 251 t/s. 35B-AWQ needs --enforce-eager (22 t/s, not viable).
+DAILY_DRIVER_MODEL="${DAILY_DRIVER_MODEL:-QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ}"
 DAILY_DRIVER_QUANT="${DAILY_DRIVER_QUANT:-AWQ-INT4}"
-DAILY_DRIVER_ARGS="${DAILY_DRIVER_ARGS:---tool-call-parser qwen3_coder --reasoning-parser qwen3}"
+DAILY_DRIVER_ARGS="${DAILY_DRIVER_ARGS:---tool-call-parser qwen3_coder}"
 
 TASKS="${REPO_ROOT}/benchmarks/phase2_model_selection/tasks/quality"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
