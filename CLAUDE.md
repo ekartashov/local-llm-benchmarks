@@ -1,18 +1,25 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working in this repository.
 
 ## What this project is
 
-A systematic benchmark suite for validating local LLM inference configurations on a dual RTX 5090 workstation. The goal is to convert architectural hypotheses into measured, reproducible results that determine the optimal model + engine + quantization + agent topology for autonomous coding workflows.
+A personal test harness to determine the optimal local LLM configuration (model + engine + quantization + KV cache settings + GPU placement + swap policy) for **one specific hardware setup** and **one operator's workload mix**.
 
-**This is NOT a general benchmarking framework.** It is a specific, opinionated test harness for ONE hardware configuration and ONE use case (coding agents like OpenCode/aider). Every test has a concrete hypothesis, a pass/fail criterion, and an "if it fails" action.
+The operator is an infrastructure engineer. The workload is not generic "coding" — it is:
 
-**Bootstrap status:** As of April 2026, the repository contains only this CLAUDE.md and configuration docs. All files listed in the project structure below must be created. When implementing, follow the conventions here exactly.
+- Infrastructure projects like this benchmark repo (Python + shell + containers)
+- Container orchestration & isolation (rootless podman, custom wrappers like `claude-box`)
+- Matrix microservice fleet (12-container deployment)
+- Compilation and build work for custom tooling
+- VM-based development of a Debian-derived custom OS
+- Idempotent deployment harness for Armbian on Orange Pi boards (cloud-init-adjacent)
+- Ceph, OpenStack, network switch tuning for low-latency quant-analysis workloads
+- Eventually: OpenCode + MCP servers (firecrawl, searxng, RAG backends) for doc-aware agentic work
 
-## Execution environment
+The current agent frontend is **OpenCode**. Subagents route to different model endpoints natively (v1.3+), so models are evaluated as **role endpoints** (coder / thinker / behemoth), not as "the one model." This changes what we test and how we score it.
 
-Claude runs inside a rootless Podman container. The target repository is bind-mounted read-write at `/workspace` (the project root). Persistent Claude state lives under `/home/node/.claude`. Host paths outside the mount are unavailable. Use repo-relative or `/workspace/...` paths everywhere.
+**Scope discipline:** we only test what is not already settled by published research. When web research answers a question definitively, we record the decision in `DECISIONS.md` and do not re-test. When research leaves ambiguity or the claim depends on details of our specific hardware/engine/quant combination, we test. Saving cycles on non-tests is as valuable as running tests — both narrow the search.
 
 ## Hardware under test
 
@@ -25,178 +32,161 @@ Inter:  NO NVLink — PCIe x8/x8 bifurcation
 OS:     Linux (kernel 6.x, rootless podman, NVIDIA container toolkit)
 ```
 
-## Python environment
+The two GPUs are a **shared pool via tensor parallelism**, not two independent slots. Single-GPU-only constraints (e.g. "this model is 22 GB bf16, doesn't fit in 32 GB") are usually false for our rig because TP=2 gives us effectively 64 GB minus TP overhead. See `ARCHITECTURE.md`.
 
-**There are two separate Python contexts. Do not confuse them.**
+## Operating model: research ↔ testing loop
 
-### 1. Host — running benchmark scripts
+This is the central workflow. Read it before doing anything else.
 
-Benchmark scripts (`run_*.sh`) call `python3 -m benchmarks...` and must be run
-on the **host** with the `hf` pyenv virtualenv active:
+```
+┌──────────────┐  open question    ┌──────────────┐
+│   RESEARCH   │  ───────────────▶ │   TESTING    │
+│  (web/docs,  │                   │  (on host,   │
+│  Claude +    │  ◀─────────────── │   GPU live)  │
+│  operator)   │  wall hit /       └──────────────┘
+└──────────────┘  new insight
+```
+
+- **Research mode** (this container): the assistant reads web sources, HF model cards, vLLM/SGLang docs, issue trackers, and prior conversation. Output is updates to `RESEARCH_STATE.md`, `TESTING_QUEUE.md`, `DECISIONS.md`, and `config/models.yaml`.
+- **Testing mode** (host, operator + Claude Code): runs real benchmarks against live GPUs. Output is `results/…/metrics.json` + `summary.md`, plus short entries in `RESEARCH_STATE.md` under "findings from last test cycle."
+
+**Testing mode MUST hand control back to research mode when any of the following happens:**
+
+1. The current item in `TESTING_QUEUE.md` is complete (one or more items).
+2. An engine bug, kernel mismatch, OOM, or unexpected parser behavior blocks progress and the cause is not already documented in `DECISIONS.md`.
+3. A result contradicts a prior assumption recorded as a "provisional" decision.
+4. A result opens a new direction (e.g. unexpectedly high TPS on a model we thought was dead) that could change subsequent priorities.
+
+The hand-off is explicit: Claude Code writes a short block in `RESEARCH_STATE.md` under `## Open from testing` describing the wall or insight, then stops and asks the operator to switch to research mode. The research pass updates the queue and decisions, then testing resumes.
+
+**This is not a phase plan.** There are no phase gates. There is a queue, and items in the queue have dependencies. See `TESTING_QUEUE.md`.
+
+## Document map
+
+| File | Purpose | Edited by |
+|------|---------|-----------|
+| `CLAUDE.md` | This file — durable project brief | Research mode |
+| `CLAUDE.local.md` | Claude launcher (rootless podman wrapper) | Operator |
+| `ARCHITECTURE.md` | Current working architecture hypothesis | Research mode |
+| `RESEARCH_STATE.md` | What we know, what we don't, cycle log | Both |
+| `TESTING_QUEUE.md` | Ordered question queue with dependencies | Both |
+| `DECISIONS.md` | Settled decisions + kill list with rationale | Research mode |
+| `PHASE2_RESULTS.md` | Historical artifact from the phased plan | Frozen |
+| `config/models.yaml` | Model registry (annotated) | Both |
+| `config/thresholds.yaml` | Pass/fail criteria — annotate per item, not per phase | Both |
+| `config/hardware.env` | Ports, cache paths, GPU IDs | Operator |
+
+## Context discipline
+
+Do NOT read into these paths unless the current task explicitly requires it:
+- `results/*/raw/` — raw API response files, large and rarely needed
+- `*.log`, `bench.log` — use `results/*/summary.md` instead
+- `*.jsonl` in `~/.claude/` — session history, not project data
+
+When analyzing a benchmark run, read `results/<item_id>-<timestamp>/summary.md` first.
+Only open `metrics.json` if the summary is insufficient.
+
+## Execution environment
+
+Claude runs inside a rootless Podman container via the claude-box wrapper (see CLAUDE.local.md).
+The repo is bind-mounted at the exact same absolute path as on the host (e.g. `/srv/ai/projects/local-llm-benchmarks`). Host paths outside this mount are unavailable.
+
+**You cannot run benchmarks. You read and write repo files only.**
+
+**Python 3.11.x is available with:** `pydantic`, `httpx`, `pyyaml`, `rich`, `openai`, `ruff`, `pytest` — plus full stdlib.
+
+Claude Code MAY use Python for:
+- Parsing `results/*/metrics.json` with `json` + `pathlib` or `pydantic` schemas
+- Parsing `config/models.yaml` / `config/thresholds.yaml` with `pyyaml`
+- Generating `summary.md` tables with `rich`
+- Running `pytest` on `lib/` unit tests after making changes to lib
+- Running `ruff check .` to lint before handing back to operator
+
+**The container CANNOT:**
+- Talk to the GPU
+- Activate the host `hf` pyenv or any host venv
+- Run benchmarks (`infra/scripts/deploy.sh` invokes `podman compose` — host only)
+- Execute `just` targets that call deploy scripts
+- Reach vLLM endpoints — ports 30000–30002 are host-side only, connection will be refused
+
+Running benchmarks is the operator's job.
+
+## Python on host (operator runs these)
 
 ```bash
-pyenv activate hf
-# Now python3, pytest, ruff, pyright, and the hf CLI are all on PATH.
+pyenv activate hf               # canonical — .venv symlink points to the same env
+pip install -e ".[dev]"         # first-time setup
+
+ruff check . && ruff format .
+pyright
+pytest
 ```
 
-The `.venv` symlink in the repo root points to this same env:
-```
-.venv -> /home/cassini/.pyenv/versions/3.12.7/envs/hf
-```
-So `source .venv/bin/activate` works too, but `pyenv activate hf` is canonical.
+Benchmark scripts live under `benchmarks/` and the `justfile` has shortcuts. All of them call `./infra/scripts/deploy.sh` which runs engines in rootless podman containers — engines are never installed on the host.
 
-First-time setup (installs repo deps into the hf venv):
-```bash
-pyenv activate hf
-pip install -e ".[dev]"
-```
-
-### 2. Claude container — editing/searching code
-
-Claude runs inside a rootless Podman container (see CLAUDE.local.md). The host
-`hf` venv and `/home/cassini` are **not mounted** — Claude cannot activate it
-or run scripts against the live GPU. All Claude does is read/write repo files.
-Scripts that deploy containers, run bench.py, etc. must be run by the **human**
-on the host terminal.
-
-### HuggingFace model downloads (host only)
+## Model downloads (host only)
 
 ```bash
 pyenv activate hf
 HF_HOME=/srv/ai/models hf download QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ
-# For gated repos:
+# gated:
 HF_TOKEN=hf_... HF_HOME=/srv/ai/models hf download mistralai/Devstral-Small-2505
 ```
 
-Do NOT use a Python container for downloads — `pip install huggingface_hub` in a
-throwaway container has repeated friction (PATH, HOME, token forwarding). The
-host `hf` venv already has everything needed.
+Do not use a throwaway Python container for downloads — the host venv has everything.
 
-## Development commands
+## Container orchestration
 
-```bash
-# (All commands run on host with pyenv activate hf)
+All engines run as rootless podman containers via `podman compose`. GPU isolation uses `NVIDIA_VISIBLE_DEVICES` (not `CUDA_VISIBLE_DEVICES`). Scripts use `podman compose`, not `docker compose`. See `infra/compose/` for templates; `infra/scripts/deploy.sh` is the one canonical entry point.
 
-# Install / sync deps
-pip install -e ".[dev]"
+## Benchmark run convention
 
-# Lint and format
-ruff check .
-ruff format .
+Every runnable test writes to `results/{item_id}_{timestamp}/`:
+- `raw/` — raw API responses per task
+- `metrics.json` — structured metrics
+- `bench.log` — full log
+- `summary.md` — human-readable summary via `lib.reporter`
+- `human_review.md` — when quality scoring needed
 
-# Type check
-pyright
-
-# Run tests
-pytest
-
-# Run a single test file
-pytest benchmarks/phase0_tool_reliability/tests/test_scorer.py -v
+`metrics.json` schema:
+```json
+{
+  "item_id": "coder_glm47_flash_awq_tp2_kv_q8",
+  "timestamp": "2026-04-17T10:30:00Z",
+  "config": {
+    "engine": "vllm",
+    "engine_version": "0.19.x",
+    "model": "cyankiwi/GLM-4.7-Flash-AWQ-4bit",
+    "quantization": "AWQ-INT4",
+    "kv_cache_dtype": "fp8",
+    "placement": "tp=2",
+    "context_length": 65536,
+    "extra_args": "--tool-call-parser glm47 --reasoning-parser glm45"
+  },
+  "metrics": {},
+  "verdict": "PASS | FAIL | INCONCLUSIVE",
+  "notes": ""
+}
 ```
 
-Shell scripts are run directly from the repo root on the host:
-```bash
-./infra/scripts/deploy.sh vllm gpu0 Qwen/Qwen3.5-35B-A3B-AWQ --ctx 114688
-./infra/scripts/teardown.sh
-./infra/scripts/wait-healthy.sh http://localhost:30000/health
+The `item_id` should match the entry in `TESTING_QUEUE.md`.
+
+## Scoring (`lib/scorer.py`)
+
+```python
+class ToolCallScore:
+    PASS         = "pass"
+    FORMAT_ERROR = "format_error"  # engine parser broken
+    DROPPED      = "dropped"       # engine silently dropped tool call
+    WRONG_TOOL   = "wrong_tool"
+    WRONG_ARGS   = "wrong_args"
+    NO_CALL      = "no_call"
+    EXCEPTION    = "exception"
 ```
 
-## Project structure
+`DROPPED` / `FORMAT_ERROR` indicate engine bugs, not model problems.
 
-```
-local-llm-benchmarks/
-├── config/
-│   ├── hardware.env       # GPU IDs, RAM, MODEL_CACHE path — source this everywhere
-│   ├── models.yaml        # Model registry: HF repo, quant, format, VRAM estimate
-│   └── thresholds.yaml    # Pass/fail criteria for every test
-├── infra/
-│   ├── compose/           # One yaml per engine+GPU combo (vllm-gpu0, sglang-gpu0, etc.)
-│   ├── scripts/           # deploy.sh, teardown.sh, wait-healthy.sh, swap-model.sh, precache-models.sh
-│   └── Containerfile.bench
-├── benchmarks/
-│   ├── phase0_tool_reliability/   # BLOCKER — run first
-│   ├── phase1_engine_selection/
-│   ├── phase2_model_selection/
-│   ├── phase3_architecture/
-│   ├── phase4_optimizations/
-│   ├── phase5_integration/
-│   └── phase6_baselines/
-├── lib/
-│   ├── client.py     # BenchClient — OpenAI-compatible client with TTFT/decode instrumentation
-│   ├── metrics.py    # TTFT, decode speed, throughput calculators
-│   ├── scorer.py     # ToolCallScore enum and scoring logic
-│   ├── reporter.py   # Generates summary.md from metrics.json; handles compare subcommand
-│   ├── tool_tasks.py # Task loader and validator
-│   └── deploy.py     # Python wrapper around deploy.sh
-├── results/          # Auto-created per run: {phase}_{timestamp}/raw/, metrics.json, summary.md
-├── pyproject.toml    # deps: openai, httpx, pyyaml, pydantic, rich, pytest, ruff, pyright
-└── justfile
-```
-
-## Critical conventions
-
-### Container orchestration
-
-All inference engines run as **rootless podman containers** via `podman compose`. Never install vLLM/SGLang/llama.cpp on the host. Always use the deploy script — never raw podman commands. Scripts use `podman compose`, not `docker compose`.
-
-**GPU isolation**: Use `NVIDIA_VISIBLE_DEVICES` in compose files, not `CUDA_VISIBLE_DEVICES`.
-
-```yaml
-# Canonical compose snippet (vLLM on GPU 0)
-services:
-  vllm-gpu0:
-    image: vllm/vllm-openai:latest
-    runtime: nvidia
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=0
-    command: >
-      --model ${MODEL_ID}
-      --port 8000
-      --gpu-memory-utilization 0.9
-      --max-model-len ${CTX_LEN}
-      --enable-auto-tool-choice
-      --tool-call-parser qwen3_coder
-    ports:
-      - "30000:8000"
-    volumes:
-      - ${MODEL_CACHE}:/root/.cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [gpu]
-```
-
-### Benchmark execution pattern
-
-Every `benchmarks/phaseN/run.sh` follows:
-
-```bash
-set -euo pipefail
-source config/hardware.env
-RESULTS_DIR="results/${PHASE}_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$RESULTS_DIR/raw"
-
-./infra/scripts/deploy.sh "$ENGINE" "$GPU" "$MODEL" $ENGINE_ARGS
-python -m benchmarks.${PHASE}.bench \
-  --endpoint "http://localhost:${PORT}/v1" \
-  --results-dir "$RESULTS_DIR" \
-  --tasks benchmarks/${PHASE}/tasks/ \
-  2>&1 | tee "$RESULTS_DIR/bench.log"
-./infra/scripts/teardown.sh
-python -m lib.reporter "$RESULTS_DIR" --thresholds config/thresholds.yaml
-cat "$RESULTS_DIR/summary.md"
-```
-
-### Metric collection rules
-
-All benchmark scripts MUST:
-1. Save raw API responses as JSON in `$RESULTS_DIR/raw/`
-2. Write computed metrics to `$RESULTS_DIR/metrics.json`
-3. Use `lib.client.BenchClient` (handles TTFT and decode-speed instrumentation automatically)
-4. Never use `print()` for metrics — only for progress. Structured data goes to files.
-
-### `BenchClient` interface
+## `BenchClient` interface (`lib/client.py`)
 
 ```python
 class BenchClient:
@@ -213,142 +203,23 @@ class BenchClient:
         #          .tool_calls, .raw_text, .error, .latency_ms
 ```
 
-### Tool-call task JSON schema
-
-```json
-{
-  "id": "01_read_file",
-  "description": "...",
-  "system_prompt": "...",
-  "user_message": "...",
-  "tools": [ /* standard OpenAI function-tool objects */ ],
-  "expected_tool_calls": [
-    { "name": "read_file", "must_include_args": ["path"] }
-  ],
-  "mock_tool_response": "...",
-  "difficulty": "simple | medium | hard",
-  "category": "file_read | file_write | search | multi_step | ..."
-}
-```
-
-`bench.py` auto-discovers all `.json` files in `tasks/`. Use `--task-filter <id>` for single-task debugging.
-
-### Scoring (`lib/scorer.py`)
-
-```python
-class ToolCallScore:
-    PASS         = "pass"          # Correct tool call, parsed successfully
-    FORMAT_ERROR = "format_error"  # Engine couldn't parse the model's output
-    DROPPED      = "dropped"       # Engine silently returned text-only
-    WRONG_TOOL   = "wrong_tool"    # Parsed but wrong tool name
-    WRONG_ARGS   = "wrong_args"    # Right tool, missing/wrong arguments
-    NO_CALL      = "no_call"       # Model made no tool call attempt
-    EXCEPTION    = "exception"     # Timeout, 400, 500
-```
-
-`DROPPED` or `FORMAT_ERROR` means the **engine parser is broken**, not the model.
-
-**Phase 0 pass criterion:** ≥95% of 30 tasks score PASS.
-
-### `metrics.json` schema
-
-```json
-{
-  "phase": "phase0_tool_reliability",
-  "timestamp": "2026-04-14T10:30:00Z",
-  "config": {
-    "engine": "vllm",
-    "engine_version": "0.19.2",
-    "model": "Qwen/Qwen3.5-35B-A3B-AWQ",
-    "quantization": "AWQ-INT4",
-    "gpu": "RTX 5090",
-    "gpu_id": 0,
-    "context_length": 114688,
-    "extra_args": "--tool-call-parser qwen3_coder"
-  },
-  "metrics": {},
-  "verdict": "PASS | FAIL | INCONCLUSIVE",
-  "notes": ""
-}
-```
-
-## Phase execution order and dependencies
-
-```
-Phase 0: Tool-call reliability          ← BLOCKER, run first
-  ├── 0.4: Chat template verification   ← run first within phase (~30 min)
-  ├── 0.1: Qwen3.5-35B-A3B on vLLM     ← if fails → test 0.3
-  ├── 0.2: Qwen3.5-35B-A3B on SGLang   ← if fails → eliminates SGLang for this model
-  └── 0.3: Qwen3-Coder-Next on vLLM    ← fallback if 0.1 fails
-
-Phase 1: Engine selection               ← Needs: Phase 0 winner
-  ├── 1.1: vLLM vs SGLang throughput
-  ├── 1.2: SGLang prefix reuse
-  ├── 1.3: vLLM prefix caching
-  └── 1.4: llama.cpp comparison
-
-Phase 2: Model selection                ← Needs: Phase 1 winner
-  ├── 2.1: Qwen3.5-35B vs Qwen3-Coder-30B (quality)
-  ├── 2.2: Thinker: Qwen3.5-27B vs R1-32B
-  ├── 2.3: Peak mode: Coder-Next vs best daily driver
-  ├── 2.4: Devstral tool-call reliability
-  └── 2.5: Dense + spec-decode vs MoE (speed)
-
-Phase 3: Architecture                   ← Needs: Phase 2 winners
-  ├── 3.1: Co-resident dual-model vs single Coder-Next (4 days)
-  ├── 3.2: LiteLLM routing accuracy (passive, runs during 3.1)
-  ├── 3.3: Mode swap timing
-  └── 3.4: Parallel swarm test
-
-Phase 4: Optimizations                  ← Can run in parallel with Phase 3
-  ├── 4.1: Unsloth UD vs standard quant quality
-  ├── 4.2: TurboQuant KV cache
-  ├── 4.3: Speculative decode on dense thinker
-  ├── 4.4: AWQ vs GGUF speed
-  └── 4.5: Context length OOM boundary
-
-Phase 5: Integration                    ← Needs: Phase 3 decision
-  ├── 5.1: Ripgrep pre-filtering
-  ├── 5.2: Small model file classifier
-  └── 5.3: MCP end-to-end
-
-Phase 6: Baselines                      ← No dependencies, run anytime
-  ├── 6.1: Cloud quality comparison
-  └── 6.2: Cost analysis
-```
-
 ## Code style
 
-- Python 3.12+, type hints everywhere, `async` for all API calls.
-- `httpx.AsyncClient` for raw HTTP; `openai.AsyncOpenAI` for chat completions.
-- `pydantic` for config/result schemas; `rich` for CLI progress and tables.
-- Shell scripts: `set -euo pipefail`, shellcheck-clean, POSIX-compatible.
-- Compose files: `docker compose` v2 CLI with podman-compose as backend.
+- Python 3.12+, type hints everywhere, `async` for API calls.
+- `httpx.AsyncClient` raw HTTP, `openai.AsyncOpenAI` for chat.
+- `pydantic` for config/result schemas, `rich` for CLI tables.
+- Shell: `set -euo pipefail`, shellcheck-clean.
+- Compose: `docker compose` v2 CLI with podman-compose backend.
 
-## Decisions already settled (do not re-evaluate)
+## Task suite scope — important caveat
 
-1. **No dense 70B with tensor parallelism.** PCIe x8/x8 without NVLink = 20–35 t/s. MoE at 200+ t/s wins.
-2. **System RAM is not VRAM.** KV cache in DDR5 = 50–80% speed loss. Keep everything in 32 GB GDDR7 per GPU.
-3. **KTransformers not viable.** i9-14900K lacks AMX.
-4. **Speculative decoding doesn't help MoE.** Only test on dense models (Phase 2.5, 4.3).
-5. **No Ollama.** Adds 10–30% overhead vs raw engine containers.
+The current task suites under `benchmarks/phase0_*/tasks/` and `benchmarks/phase2_*/tasks/` are coding-oriented (Python-heavy fix-the-race-condition, refactor-this-class, etc). They are a partial proxy for the operator's real workload. Over time, `TESTING_QUEUE.md` will add infra-specific task categories:
 
-## Decisions to be made by benchmarks
+- Shell + containerfile authoring
+- systemd unit / compose / podman-specific errors
+- Network and kernel tuning (sysctl, ethtool, tc)
+- Ceph/OpenStack/openstack-ansible troubleshooting
+- Cross-arch work (arm64 for Orange Pi, x86 for desktop)
+- RAG-assisted doc lookup flows (once MCP servers are wired)
 
-1. Does Qwen3.5-35B-A3B tool calling actually work? (Phase 0 — BLOCKER)
-2. vLLM or SGLang for MoE on 5090? (Phase 1)
-3. Which coder model? 35B-A3B vs 30B-A3B vs Coder-Next (Phase 2)
-4. Which thinker model? Qwen3.5-27B vs R1-32B vs none (Phase 2)
-5. Is multi-tier worth the complexity? (Phase 3)
-6. Does the LiteLLM router classify correctly? (Phase 3)
-
-## Known engine bugs (as of April 2026 — verify fix status before testing)
-
-| Bug | Engine | Impact | Workaround |
-|-----|--------|--------|------------|
-| Tool calls inside `<think>` silently dropped | vLLM 0.19 (PR #39055 open) | CRITICAL for thinking+tool models | Use `--reasoning-parser qwen3`; check PR status |
-| Qwen3.5 tool call JSON malformat | vLLM (PR #35347 merged?) | Format errors | Verify your vLLM version includes fix |
-| Wrong tool parser for qwen3.5 | Ollama (Issue #14493) | Tool calling completely broken | Don't use Ollama |
-| Qwen3.5 chat template broken | All HF-template engines | Malformed tool-call rendering | Use barubary's fixed template or Unsloth March 2026 GGUFs |
-| Spec decode crashes on hybrid SSM/MoE | llama.cpp (PR #20075 open) | Crash on Qwen3.5 MoE | Don't test spec decode on MoE |
-| Coder-Next CPU inference 5× slower | llama.cpp (Issue #19480) | MoE routing overhead | GPU-only: `--n-gpu-layers 99` |
+Do not assume a model that wins on the Python code suite also wins on these. When adding infra-shaped tasks, note this in the queue entry so reruns capture the expanded workload.

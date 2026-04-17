@@ -1,74 +1,143 @@
-# thresholds.yaml — pass/fail criteria for every benchmark phase.
+# thresholds.yaml — pass/fail criteria keyed by TESTING_QUEUE.md item_id.
 # lib/reporter.py reads this to emit PASS / FAIL / INCONCLUSIVE verdicts.
+#
+# Keys match item_id (T1.1, T1.2, ...). Generic metric thresholds at the bottom
+# apply to ad-hoc / debug runs.
 
-phase0_tool_reliability:
-  tool_call_success_rate:
-    pass: 0.95        # ≥95% of tasks score PASS
-    inconclusive: 0.80
-    # below 0.80 → FAIL
-  critical_error_rate:
-    # DROPPED or FORMAT_ERROR indicates a broken engine parser
-    pass: 0.00        # zero tolerance
-    inconclusive: 0.03
+# ============================================================
+# Tier 1 — architecture-defining
+# ============================================================
 
-phase1_engine_selection:
-  ttft_p50_ms:
-    pass: 500         # first token within 500 ms at concurrency=1
-    inconclusive: 1000
-  decode_tps_mean:
-    pass: 150         # ≥150 tokens/s decode on MoE model
-    inconclusive: 80
-
-phase1_prefix_cache:
-  prefix_reuse_speedup:
-    # ratio: ttft_with_cache / ttft_cold — lower is better
-    pass: 0.50        # cache cuts TTFT by ≥50%
-    inconclusive: 0.75
-
-phase2_model_selection:
-  # Quality is human-evaluated — reporter checks completion rate only
-  task_completion_rate:
-    pass: 1.00        # all tasks returned a non-empty response
-    inconclusive: 0.90
-  decode_tps_mean:
-    pass: 100
-    inconclusive: 60
-
-phase3_architecture:
-  swap_latency_s:
-    pass: 30          # model hot-swap completes within 30 s (weights page-cached)
-    inconclusive: 60
-  routing_accuracy:
-    pass: 0.95        # LiteLLM routes to correct model ≥95% of the time
-    inconclusive: 0.85
-  swarm_speedup:
-    # wall time ratio: parallel / sequential — lower is better
-    pass: 0.60        # parallel is ≥40% faster
+T1.1_sleep_mode_operational_under_podman:
+  freed_vram_fraction:
+    pass: 0.80                  # ≥80% of allocated VRAM freed on sleep
+    inconclusive: 0.60
+  wake_latency_s:
+    pass: 10
+    inconclusive: 20
+  post_wake_tps_ratio:
+    pass: 0.95                  # post-wake ≥95% of pre-sleep TPS
     inconclusive: 0.85
 
-phase4_optimizations:
-  quant_quality_delta:
-    # perplexity delta vs bf16 baseline — lower is better
-    pass: 0.05        # UD quant within 5% perplexity of bf16
-    inconclusive: 0.10
-  kv_cache_speedup:
-    pass: 1.20        # TurboQuant KV gives ≥20% throughput improvement
-    inconclusive: 1.05
-  spec_decode_speedup:
-    pass: 1.30        # spec decode gives ≥30% speedup on dense model
-    inconclusive: 1.10
+T1.2_concurrent_two_vllm_processes_shared_gpus:
+  concurrent_vs_isolated_tps_ratio:
+    pass: 0.80                  # concurrent-decode ≥80% of isolated-decode
+    inconclusive: 0.60
+  prefill_contention_factor:
+    # ttft under concurrent prefill / ttft under isolated prefill — lower is better
+    pass: 2.0                   # ≤2× is acceptable
+    inconclusive: 3.0
+  crashes_or_corruption:
+    pass: 0                     # zero tolerance
+    inconclusive: 0
 
-phase5_integration:
-  search_filter_reduction:
-    # fraction of tokens eliminated by ripgrep pre-filtering
-    pass: 0.50
-    inconclusive: 0.20
-  mcp_e2e_success_rate:
+T1.3_qwen3_coder_next_awq_tp2_viability:
+  decode_tps_seq1:
+    pass: 40
+    inconclusive: 25
+  tool_call_pass_rate:
     pass: 0.95
     inconclusive: 0.80
+  prefill_32k_tokens_per_s:
+    pass: 1500                  # orientation number; behemoth is not used for heavy prefill
+    inconclusive: 800
 
-phase6_baselines:
-  # Cloud comparison is informational — no hard pass/fail
-  quality_parity:
-    pass: 0.90        # local model within 10% of cloud on eval rubric
-    inconclusive: 0.75
+T1.4_th03_token_budget_fix:
+  non_empty_answer_rate:
+    pass: 1.00                  # all 5 runs produce a non-empty answer
+    inconclusive: 0.80
+
+# ============================================================
+# Tier 2 — model shortlist
+# ============================================================
+
+T2.1_glm47_flash_mla_verification:
+  kv_bytes_per_token:
+    # MLA target ~54 KB/token; GQA fallback ~98 KB/token
+    pass_below: 60000
+    inconclusive_below: 75000
+
+T2.2_coder_shootout_glm47_vs_qwen3coder30b:
+  tool_call_pass_rate:
+    pass: 0.95
+    inconclusive: 0.80
+  quality_win_fraction:
+    # fraction of tasks where candidate's human score ≥ baseline's
+    pass: 0.60                  # candidate wins 60%+ of tasks → swap baseline
+    inconclusive: 0.45
+  tps_regression_max:
+    # (baseline_tps - candidate_tps) / baseline_tps
+    pass: 0.20                  # ≤20% TPS regression is tolerable for quality wins
+    inconclusive: 0.40
+
+T2.3_thinker_shootout_glm45_air_vs_qwen35_27b:
+  quality_delta_mean_1_to_5:
+    pass: 0.3                   # candidate's mean quality ≥ baseline + 0.3
+    inconclusive: 0.0
+  non_empty_answer_rate:
+    pass: 1.00
+    inconclusive: 0.90
+
+T2.4_behemoth_quality_vs_coder:
+  quality_delta_on_hard_subset:
+    pass: 1.0                   # behemoth wins by ≥1.0 on 1–5 scale on hard subset
+    inconclusive: 0.5
+
+# ============================================================
+# Tier 3 — optimization axes
+# ============================================================
+
+T3.1_kv_cache_q8_q4_on_thinker:
+  quality_regression_vs_baseline:
+    # max allowed quality drop (1-5 scale) vs bf16-equivalent KV
+    pass: 0.2
+    inconclusive: 0.5
+  context_viable_min_tokens:
+    pass: 30000
+    inconclusive: 16000
+
+T3.2_mtp_spec_decode_on_blackwell_sm120:
+  tps_speedup_ratio:
+    pass: 1.15                  # ≥15% speedup with MTP
+    inconclusive: 1.00          # no regression
+    # <1.0 means MTP regresses → disable
+
+T3.3_qwen3_next_mtp_on_behemoth:
+  tps_speedup_ratio:
+    pass: 1.15
+    inconclusive: 1.00
+
+T3.4_prefix_cache_survival_across_sleep:
+  post_wake_prefill_ratio_vs_warm:
+    # 1.0 = full cold prefill, 0.0 = as fast as cached
+    pass: 0.25                  # post-wake prefill ≤25% of cold = cache survived
+    inconclusive: 0.60
+
+# ============================================================
+# Tier 5 — integration
+# ============================================================
+
+T5.1_opencode_endpoint_binding_with_subagents:
+  routing_determinism:
+    pass: 1.00                  # every subagent call hits its bound endpoint
+    inconclusive: 0.95
+  failure_surface_clean:
+    # did endpoint kill produce a clear error to the user, no hangs
+    pass: true
+
+# ============================================================
+# Generic fallbacks for ad-hoc runs not tied to a queue item
+# ============================================================
+
+generic:
+  fallback_behavior: INCONCLUSIVE  # written to metrics.json when no item_id match found
+  tool_call_success_rate:
+    pass: 0.95
+    inconclusive: 0.80
+  decode_tps_mean:
+    # applied only when `role: coder` is in config — else not meaningful
+    pass: 100
+    inconclusive: 60
+  ttft_p50_ms:
+    pass: 500
+    inconclusive: 1000

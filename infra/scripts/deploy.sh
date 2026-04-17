@@ -1,100 +1,150 @@
 #!/usr/bin/env bash
-# deploy.sh <engine> <gpu> <model_id> [extra engine args...]
+# deploy.sh <engine> <placement> <model_id> [extra engine args...]
 #
-# Brings up a single inference engine container on the specified GPU using CDI
-# GPU passthrough (nvidia.com/gpu=N), which works with rootless podman.
+# Brings up a single inference engine container using CDI GPU passthrough
+# (nvidia.com/gpu=N), which works with rootless podman.
 #
-# Sources config/hardware.env for port and GPU mappings.
+# <placement> values:
+#   gpu0       — single GPU 0 (legacy; use for debugging only)
+#   gpu1       — single GPU 1 (legacy; use for debugging only)
+#   tp2        — both GPUs, TP=2 (alias for tp2a; default for new queue items)
+#   tp2a       — both GPUs, TP=2, port slot A (coder, :30000)
+#   tp2b       — both GPUs, TP=2, port slot B (thinker, :30001)
+#   tp2c       — both GPUs, TP=2, port slot C (behemoth, :30002)
+#
+# Named args (consumed by this script; not forwarded to the engine):
+#   --ctx N          set --max-model-len N  (default: 32768)
+#   --gpu-mem-util F set --gpu-memory-utilization F (default: 0.90)
+#   --model-file F   llama.cpp only: GGUF filename inside MODEL_CACHE
+#
+# Environment variables forwarded to the container if set in the caller:
+#   HF_TOKEN, HUGGING_FACE_HUB_TOKEN
+#   VLLM_SERVER_DEV_MODE   — set to 1 to enable Sleep Mode API (/sleep, /wake_up)
+#   VLLM_ALLOW_LONG_MAX_MODEL_LEN  — set to 1 for models with >32k native context
 #
 # Examples:
-#   ./infra/scripts/deploy.sh vllm gpu0 QuantTrio/Qwen3.5-35B-A3B-AWQ --ctx 114688
-#   ./infra/scripts/deploy.sh sglang gpu1 Qwen/Qwen3-Coder-30B-A3B-Instruct-AWQ
-#   ./infra/scripts/deploy.sh llamacpp gpu0 "" --model-file Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf
+#   ./infra/scripts/deploy.sh vllm tp2 QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ \
+#       --gpu-mem-util 0.40 --tool-call-parser qwen3_coder --reasoning-parser qwen3
 #
-# Download a model before first run (token required for gated repos):
-#   export HF_TOKEN=hf_...
-#   podman run --rm --entrypoint hf -e HF_TOKEN -v /srv/ai/models:/root/.cache/huggingface:z \
-#     vllm/vllm-openai:latest download <org/repo>
-# Or use: ./infra/scripts/precache-models.sh
+#   VLLM_SERVER_DEV_MODE=1 \
+#   ./infra/scripts/deploy.sh vllm tp2 QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ \
+#       --gpu-mem-util 0.85 --tool-call-parser qwen3_coder --reasoning-parser qwen3
+#
+#   ./infra/scripts/deploy.sh vllm tp2b QuantTrio/Qwen3.5-27B-AWQ \
+#       --gpu-mem-util 0.40 --tool-call-parser qwen3_coder --reasoning-parser qwen3 \
+#       --max-num-seqs 1
+#
+#   ./infra/scripts/deploy.sh sglang gpu0 Qwen/Qwen3-Coder-30B-A3B-Instruct-AWQ
+#
+#   ./infra/scripts/deploy.sh llamacpp gpu0 "" \
+#       --model-file Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
-ENGINE="${1:?Usage: deploy.sh <engine> <gpu> <model_id> [extra_args...]}"
-GPU="${2:?Usage: deploy.sh <engine> <gpu> <model_id> [extra_args...]}"
+ENGINE="${1:?Usage: deploy.sh <engine> <placement> <model_id> [extra_args...]}"
+PLACEMENT="${2:?Usage: deploy.sh <engine> <placement> <model_id> [extra_args...]}"
 MODEL_ID="${3:-}"
 shift 3
 
-# ── Parse --ctx and --model-file from extra args ──────────────────────────────
+# ── Parse named args out of extra args ────────────────────────────────────────
 CTX_LEN="${CTX_LEN:-32768}"
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
 MODEL_FILE=""
 REMAINING_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --ctx)        CTX_LEN="$2";    shift 2 ;;
-        --model-file) MODEL_FILE="$2"; shift 2 ;;
-        *)            REMAINING_ARGS+=("$1"); shift ;;
+        --ctx)           CTX_LEN="$2";      shift 2 ;;
+        --gpu-mem-util)  GPU_MEM_UTIL="$2"; shift 2 ;;
+        --model-file)    MODEL_FILE="$2";   shift 2 ;;
+        *)               REMAINING_ARGS+=("$1"); shift ;;
     esac
 done
 EXTRA_ARGS=("${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}")
 
-# ── Map engine+gpu to image, port, GPU ID ─────────────────────────────────────
-case "${ENGINE}-${GPU}" in
+# ── Map engine+placement to image, port, GPU list, TP size ────────────────────
+TP_SIZE=1  # overridden for tp2* placements
+case "${ENGINE}-${PLACEMENT}" in
     vllm-gpu0)
         IMAGE="vllm/vllm-openai:latest"
         PORT="${PORT_VLLM_GPU0}"
-        GPU_ID="${GPU_0_ID}"
+        GPU_IDS=("${GPU_0_ID}")
         ;;
     vllm-gpu1)
         IMAGE="vllm/vllm-openai:latest"
         PORT="${PORT_VLLM_GPU1}"
-        GPU_ID="${GPU_1_ID}"
+        GPU_IDS=("${GPU_1_ID}")
+        ;;
+    vllm-tp2|vllm-tp2a)
+        IMAGE="vllm/vllm-openai:latest"
+        PORT="${PORT_VLLM_TP2_A}"
+        GPU_IDS=("${GPU_0_ID}" "${GPU_1_ID}")
+        TP_SIZE=2
+        ;;
+    vllm-tp2b)
+        IMAGE="vllm/vllm-openai:latest"
+        PORT="${PORT_VLLM_TP2_B}"
+        GPU_IDS=("${GPU_0_ID}" "${GPU_1_ID}")
+        TP_SIZE=2
+        ;;
+    vllm-tp2c)
+        IMAGE="vllm/vllm-openai:latest"
+        PORT="${PORT_VLLM_TP2_C}"
+        GPU_IDS=("${GPU_0_ID}" "${GPU_1_ID}")
+        TP_SIZE=2
         ;;
     sglang-gpu0)
         IMAGE="lmsysorg/sglang:latest"
         PORT="${PORT_SGLANG_GPU0}"
-        GPU_ID="${GPU_0_ID}"
+        GPU_IDS=("${GPU_0_ID}")
         ;;
     sglang-gpu1)
         IMAGE="lmsysorg/sglang:latest"
         PORT="${PORT_SGLANG_GPU1}"
-        GPU_ID="${GPU_1_ID}"
+        GPU_IDS=("${GPU_1_ID}")
         ;;
     llamacpp-gpu0)
         IMAGE="ghcr.io/ggerganov/llama.cpp:server-cuda"
         PORT="${PORT_LLAMACPP_GPU0}"
-        GPU_ID="${GPU_0_ID}"
+        GPU_IDS=("${GPU_0_ID}")
         ;;
     *)
-        echo "[deploy] ERROR: Unknown engine/gpu combo: ${ENGINE}/${GPU}" >&2
-        echo "         Valid: vllm-gpu0, vllm-gpu1, sglang-gpu0, sglang-gpu1, llamacpp-gpu0" >&2
+        echo "[deploy] ERROR: Unknown engine/placement combo: ${ENGINE}/${PLACEMENT}" >&2
+        echo "         Valid engine values: vllm, sglang, llamacpp" >&2
+        echo "         Valid placement values: gpu0, gpu1, tp2, tp2a, tp2b, tp2c" >&2
+        echo "         (tp2/tp2a/tp2b/tp2c are vllm-only; use gpu0/gpu1 for sglang/llamacpp)" >&2
         exit 1
         ;;
 esac
 
-CONTAINER_NAME="bench-${ENGINE}-${GPU}"
-CDI_DEVICE="nvidia.com/gpu=${GPU_ID}"
+# ── Build CDI device list and NVIDIA_VISIBLE_DEVICES ──────────────────────────
+CONTAINER_NAME="bench-${ENGINE}-${PLACEMENT}"
+CDI_DEVICE_ARGS=()
+for _gid in "${GPU_IDS[@]}"; do
+    CDI_DEVICE_ARGS+=("--device" "nvidia.com/gpu=${_gid}")
+done
+NVIDIA_VISIBLE_STR=$(IFS=,; echo "${GPU_IDS[*]}")
 
-echo "[deploy] Engine=${ENGINE}  GPU=${GPU}  Model=${MODEL_ID:-${MODEL_FILE}}  Port=${PORT}  CTX=${CTX_LEN}"
-echo "[deploy] CDI device: ${CDI_DEVICE}  Container: ${CONTAINER_NAME}"
-[[ ${#EXTRA_ARGS[@]} -gt 0 ]] && echo "[deploy] Extra args: ${EXTRA_ARGS[*]}"
+echo "[deploy] Engine=${ENGINE}  Placement=${PLACEMENT}  TP=${TP_SIZE}"
+echo "[deploy] Model=${MODEL_ID:-${MODEL_FILE}}  Port=${PORT}  CTX=${CTX_LEN}  gpu-mem-util=${GPU_MEM_UTIL}"
+echo "[deploy] GPUs=${NVIDIA_VISIBLE_STR}  Container=${CONTAINER_NAME}"
+[[ ${#EXTRA_ARGS[@]} -gt 0 ]] && echo "[deploy] Extra engine args: ${EXTRA_ARGS[*]}"
 
 # ── Tear down any existing container with this name ───────────────────────────
 if podman container exists "${CONTAINER_NAME}" 2>/dev/null; then
     echo "[deploy] Removing existing container ${CONTAINER_NAME}..."
     podman stop "${CONTAINER_NAME}" 2>/dev/null || true
-    podman rm  "${CONTAINER_NAME}" 2>/dev/null || true
+    podman rm   "${CONTAINER_NAME}" 2>/dev/null || true
 fi
 
 # ── Build engine-specific podman run command ──────────────────────────────────
-# Common flags shared by all engines.
 COMMON=(
     podman run -d
     --name "${CONTAINER_NAME}"
-    --device "${CDI_DEVICE}"
-    -e "NVIDIA_VISIBLE_DEVICES=${GPU_ID}"
+    "${CDI_DEVICE_ARGS[@]}"
+    -e "NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_STR}"
     -e "NVIDIA_DRIVER_CAPABILITIES=compute,utility"
     -e "HF_HOME=/root/.cache/huggingface"
     -e "HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}"
@@ -102,9 +152,12 @@ COMMON=(
     --shm-size=4g
     --restart=no
 )
-# Forward HF credentials if set in the caller's environment.
-[[ -n "${HF_TOKEN:-}" ]]             && COMMON+=(-e "HF_TOKEN=${HF_TOKEN}")
-[[ -n "${HUGGING_FACE_HUB_TOKEN:-}" ]] && COMMON+=(-e "HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}")
+
+# Forward credentials and well-known vLLM env vars if set by caller.
+[[ -n "${HF_TOKEN:-}" ]]                        && COMMON+=(-e "HF_TOKEN=${HF_TOKEN}")
+[[ -n "${HUGGING_FACE_HUB_TOKEN:-}" ]]          && COMMON+=(-e "HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}")
+[[ -n "${VLLM_SERVER_DEV_MODE:-}" ]]            && COMMON+=(-e "VLLM_SERVER_DEV_MODE=${VLLM_SERVER_DEV_MODE}")
+[[ -n "${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-}" ]]   && COMMON+=(-e "VLLM_ALLOW_LONG_MAX_MODEL_LEN=${VLLM_ALLOW_LONG_MAX_MODEL_LEN}")
 
 case "${ENGINE}" in
     vllm)
@@ -114,14 +167,20 @@ case "${ENGINE}" in
         for _a in "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
             [[ "$_a" == "--tool-call-parser" ]] && VLLM_TOOL_ARGS=(--enable-auto-tool-choice) && break
         done
+
+        # Inject --tensor-parallel-size for TP=2 placements.
+        VLLM_TP_ARGS=()
+        [[ "${TP_SIZE}" -gt 1 ]] && VLLM_TP_ARGS=(--tensor-parallel-size "${TP_SIZE}")
+
         CMD=(
             "${COMMON[@]}"
             -v "${MODEL_CACHE}:/root/.cache/huggingface:z"
             "${IMAGE}"
             --model "${MODEL_ID}"
             --port 8000
-            --gpu-memory-utilization 0.90
+            --gpu-memory-utilization "${GPU_MEM_UTIL}"
             --max-model-len "${CTX_LEN}"
+            "${VLLM_TP_ARGS[@]+"${VLLM_TP_ARGS[@]}"}"
             "${VLLM_TOOL_ARGS[@]+"${VLLM_TOOL_ARGS[@]}"}"
             "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
         )
@@ -170,18 +229,17 @@ echo ""
 echo "[deploy] ── Live log stream (Ctrl-C does not stop the container) ──"
 echo "[deploy] Follow logs manually: podman logs -f ${CONTAINER_NAME}"
 echo ""
-podman logs -f "${CONTAINER_NAME}" 2>&1 | sed "s/^/  [${ENGINE}-${GPU}] /" &
+podman logs -f "${CONTAINER_NAME}" 2>&1 | sed "s/^/  [${ENGINE}-${PLACEMENT}] /" &
 LOGS_PID=$!
 
 # ── Wait for the health endpoint ──────────────────────────────────────────────
 HEALTH_URL="http://localhost:${PORT}/health"
 # 900s timeout: large models (35B AWQ) can take 5–10 min to load from page cache;
-# first-run downloads take much longer.
+# first-run downloads take much longer. TP=2 startup is comparable to single-GPU.
 echo "[deploy] Waiting for ${HEALTH_URL} (timeout=900s) ..."
 "${REPO_ROOT}/infra/scripts/wait-healthy.sh" "${HEALTH_URL}" 900 "${CONTAINER_NAME}"
 WAIT_RC=$?
 
-# Stop the background log stream.
 kill "${LOGS_PID}" 2>/dev/null || true
 wait "${LOGS_PID}" 2>/dev/null || true
 

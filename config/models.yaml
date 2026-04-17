@@ -1,130 +1,216 @@
-# models.yaml — registry of all models used across benchmark phases.
-# Fields:
-#   hf_repo:      HuggingFace repo id (used for huggingface-cli download)
-#   quant:        quantization label
-#   format:       awq | gguf | bf16
-#   vram_gb:      estimated VRAM usage at default context (single GPU)
-#   ctx_default:  default --max-model-len to pass to the engine
-#   engines:      engines known to support this model
-#   notes:        known issues or workarounds
+# models.yaml — registry of all models considered across the research plan.
+#
+# Status tiers (mirror DECISIONS.md):
+#   BASELINE     — currently in use, proven on our hardware
+#   CANDIDATE    — active test item in TESTING_QUEUE.md
+#   ELIMINATED   — decided against, see DECISIONS.md for rationale
+#   REVIEW       — was decided on outdated single-GPU assumption; revisit if needed
+#
+# Field notes:
+#   vram_gb:     AWQ weight size at TP=1. For TP=2, divide by 2 plus ~1 GiB allocator overhead per card.
+#                bf16 sizes are not tracked here — we don't deploy bf16.
+#   ctx_default: --max-model-len value; actual workable context depends on KV cache dtype and
+#                concurrent model load (see ARCHITECTURE.md for TP=2 gpu-mem-util math).
+#   engines:     engines known to *load* the model. Does not imply all features work (see notes).
 
 models:
 
-  # ── Primary coder (MoE, daily driver candidate) ───────────────────────────
+  # ============================================================
+  # CODER ROLE
+  # ============================================================
+
+  # ── BASELINE coder ─────────────────────────────────────────────────────
+  qwen3_coder_30b_awq:
+    status: BASELINE
+    role: coder
+    hf_repo: QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 18
+    ctx_default: 32768
+    engines: [vllm, sglang]
+    # flags.vllm: space-separated flags passed verbatim to vLLM CLI. Use exact flag names from
+    # `vllm serve --help`. Do not invent flag names — verify against your running vLLM version.
+    flags:
+      vllm: "--tool-call-parser qwen3_coder --reasoning-parser qwen3"
+    measured:
+      single_gpu_seq1_tps: 251
+      single_gpu_c4_agg_tps: 730
+      tool_call_pass_rate: 1.00
+    notes: >
+      Current coder baseline. See PHASE2_RESULTS.md. On TP=2 the expected decode is
+      close to single-GPU (A3B MoE allreduce traffic is <2% of PCIe 5.0 x8 bandwidth).
+      Concurrent dual-process on shared GPUs is test item T1.2.
+
+  # ── CANDIDATE coder ────────────────────────────────────────────────────
+  glm47_flash_awq:
+    status: CANDIDATE
+    role: coder
+    hf_repo: cyankiwi/GLM-4.7-Flash-AWQ-4bit    # also cpatonn publishes
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 18
+    ctx_default: 65536        # aspirational with MLA; verify per T2.1
+    engines: [vllm, sglang]
+    flags:
+      vllm: "--tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice"
+    requires_vllm: ">=0.15.0"
+    known_bugs:
+      - "MLA auto-detection was broken at release (KV cache 10× bloated). One-line fix for glm4_moe_lite in model_arch_config_convertor.py. Verify per T2.1 before trusting benchmark numbers."
+      - "MTP spec decode: 10× throughput regression reported on B200. Status on consumer Blackwell sm_120 unknown. Do NOT enable --speculative-config.method mtp without measuring via T3.2."
+    test_items: [T2.1, T2.2, T3.2]
+    notes: >
+      30B-A3B MoE. Z.ai claims 59.2% SWE-bench Verified, 79.5% τ²-Bench.
+      Their published comparison is against Qwen3-30B-A3B general, NOT our
+      Qwen3-Coder-30B-A3B baseline — real gap vs our coder is unknown until T2.2.
+
+  # ── REVIEW (decided on old single-GPU assumption) ──────────────────────
   qwen35_35b_a3b_awq:
+    status: REVIEW
+    role: coder
     hf_repo: QuantTrio/Qwen3.5-35B-A3B-AWQ
     quant: AWQ-INT4
     format: awq
     vram_gb: 22
-    ctx_default: 16384   # 32 GB GPU: only ~0.57 GiB free after model load; max viable ~26400
-    engines: [vllm]      # SGLang: KeyError on w2_weight — MoE AWQ weight-map bug in current image
-    notes: >
-      Use --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enforce-eager on vLLM.
-      --enforce-eager required: CUDA graph profiling (51 batch sizes) OOMs on 32 GB after 22 GiB model.
-      SGLang PERMANENTLY INCOMPATIBLE: lmsysorg/sglang:latest qwen3_5.py load_weights() expects fused
-      experts.w2_weight tensor but QuantTrio stores per-expert experts.N.w2.weight tensors.
-      Neither --quantization awq_marlin nor any other runtime flag fixes this — it is a code bug in
-      SGLang's qwen3_5.py:1662 weight loader. Patch required. Skip all SGLang tests for this model.
-      Chat template may be broken on HF — use barubary's fixed template.
-      vLLM PR #39055 (think+tool drop) workaround: --reasoning-parser qwen3.
-
-  qwen35_35b_a3b_gguf:
-    hf_repo: unsloth/Qwen3.5-35B-A3B-GGUF
-    file: Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf
-    quant: GGUF-Q4_K_XL (Unsloth UD)
-    format: gguf
-    vram_gb: 23
-    ctx_default: 32768
-    engines: [llamacpp]
-    notes: >
-      Unsloth UD quant — higher quality than standard Q4_K_M.
-      Do NOT test spec decode (llama.cpp PR #20075).
-
-  # ── Coder variant (30B MoE) ───────────────────────────────────────────────
-  qwen3_coder_30b_awq:
-    hf_repo: QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ
-    quant: AWQ-INT4
-    format: awq
-    vram_gb: 20
-    ctx_default: 65536
-    engines: [vllm, sglang]
-
-  # ── Peak / frontier coder (dense 80B — single GPU won't fit, needs swap) ──
-  qwen3_coder_next:
-    hf_repo: Qwen/Qwen3-Coder-Next
-    quant: bf16
-    format: bf16
-    vram_gb: 160   # too large for single GPU — load in GGUF Q4 split or skip
     ctx_default: 32768
     engines: [vllm]
+    known_bugs:
+      - "SGLang PERMANENTLY INCOMPATIBLE: qwen3_5.py:1662 weight-loader expects fused experts.w2_weight but QuantTrio stores per-expert tensors. Code bug, not config. Skip SGLang for this model until patched upstream."
+      - "vLLM PR #39055 (think+tool drop): use --reasoning-parser qwen3 as workaround."
+    why_review: >
+      Eliminated at 22 t/s with --enforce-eager on SINGLE GPU because 22 GiB
+      weights left <1 GiB headroom (CUDA graph profiling needs ~1.03 GiB, so
+      graphs had to be disabled → 10× penalty). On TP=2, per-card weight load
+      drops to ~11 GiB leaving ~16+ GiB per card for graphs + KV. The original
+      failure reason does not apply to TP=2. Not currently a priority (our coder
+      baseline is strong), but this model is not dead in principle. If revived,
+      queue as new T-item.
     notes: >
-      Only viable as GGUF on llamacpp with full GPU offload (--n-gpu-layers 99).
-      CPU inference is 5x slower than expected (llama.cpp issue #19480).
+      Keep the SGLang incompatibility note above — that is permanent until patched.
 
-  # ── Thinker models ────────────────────────────────────────────────────────
-  # NOTE: bf16 variants of 27B/32B models DO NOT fit in 32 GB GDDR7.
-  #   Qwen3.5-27B bf16 = ~50 GiB weights (27B × 2 bytes), OOMs at 30.5 GiB loaded.
-  #   R1-32B bf16 = ~60 GiB weights (32B × 2 bytes), OOMs at 30.6 GiB loaded.
-  #   GPU has 31.33 GiB usable VRAM. AWQ INT4 is required (~13-16 GiB).
+  # ============================================================
+  # THINKER ROLE
+  # ============================================================
 
-  qwen35_27b:
-    hf_repo: Qwen/Qwen3.5-27B
-    quant: bf16
-    format: bf16
-    vram_gb: 50   # CORRECTED: bf16 27B = ~50 GiB — does NOT fit in 32 GB GPU
-    ctx_default: 32768
-    engines: [vllm, sglang]
-    notes: >
-      bf16 DOES NOT FIT in 32 GB. Confirmed OOM at 30.5 GiB loaded (needs ~50 GiB total).
-      Use AWQ INT4 variant instead (~13 GiB). See qwen35_27b_awq below.
-
+  # ── BASELINE thinker (with caveat) ─────────────────────────────────────
   qwen35_27b_awq:
+    status: BASELINE
+    role: thinker
     hf_repo: QuantTrio/Qwen3.5-27B-AWQ
     quant: AWQ-INT4
     format: awq
     vram_gb: 14
     ctx_default: 32768
     engines: [vllm]
+    flags:
+      vllm: "--tool-call-parser qwen3_coder --reasoning-parser qwen3 --max-num-seqs 1"
+    measured:
+      single_gpu_seq1_tps: 76
+      quality_mean_8task: 4.0
+    outstanding_defect:
+      - "th03_architecture_tradeoffs: <think> consistently exhausts 8192-token budget, empty output. Fix: raise to 16384 (test T1.4). Until fixed, route architecture-heavy tasks elsewhere."
     notes: >
-      AWQ INT4 — loads 19.78 GiB. Hybrid SSM/transformer (Qwen3_5ForConditionalGeneration,
-      GDN/FLA layers). Default vLLM CUDA graph profiling OOMs: 51 batch sizes need 1.53 GiB
-      but only 1.11 GiB free. Fix: --max-num-seqs 1 limits profiling to 1 batch size (0.04 GiB
-      actual), CUDA graphs active. CONFIRMED 76 t/s at max-num-seqs=1 (Phase 2.2, 2026-04-15).
-      Use --tool-call-parser qwen3_coder --reasoning-parser qwen3 --max-num-seqs 1 on vLLM.
-      Do NOT use --enforce-eager (cuts speed to 24 t/s).
-      361k downloads/month. Same QuantTrio quantizer as qwen3_coder_30b_awq.
+      Hybrid SSM/transformer (Qwen3_5ForConditionalGeneration, GDN/FLA layers).
+      --max-num-seqs 1 required to keep CUDA graphs active on single GPU (graph
+      profiling with 51 batch sizes needs 1.53 GiB, but only 1.11 GiB free
+      after 19.78 GiB load). On TP=2 with more headroom, higher --max-num-seqs
+      may be viable — flag for T1.2 / T2.3.
 
-  deepseek_r1_32b:
-    hf_repo: deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
-    quant: bf16
-    format: bf16
-    vram_gb: 60   # CORRECTED: bf16 32B = ~60 GiB — does NOT fit in 32 GB GPU
+  # ── CANDIDATE thinker ──────────────────────────────────────────────────
+  glm45_air_awq:
+    status: CANDIDATE
+    role: thinker
+    hf_repo: cpatonn/GLM-4.5-Air-AWQ-4bit
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 55       # across TP=2 → ~28 GiB per card for weights alone
     ctx_default: 32768
-    engines: [vllm, sglang]
+    engines: [vllm]
+    flags:
+      vllm: "--tool-call-parser glm45 --reasoning-parser glm45 --enable-auto-tool-choice"
+    tp_constraints:
+      - "AWQ group_size=64 → vLLM CompressedTensorsWNA16MarlinMoEMethod kernel caps tensor_parallel_size at 2. Fine for us (TP=2 is the target)."
+      - "Does not fit alongside the coder at gpu-mem 0.40 each — would need ~0.55+ gpu-mem-util for thinker alone. Revisit concurrent-dual viability if picked."
+    test_items: [T2.3]
     notes: >
-      bf16 DOES NOT FIT in 32 GB. Confirmed OOM at 30.6 GiB loaded (needs ~60 GiB total).
-      Use AWQ INT4 variant instead (~16 GiB). See deepseek_r1_32b_awq below.
+      106B total / 12B active MoE. Hybrid thinking+non-thinking modes. Strong
+      on tool invocation and agentic benchmarks per Z.ai tech report. Larger
+      VRAM footprint than Qwen3.5-27B-AWQ means the concurrent-dual assumption
+      needs re-validation if GLM-4.5-Air wins T2.3.
 
+  # ── ELIMINATED thinker ─────────────────────────────────────────────────
   deepseek_r1_32b_awq:
+    status: ELIMINATED
+    role: thinker
     hf_repo: casperhansen/deepseek-r1-distill-qwen-32b-awq
     quant: AWQ-INT4
     format: awq
     vram_gb: 16
     ctx_default: 32768
     engines: [vllm]
-    notes: >
-      AWQ INT4 — fits in 32 GB with ~15 GiB headroom.
-      Architecture: Qwen2ForCausalLM. Use --reasoning-parser deepseek_r1 on vLLM.
+    flags:
+      vllm: "--reasoning-parser deepseek_r1"
+    measured:
+      single_gpu_seq1_tps: 74
+      quality_mean_8task: 2.6
+    elimination_reason: >
+      Quality 2.6/5 vs Qwen3.5-27B 4.0/5 across task categories — not marginally
+      worse but structurally worse (surface fixes, wrong diagnoses, misses
+      consistency-scenario points). TP=2 rehab not worth the cycles.
 
-  # ── Coding assistant alternative ──────────────────────────────────────────
+  # ============================================================
+  # BEHEMOTH ROLE
+  # ============================================================
+
+  # ── CANDIDATE behemoth ─────────────────────────────────────────────────
+  qwen3_coder_next_awq:
+    status: CANDIDATE
+    role: behemoth
+    hf_repo: cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 42       # across TP=2 → ~22 GiB per card
+    ctx_default: 32768           # 262144 supported with VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+    engines: [vllm]
+    flags:
+      vllm: "--tool-call-parser qwen3_coder --enable-auto-tool-choice"
+    env:
+      - "VLLM_ALLOW_LONG_MAX_MODEL_LEN=1   # required"
+    requires_vllm: ">=0.15.0"
+    known_bugs:
+      - "MTP (qwen3_next_mtp) spec decode: status on sm_120 unverified. Do not enable by default; test via T3.3."
+    test_items: [T1.3, T2.4, T3.3]
+    notes: >
+      80B-A3B MoE with hybrid attention. Originally blocked because GGUF-only
+      and bf16 doesn't fit one GPU. AWQ-4bit publication makes TP=2 deployment
+      viable. Serves as the on-demand behemoth via Sleep Mode — kept asleep
+      with gpu-mem-util 0.85, woken when the coder/thinker pair is insufficient.
+      Only path to behemoth tier — if T1.3 fails, we become two-tier.
+
+  # ============================================================
+  # ELIMINATED — do not re-add to queue without new reason
+  # ============================================================
+
   devstral:
+    status: ELIMINATED
+    role: coder
     hf_repo: mistralai/Devstral-Small-2505
     quant: bf16
     format: bf16
-    vram_gb: 30   # CORRECTED: confirmed OOM at 30.39 GiB loaded (needs ~32 GiB total)
-    ctx_default: 32768
-    engines: [vllm]
-    notes: >
-      ELIMINATED (Phase 2.4, 2026-04-15). bf16 OOMs at 30.39 GiB (needs ~32 GiB).
-      Even if quantized, lower quality than Qwen3-Coder-30B-AWQ and minimal reasoning depth.
-      Do not pursue further.
+    elimination_reason: >
+      bf16 OOMs at 30.4 GiB single-GPU. Quantized variants available but quality
+      is below Qwen3-Coder-30B-AWQ on our tasks, with minimal reasoning. No path
+      to viability even on TP=2. See DECISIONS.md.
+
+  # ============================================================
+  # OBSOLETE ENTRIES (bf16 registry placeholders — removed from planning)
+  # ============================================================
+  # The following entries existed in the old registry only to document "bf16
+  # doesn't fit" — which is not a useful criterion since we don't deploy bf16.
+  # They are deliberately removed from this file. If the corresponding AWQ
+  # entry above isn't sufficient, reintroduce with a specific deployment path.
+  #
+  #   qwen35_27b (bf16 placeholder)
+  #   deepseek_r1_32b (bf16 placeholder)
+  #   qwen35_35b_a3b_gguf (unsloth UD — not currently planned; see DECISIONS.md T4.2)
+  #   qwen3_coder_next (bf16 placeholder — replaced by qwen3_coder_next_awq)

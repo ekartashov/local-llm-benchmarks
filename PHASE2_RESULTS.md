@@ -1,4 +1,25 @@
-# Phase 2 — Model Selection Results
+# Phase 2 — Model Selection Results (historical, single-GPU)
+
+> **Status: FROZEN HISTORICAL ARTIFACT**
+>
+> This document records the Phase 2 runs from 2026-04-15 on the previous phased plan that assumed single-GPU-per-model deployment.
+>
+> **What is still valid from this document:**
+> - Raw measurements (251 t/s, 76 t/s, quality scores) — these are real numbers.
+> - The elimination of DeepSeek-R1-32B on quality grounds.
+> - The elimination of Devstral.
+> - The observed Qwen3.5-27B defect on th03.
+>
+> **What is superseded:**
+> - The "stack decided so far" single-GPU placement is no longer our target — TP=2 is the default. See `ARCHITECTURE.md`.
+> - The "remaining Phase 2 sub-tests" list is replaced by `TESTING_QUEUE.md`.
+> - Qwen3-Coder-Next "requires GGUF, doesn't fit" — superseded, `cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` now exists and is queued as T1.3.
+> - The GLM model family had not been evaluated; GLM-4.7-Flash and GLM-4.5-Air are now active candidates (T2.2, T2.3).
+>
+> For the current plan, read `CLAUDE.md` → `ARCHITECTURE.md` → `TESTING_QUEUE.md` → `DECISIONS.md`.
+> Do NOT use this document to drive testing decisions.
+
+---
 
 **Hardware:** RTX 5090 32 GB GDDR7, vLLM 0.19.0  
 **Date:** 2026-04-15
@@ -16,7 +37,9 @@
 
 *INCONCLUSIVE because decode_tps threshold (150) is calibrated for concurrency=4; at concurrency=1 251 t/s is well above the threshold. Verdict is effectively PASS.
 
-**Why 35B lost:** bf16 VRAM = ~22 GiB, leaves only 510 MiB headroom — insufficient for CUDA graph profiling (needs 1.03 GiB). `--enforce-eager` required → 10× speed penalty.
+**Why 35B lost on single GPU:** bf16 VRAM = ~22 GiB, leaves only 510 MiB headroom — insufficient for CUDA graph profiling (needs 1.03 GiB). `--enforce-eager` required → 10× speed penalty.
+
+> **Note (added R4):** the 35B elimination is single-GPU specific. TP=2 rehab is plausible but not currently prioritized — see `config/models.yaml` entry marked REVIEW.
 
 **Config (30B):**
 ```
@@ -63,21 +86,23 @@ Default vLLM CUDA graph profiling needs 1.53 GiB for 51 batch sizes, but only 1.
 CTX: 32768, max_tokens: 8192, gpu_memory_utilization: 0.90
 ```
 
-**Known issue — th03:** `th03_architecture_tradeoffs` consistently exhausts the 8192-token budget inside `<think>` without surfacing an answer. Workaround: run that specific task without `--reasoning-parser` or increase `--max-tokens` to 16384+.
+**Known issue — th03:** `th03_architecture_tradeoffs` consistently exhausts the 8192-token budget inside `<think>` without surfacing an answer. Workaround: run that specific task without `--reasoning-parser` or increase `--max-tokens` to 16384+. Now tracked as T1.4 in `TESTING_QUEUE.md`.
 
 ---
 
-## Stack decided so far
+## Stack decided (single-GPU era — superseded)
 
 | Role | Model | Engine | TPS | Flags |
 |------|-------|--------|-----|-------|
 | Coder | Qwen3-Coder-30B-A3B-AWQ | vLLM | 251 t/s (seq) / 182 t/s×4 | `--tool-call-parser qwen3_coder` |
 | Thinker | Qwen3.5-27B-AWQ | vLLM | 76 t/s | `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --max-num-seqs 1` |
 
+**Current plan** is three-tier (coder + thinker concurrent TP=2 + behemoth via Sleep Mode). See `ARCHITECTURE.md`.
+
 ---
 
-## Remaining Phase 2 sub-tests
+## Remaining Phase 2 sub-tests (original plan — superseded by TESTING_QUEUE.md)
 
-- **2.3** — Peak mode: Coder-Next vs Coder-30B (requires GGUF on llamacpp; 160B bf16 doesn't fit single GPU)
-- **2.4** — Devstral: ELIMINATED. OOM (30.39 GiB, needs ~32 GiB bf16). Even if quantized: lower quality than 30B-AWQ, minimal reasoning. Not worth pursuing.
-- **2.5** — Dense + spec-decode vs MoE (speed comparison on thinker path)
+- **2.3** — Peak mode: Coder-Next → now T1.3. Qwen3-Coder-Next-80B-A3B-AWQ is available.
+- **2.4** — Devstral: ELIMINATED (unchanged).
+- **2.5** — Dense + spec-decode: partially survives as T3.2 / T3.3 (only for models where MTP is published and supports our hardware).
