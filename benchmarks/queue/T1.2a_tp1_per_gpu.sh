@@ -15,8 +15,8 @@ CODER_MODEL="QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ"
 THINKER_MODEL="QuantTrio/Qwen3.5-27B-AWQ"
 CODER_URL="http://localhost:${PORT_VLLM_GPU0}/v1"
 THINKER_URL="http://localhost:${PORT_VLLM_GPU1}/v1"
-# 80% of 2×32 GiB = 52429 MiB — warn if exceeded
-VRAM_BUDGET_MIB=52429
+# 80% of 32 GiB = 26214 MiB per GPU — warn if exceeded
+VRAM_PER_GPU_BUDGET_MIB=26214
 
 mkdir -p "${RESULTS_DIR}/raw"
 LOG="${RESULTS_DIR}/bench.log"
@@ -24,10 +24,8 @@ LOG="${RESULTS_DIR}/bench.log"
 log()  { echo "[T1.2a] $*" | tee -a "${LOG}"; }
 die()  { log "FATAL: $*"; exit 1; }
 
-vram_total_mib() {
-    nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits \
-        -i "${GPU_0_ID},${GPU_1_ID}" \
-        | awk '$1 ~ /^[0-9]+$/ { s += $1 } END { print s+0 }'
+vram_gpu() {
+    nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i "$1" | tr -d ' '
 }
 
 # ── Write Python helper to temp file ──────────────────────────────────────────
@@ -182,10 +180,15 @@ log "Deploying thinker (${THINKER_MODEL}) gpu1 gpu-mem=0.85 ctx=16384 ..."
     2>&1 | tee -a "${LOG}"
 
 # ── Step 3: VRAM check ─────────────────────────────────────────────────────────
-VRAM_DUAL=$(vram_total_mib)
-log "VRAM after both loaded: ${VRAM_DUAL} MiB (budget ≤${VRAM_BUDGET_MIB} MiB for 80% of 2×32GiB)"
-if (( VRAM_DUAL > VRAM_BUDGET_MIB )); then
-    log "WARNING: VRAM exceeds 80% budget — KV cache may be very small, results may be unreliable"
+VRAM_GPU0=$(vram_gpu "${GPU_0_ID}")
+VRAM_GPU1=$(vram_gpu "${GPU_1_ID}")
+VRAM_DUAL=$(( VRAM_GPU0 + VRAM_GPU1 ))
+log "VRAM after both loaded: GPU0=${VRAM_GPU0} MiB, GPU1=${VRAM_GPU1} MiB (budget ≤${VRAM_PER_GPU_BUDGET_MIB} MiB per GPU)"
+
+if (( VRAM_GPU0 > VRAM_PER_GPU_BUDGET_MIB )) || (( VRAM_GPU1 > VRAM_PER_GPU_BUDGET_MIB )); then
+    log "WARNING: VRAM exceeds 80% budget on one or both GPUs — KV cache may be very small, results may be unreliable"
+    if (( VRAM_GPU0 > VRAM_PER_GPU_BUDGET_MIB )); then log "  -> GPU0 overbudget"; fi
+    if (( VRAM_GPU1 > VRAM_PER_GPU_BUDGET_MIB )); then log "  -> GPU1 overbudget"; fi
 fi
 
 # ── Step 4: Warmup (ensure CUDA graphs exercised before measurement) ───────────
@@ -350,7 +353,7 @@ summary = f"""# T1.2a TP=1-per-GPU Concurrent Dual-Process — {verdict}
 
 **Verdict: {verdict}**
 
-VRAM dual-loaded: {vram_mib:.0f} MiB (budget ≤52429 MiB)
+VRAM dual-loaded: {vram_mib:.0f} MiB (GPU0/GPU1 checked independently against ${VRAM_PER_GPU_BUDGET_MIB} MiB budget)
 """
 (out / "summary.md").write_text(summary)
 

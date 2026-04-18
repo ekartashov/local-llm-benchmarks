@@ -2,19 +2,22 @@
 # teardown.sh — stop and remove all benchmark inference containers.
 set -euo pipefail
 
-CONTAINERS=(
-    bench-vllm-gpu0
-    bench-vllm-gpu1
-    bench-vllm-tp2a
-    bench-vllm-tp2b
-    bench-vllm-tp2c
-    bench-sglang-gpu0
-    bench-sglang-gpu1
-    bench-llamacpp-gpu0
-    bench-litellm
-)
+# Standard named containers plus dynamic discovery of ad-hoc runs
+TARGET_PATTERNS=("bench-" "vllm" "sglang" "llamacpp" "litellm")
 
-echo "[teardown] Stopping all bench-* containers..."
+# Gather list of existing containers matching our target engines
+ALL_NAMES=$(podman ps -a --format "{{.Names}}" 2>/dev/null || true)
+CONTAINERS=()
+for name in $ALL_NAMES; do
+    for pat in "${TARGET_PATTERNS[@]}"; do
+        if [[ "${name}" == *"${pat}"* ]]; then
+            CONTAINERS+=("${name}")
+            break
+        fi
+    done
+done
+
+echo "[teardown] Stopping ${#CONTAINERS[@]} matching containers..."
 
 for name in "${CONTAINERS[@]}"; do
     if podman container exists "${name}" 2>/dev/null; then

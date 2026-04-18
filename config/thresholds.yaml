@@ -19,7 +19,7 @@ T1.1_sleep_mode_operational_under_podman:
     pass: 0.95                  # post-wake ≥95% of pre-sleep TPS
     inconclusive: 0.85
 
-T1.2_concurrent_two_vllm_processes_shared_gpus:
+T1.2a_tp1_per_gpu_concurrent_decode:
   concurrent_vs_isolated_tps_ratio:
     pass: 0.80                  # concurrent-decode ≥80% of isolated-decode
     inconclusive: 0.60
