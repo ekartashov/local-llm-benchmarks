@@ -57,7 +57,7 @@ Everything here is contingent on the tests listed in `TESTING_QUEUE.md`. This is
 
 | Role | When | Model candidates |
 |------|------|------------------|
-| Coder | Always hot | Qwen3-Coder-30B-A3B-AWQ *(baseline)*, GLM-4.7-Flash-AWQ |
+| Coder | Always hot | Qwen3-Coder-30B-A3B-AWQ *(baseline)*, GLM-4.7-Flash-AWQ *(MLA verified, V1 tool-broken)* |
 | Thinker | Always hot | Qwen3.5-27B-AWQ *(baseline)*, GLM-4.5-Air-AWQ |
 | Behemoth | On-demand wake | Qwen3-Coder-Next-80B-A3B-AWQ |
 

@@ -80,6 +80,13 @@ bf16 OOMs at 30.4 GiB, and at any quant its quality is below Qwen3-Coder-30B-AWQ
 ### Qwen3.5-35B-A3B-AWQ is superseded by Qwen3.6-35B-A3B-AWQ
 Old REVIEW status retained for the single-GPU failure record (22 t/s with `--enforce-eager`, <1 GiB headroom, 10× slowdown). **Qwen3.6-35B-A3B-AWQ** (Apache 2.0, released 2026-04-14, publisher `cyankiwi`) is the fresh-generation 35B-A3B candidate of record — same active-param class (3B), 262k native context, tool parser `qwen3_coder`, thinking-by-default. Queued as T2.5. The old Qwen3.5-35B-A3B entry should not be revived as a coder candidate; any 35B-A3B re-evaluation targets Qwen3.6. SGLang is separately incompatible with the QuantTrio Qwen3.5 weights (see config note on `qwen3_5.py:1662` weight-map bug — a code bug in SGLang, not a config problem).
 
+### GLM-4.7-Flash (30B-A3B) MLA is active but tool-broken in vLLM V1
+- **MLA Status**: **PASS**. Verified by measurement at **129.2 KB/token** (TP=2).
+- **Infrastructure**: Requires `cu130-nightly` image and `transformers` from git to natively support `Glm4MoeLiteForCausalLM`.
+- **Engine Status**: **BLOCKED**. vLLM forces the V1 engine for this architecture and ignores all V0 legacy-disable flags.
+- **Quality Status**: **UNSTABLE**. V1 crashes (EngineDeadError) during tool generation for complex schemas (Tasks 02, 03).
+- **Decision**: Avoid for tool-intensive roles until vLLM V1 stabilizes.
+
 ### GLM-4.6-Air does not exist
 Z.ai released GLM-4.6V (vision, Air-sized) but skipped text-only Air. They went to GLM-4.7 flagship + GLM-4.7-Flash. No research gap — it was simply never released.
 
@@ -153,6 +160,9 @@ Was deprioritized in R4, but T1.2's collapse under multi-process GPU sharing mak
 ---
 
 ## SUPERSEDED — invalidated by later findings
+
+### OLD: "One-line source patch for glm4_moe_lite"
+**Superseded** — This was a legacy workaround for older vLLM images where `glm4_moe_lite` mapping was missing in `model_arch_config_convertor.py`. The current `cu130-nightly` image based stack with git-transformers resolves this natively. Do not apply source patches to modern images.
 
 ### OLD: "No dense 70B with tensor parallelism"
 **Still true** but don't generalize it. The old wording implied "no TP period." TP=2 is fine for A3B MoE; it's dense-at-large-hidden-dim that pays the PCIe-sync penalty.

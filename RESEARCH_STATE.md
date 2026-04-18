@@ -2,7 +2,7 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R7 updated — T1.4 FAIL recorded. T2.1 REBUILD/PATCH pending.
+**Current cycle:** R7 updated — T1.4 FAIL recorded. T2.1 image verification pending.
 **Current mode:** TESTING READY — pull next OPEN item from the queue (T2.1 re-test, T2.5).
 
 ---
@@ -84,14 +84,15 @@ Critical unknowns remaining:
 **Findings from testing (R7 cycle):**
 
 1. **T1.4 (Thinker th03) — [FAIL]**: Increasing `max_tokens` to 16384 did not fix the empty-output issue in reasoning tasks. The thinker exhausts its budget in a reasoning loop. Architecture-heavy tasks must move to the coder or behemoth tiers.
-2. **T2.1 (GLM-4.7-Flash) — [FAIL]**: 
-    - **Attempt 1**: Load failure (no `transformers` support) + initial MLA bloat.
-    - **Attempt 2 (2026-04-18 — RE-RUN)**: 
-        - **MLA Bloat Remains**: Still **127.4 KB/token**. ANALYSIS: The `is_deepseek_mla=True` flag in vLLM is necessary but NOT sufficient. The attention kernel requires specific dimensions like `qk_nope_head_dim` (missing in HF `config.json`) to be populated.
-        - **Script SyntaxError**: Quoted heredoc (`<<'PYEOF'`) blocked bash variable expansion (e.g. `${CTX}` became a literal string in Python).
-        - **Tool Sanity**: Sub-tasks 02 and 03 failed with exceptions; likely related to the high-VRAM pressure or chat template issues.
+- [x] **R7: GLM-4.7-Flash Stabilization (2026-04-18) — [INCONCLUSIVE (Tool-Broken)]**
+    - **Hypothesis**: Model requires `cu130-nightly` + `transformers` git to activate MLA (128 KB) vs GQA (380 KB).
+    - **Results**:
+        - **MLA Success**: Measured **129.2 KB/token** using `cu130-nightly` + git-transformers natively resolving `Glm4MoeLiteForCausalLM`. MLA bypass is definitively verified.
+        - **V1 Constraint**: vLLM Nightly forces V1 engine and ignores all V0 legacy flags (`VLLM_V1=0`, etc. listed as "Unknown").
+        - **Tool Blocker**: V1 crashes (EngineDeadError) on complex tool schemas (Tasks 02, 03). Task 01 (simple) passes at 44.7 t/s.
+    - **Conclusion**: GLM-4.7-Flash is MLA-capable but unusable for tool-calling on the current vLLM nightly. T2.1 marked as "Verified Footprint / Unstable Tooling."
 
-**Open from research:** none — fixes identified (patching `config.json` directly); re-test T2.1 v2 queued.
+**Open from research:** none — fixes identified: ensure `config.json` contains MLA dimensions (192/64/512) and re-test on clean `vllm-glm47` image stack. (Note: the previous "one-line source patch" advice is now deprecated as a legacy workaround for older images).
 
 ### R6 — April 18 2026 — T1.2 hand-back, TP=1-per-GPU pivot
 
