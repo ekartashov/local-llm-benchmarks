@@ -58,7 +58,7 @@ models:
       vllm: "--tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice"
     requires_vllm: ">=0.15.0"
     known_bugs:
-      - "MLA auto-detection was broken at release (KV cache 10× bloated). One-line fix for glm4_moe_lite in model_arch_config_convertor.py. Verify per T2.1 before trusting benchmark numbers."
+      - "MLA auto-detection was broken at release (KV cache 10× bloated). Confirmed in T2.1 (2026-04-18) reporting 127.4 KB/token. Requires custom vLLM patch in model_arch_config_convertor.py."
       - "MTP spec decode: 10× throughput regression reported on B200. Status on consumer Blackwell sm_120 unknown. Do NOT enable --speculative-config.method mtp without measuring via T3.2."
     test_items: [T2.1, T2.2, T3.2]
     notes: >

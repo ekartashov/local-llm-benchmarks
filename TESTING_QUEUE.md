@@ -216,7 +216,9 @@ Also required for successful load: `--gpu-memory-utilization 0.95` (0.85 OOM'd d
 
 ### T1.4 — th03_token_budget_fix — DONE (FAIL) ✗
 
-**Question:** Does raising `--max-tokens` to 16384 on the thinker endpoint resolve the `th03_architecture_tradeoffs` empty-output defect?
+**Result (2026-04-18):** FAIL. Model exhausts search budget even at 16k tokens. Not a budget limit, but a reasoning pathology/loop. Architecture-heavy tasks must be routed to Coder or Behemoth.
+
+**Procedure:**
 
 **Procedure:**
 1. Start Qwen3.5-27B-AWQ with existing config + `--max-tokens 16384` (or the equivalent server-side limit).
@@ -239,9 +241,11 @@ Also required for successful load: `--gpu-memory-utilization 0.95` (0.85 OOM'd d
 
 Run after T1 is settled (or mid-T1 if cycles allow).
 
-### T2.1 — glm47_flash_mla_verification
+### T2.1 — glm47_flash_mla_verification — DONE (FAIL - REBUILD/PATCH PENDING) ✗
 
 **Question:** In our current vLLM, does GLM-4.7-Flash use MLA (KV ≈54 KB/token) or is it stuck on the GQA-sized path (~98 KB/token) due to the known arch-convertor bug?
+
+**Procedure:**
 
 **Procedure:**
 1. Deploy `cyankiwi/GLM-4.7-Flash-AWQ-4bit` with `--tool-call-parser glm47 --reasoning-parser glm45`, TP=2, some context value C.

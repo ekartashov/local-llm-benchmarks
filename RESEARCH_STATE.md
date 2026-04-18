@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R7 updated — T1.4 FAIL recorded. T2.1/T2.5 pending.
-**Current mode:** TESTING READY — pull next OPEN item from the queue (T2.1, T2.5).
+**Current cycle:** R7 updated — T1.4 FAIL recorded. T2.1 REBUILD/PATCH pending.
+**Current mode:** TESTING READY — pull next OPEN item from the queue (T2.1 re-test, T2.5).
 
 ---
 
@@ -78,11 +78,19 @@ Critical unknowns remaining:
 - `config/models.yaml`: added `qwen36_35b_a3b_awq` as CANDIDATE coder; old `qwen35_35b_a3b_awq` REVIEW entry annotated as superseded by Qwen3.6.
 
 **Tests queued for the next testing cycle:**
-- T1.5 (kvcached spike) — unblocks potential TP=2 revival.
-- T2.5 (Qwen3.6-35B-A3B shootout) — can run solo-TP=1 today; concurrent-dual re-run gated on T1.5.
-- Plus previously-queued: T2.1 (GLM-4.7-Flash MLA), T1.4 (thinker token budget fix).
+- T2.1 (re-test with `vllm-glm47` image) — verify MLA and tool-calling fix.
+- T2.5 (Qwen3.6-35B-A3B shootout) — solo-TP=1 ready.
 
-**Open from research:** none — queue is ready for testing.
+**Findings from testing (R7 cycle):**
+
+1. **T1.4 (Thinker th03) — [FAIL]**: Increasing `max_tokens` to 16384 did not fix the empty-output issue in reasoning tasks. The thinker exhausts its budget in a reasoning loop. Architecture-heavy tasks must move to the coder or behemoth tiers.
+2. **T2.1 (GLM-4.7-Flash) — [FAIL]**: 
+    - **Load failure**: vLLM 0.19/latest didn't recognize `glm4_moe_lite` architecture.
+    - **MLA Bloat**: Initial run with `cu130-nightly` image reported **127.4 KB/token** KV cache. This confirms the MLA regression on Blackwell still persists in the nightly build.
+    - **Tool Sanity**: Filter `'01 02 03'` failed due to literal string matching.
+    - **Script Bug**: Shell expansion in the metrics heredoc caused syntax errors.
+
+**Open from research:** none — fixes identified; re-test T2.1 queued with custom image patch.
 
 ### R6 — April 18 2026 — T1.2 hand-back, TP=1-per-GPU pivot
 
