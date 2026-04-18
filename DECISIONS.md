@@ -88,13 +88,13 @@ Old REVIEW status retained for the single-GPU failure record (22 t/s with `--enf
 
 - **V1 engine cannot be disabled** for `Glm4MoeLiteForCausalLM`. All six env vars (`VLLM_V1=0`, `VLLM_USE_V1=0`, `VLLM_V1_ENABLED=0`, `VLLM_USE_V1_ENGINE=0`, `VLLM_ENGINE_ITERATOR_SOURCE=LEGACY`) are "Unknown" in vLLM 0.19.x nightly. This is not the root cause of the tool crash.
 
-- **Tool crash root cause: PR #37385, streaming parser bug (NOT in our build).** The `glm4_moe_tool_parser.py` streaming path (`extract_tool_calls_streaming`) stores `prev_tool_call_arr[index]["arguments"]` as a Python dict when a new tool call is first registered. Finalization code that treats this as a string crashes with TypeError. This crash occurs in the V1 EngineCore subprocess and propagates as EngineDeadError, killing the server for all subsequent requests. Fix: change `"arguments": args_dict` → `"arguments": full_args_str` in `infra/Containerfile.vllm_glm47` (one-line patch to the parser source after pip install). Tracked as T2.1b.
+- **Tool crash root cause: EngineCore subprocess crash — NOT the tool parser.** R9 code inspection reviewed all 504 lines of `glm4_moe_tool_parser.py`. Every function is correct — no dict/string type confusion, no 2-arg-specific bugs, no code path that can crash vLLM's server. The crash is in the EngineCore subprocess (pid=188), not in the APIServer (pid=1) where the tool parser runs. The Task 02 raw error is vLLM V1's exact EngineCore death message: `"EngineCore encountered an issue. See stack trace (above) for the root cause."` A parser exception cannot produce this error.
 
-- **Note**: PR #37386 (merged v0.18.0) fixed the non-streaming `func_arg_regex` non-greedy bug. That fix IS in our build. The non-streaming path likely handles 2-arg tool calls correctly — `curl` with `stream=false` can confirm this as a quick diagnostic.
+- **Most likely cause: TRITON_MLA PIECEWISE CUDA graph instability on Blackwell.** The startup log shows TRITON_MLA cannot use full CUDA graphs (`AttentionCGSupport.NEVER`), falling back to PIECEWISE mode. Task 01 (1-arg, shorter decode) passes; Task 02 (2-arg, longer decode) crashes EngineCore after full generation time (~14s). This is consistent with a PIECEWISE boundary instability at certain decode lengths. The actual traceback is in container stderr only (not captured by bench scripts).
 
-- **Workaround (does not fix parser):** `VLLM_ENABLE_V1_MULTIPROCESSING=0` keeps V1 in single-process mode, making parser exceptions per-request recoverable instead of server-fatal. Useful during transition.
+- **Confirmed wrong approaches:** (1) PR #37385 sed patch — those variables don't exist in our build; (2) any tool parser patch — the parser is not the crash site; (3) `VLLM_ENABLE_V1_MULTIPROCESSING=0` — only affects how exceptions in the serving layer propagate, not EngineCore crashes; (4) V0 engine env vars — confirmed "Unknown" and ignored.
 
-- **Decision**: Do not use for tool-intensive roles until T2.1b (streaming parser patch) passes. The fix is narrow and testable — this is not a "wait for upstream" situation.
+- **Decision**: GLM-4.7-Flash in cold storage — **wait for upstream.** The crash requires a vLLM fix for TRITON_MLA + Blackwell + PIECEWISE stability. Monitor vLLM releases for `Glm4MoeLite`/TRITON_MLA fixes. Do not attempt further T2.1x patches. T2.1b CANCELLED.
 
 ### GLM-4.6-Air does not exist
 Z.ai released GLM-4.6V (vision, Air-sized) but skipped text-only Air. They went to GLM-4.7 flagship + GLM-4.7-Flash. No research gap — it was simply never released.

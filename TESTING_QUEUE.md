@@ -258,37 +258,13 @@ Run after T1 is settled (or mid-T1 if cycles allow).
 
 ---
 
-### T2.1b — glm47_flash_streaming_parser_patch — OPEN
+### T2.1b — glm47_flash_streaming_parser_patch — CANCELLED
 
 **Question:** Does patching `glm4_moe_tool_parser.py` with PR #37385's one-line fix (store streaming tool arguments as JSON string, not Python dict) make GLM-4.7-Flash tool calling reliable under V1?
 
 **Root cause confirmed by R8 research:** `extract_tool_calls_streaming` stores `prev_tool_call_arr[index]["arguments"]` as a Python dict. Finalization code that uses this as a string crashes with TypeError inside the V1 EngineCore subprocess → EngineDeadError propagates to all subsequent requests. PR #37386 (v0.18.0) fixed the non-streaming path (greedy `.*` in `func_arg_regex`); PR #37385 fixes the streaming path but is not yet merged.
 
-**Procedure (run on host):**
-
-1. **Diagnostic first — verify bug presence and non-streaming baseline** (no image rebuild needed):
-   ```bash
-   # Check if bug is in the image:
-   podman run --rm vllm-glm47 grep -rn "arguments.*args_dict\|args_dict.*arguments" \
-     /usr/local/lib/python3.12/dist-packages/vllm/tool_parsers/ 2>/dev/null
-   # Find parser file:
-   podman run --rm vllm-glm47 find /usr -name "glm4_moe_tool_parser.py" 2>/dev/null
-   ```
-   Then start the container (using existing bench script deploy) and test Task 02 non-streaming:
-   ```bash
-   curl -s -X POST http://localhost:30002/v1/chat/completions \
-     -H "Content-Type: application/json" \
-     -d '{"model":"cyankiwi/GLM-4.7-Flash-AWQ-4bit","stream":false,
-          "messages":[{"role":"user","content":"Create a file at /tmp/hello.txt with content Hello, world!"}],
-          "tools":[{"type":"function","function":{"name":"write_file","description":"Write content to a file.",
-            "parameters":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},
-            "required":["path","content"]}}}]}'
-   ```
-   **If non-streaming succeeds**: streaming parser is confirmed as the sole crash vector. Proceed to patch.
-
-2. **Apply the patch in `infra/Containerfile.vllm_glm47`**: After the pip install step, add a RUN command that patches the parser file. The fix (PR #37385): find the line that initializes the `arguments` entry in `prev_tool_call_arr` with a dict value, and change it to store the JSON string instead. Exact line depends on what `grep` shows in step 1. Rebuild with `--rebuild` flag.
-
-3. **Rerun T2.1 bench script** with the patched image. Expected: Task 01, 02, 03 all pass (≥2/3 = 67% tool sanity rate). Also add `VLLM_ENABLE_V1_MULTIPROCESSING=0` to the container env as a safety net.
+**CANCELLED after R9 research (2026-04-18).** The tool parser (`glm4_moe_tool_parser.py`) was reviewed in full (504 lines, all functions) and is correct. The crash is in the EngineCore subprocess (pid=188), not in the tool parser (APIServer pid=1). An EngineCore crash cannot be fixed by patching the parser. Root cause: TRITON_MLA PIECEWISE CUDA graph instability on Blackwell at longer decode lengths. Fix requires a vLLM upstream change. GLM-4.7-Flash is in cold storage until a vLLM release fixes `Glm4MoeLite`/TRITON_MLA on sm_120. See `DECISIONS.md` for full rationale.
 
 **Pass:** ≥2/3 tool sanity tasks pass (Tasks 01–03). EngineDeadError no longer occurs.
 

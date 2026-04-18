@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R7 closed — T2.1 complete (MLA active / V1 tool-broken). Next: T2.5 or research on V1 blocker.
-**Current mode:** RESEARCH NEEDED — V1 tool-crash wall from T2.1 requires research before GLM-4.7-Flash retesting. T2.5 is independently runnable.
+**Current cycle:** R9 CLOSED — tool parser confirmed clean (all 504 lines reviewed). EngineCore (pid=188) is crashing, not the parser (APIServer pid=1). Likely TRITON_MLA PIECEWISE CUDA graph instability at longer decode lengths. T2.1b cancelled. GLM-4.7-Flash in cold storage pending vLLM fix.
+**Current mode:** TESTING READY — T2.5 (Qwen3.6-35B-A3B) is independently runnable, no deps on GLM.
 
 ---
 
@@ -48,6 +48,39 @@ Critical unknowns remaining:
 ---
 
 ## Cycle log
+
+### R9 — April 18 2026 — T2.1b wrong code path; actual bug in unseen helpers (lines 1–394)
+
+**Triggered by:** T2.1b FAIL. Operator ran two diagnostics (`sed -n "395,445p"` and `sed -n "443,600p"`), giving us lines 395–504 (the complete second half of the 504-line file).
+
+**Research findings:**
+
+1. **All 504 lines of `glm4_moe_tool_parser.py` reviewed — parser is clean.** Three diagnostic dumps (lines 1–200, 200–395, 395–504) cover the complete file. Every function is correct:
+   - `extract_tool_calls_streaming` — clean. Calls `_build_args_json_so_far` (returns str), `_compute_args_diff` (diffs str correctly).
+   - `_build_args_json_so_far` — handles both complete and partial arg states. Returns string in all code paths. Correctly handles 1-arg and 2-arg via `func_arg_regex.findall`.
+   - `_extract_tool_call_regions`, `_extract_tool_name_from_region`, `_extract_content` — clean.
+   - `extract_tool_calls` (non-streaming) — has broad `except Exception` handler, cannot crash the server.
+   - `__init__`, `_is_string_type`, `_deserialize`, `_json_escape_string_content`, `_tools_enabled`, `adjust_request` — all clean.
+   - No dict/string type confusion anywhere. PR #37385 described variables (`args_dict`, `full_args_str`) that don't exist in this build — it targeted an older, simpler parser.
+
+2. **The crash is in EngineCore (pid=188), not in the tool parser (APIServer pid=1).** The Task 02 raw result contains: `"error": "EngineCore encountered an issue. See stack trace (above) for the root cause."` — vLLM V1's exact error string for EngineCore subprocess death. The APIServer (where the tool parser runs) and EngineCore are separate processes. An exception in the parser cannot produce this error.
+
+3. **TRITON_MLA PIECEWISE CUDA graph is the likely crash vector.** Startup log shows:
+   ```
+   WARNING: CUDAGraphMode.FULL_AND_PIECEWISE is not supported with TritonMLABackend
+   (support: AttentionCGSupport.NEVER); setting cudagraph_mode=PIECEWISE
+   ```
+   PIECEWISE mode handles different batch sizes with/without graphs at a boundary. Task 01 generates ~20–30 tokens (1-arg tool call), Task 02 generates ~40–60 tokens (2-arg tool call). If the EngineCore's PIECEWISE path has an instability at certain decode lengths, the longer Task 02 generation hits it while Task 01 doesn't. The actual traceback is in container stderr (not captured by the bench script).
+
+4. **T2.1b is cancelled.** The "patch the streaming parser" approach was based on an incorrect root cause. Patching `glm4_moe_tool_parser.py` cannot fix a crash in the EngineCore subprocess. The fix requires either: (a) a vLLM update that stabilizes TRITON_MLA on Blackwell in PIECEWISE mode, or (b) a workaround that avoids the crash condition (e.g., forcing eager mode, different graph capture settings).
+
+5. **GLM-4.7-Flash moves to cold storage — "wait for upstream."** The crash is in vLLM's engine/model execution layer, not in anything we can patch in a Containerfile RUN layer. The correct action is to monitor vLLM releases for `Glm4MoeLite` + TRITON_MLA + Blackwell fixes.
+
+**Decisions updated:** All GLM-4.7-Flash DECISIONS entries updated. T2.1b CANCELLED in TESTING_QUEUE. `TESTING_QUEUE.md` status updated.
+
+**Tests queued for next cycle:** T2.5 (Qwen3.6-35B-A3B coder shootout) — no dependencies, ready to run.
+
+---
 
 ### R8 — April 18 2026 — GLM-4.7-Flash tool crash root cause
 
@@ -252,6 +285,10 @@ Phase 0/1 work: chat template verification, vLLM vs SGLang throughput comparison
 - **Step 2a** (quick non-streaming test, host only): `curl` Task 02 with `"stream": false` to confirm the non-streaming path works — if so, the streaming parser is definitively the crash point.
 - **Step 2b** (fix): Patch `glm4_moe_tool_parser.py` in `infra/Containerfile.vllm_glm47` to change `"arguments": args_dict` → `"arguments": full_args_str` at the point where a new tool call entry is first added to `prev_tool_call_arr`. Then rebuild (`--rebuild` flag on the bench script) and rerun T2.1.
 - **Step 3** (safety net): Add `VLLM_ENABLE_V1_MULTIPROCESSING=0` to the container env — keeps V1 in single-process mode so parser exceptions don't kill the entire engine; failures become per-request recoverable instead of fatal.
+
+### From T2.1b, 2026-04-18 — RESOLVED (R9 cycle)
+
+**What happened:** T2.1b sed patch was a no-op (wrong variable name). After three diagnostic dumps covering all 504 lines of `glm4_moe_tool_parser.py`, the parser was confirmed clean. The crash is in EngineCore (not the parser). T2.1b CANCELLED. See R9 cycle log above.
 
 <!-- Template for testing mode to fill in:
 
