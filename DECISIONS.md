@@ -22,6 +22,12 @@ CPU offload path depends on AMX instructions. i9-14900K (Raptor Lake) does not h
 ### Engines are containerized
 Rootless podman only. No host installs of vLLM/SGLang/llama.cpp. Not a performance decision — an operational one (reproducibility, isolation, cleanup).
 
+### Two vLLM processes on shared GPUs collapse to ~2% throughput
+Two parallel vLLM processes sharing the same GPU(s) without NVIDIA MPS experience catastrophic performance degradation. Measured throughput drops to 4.2 t/s (vs 212 t/s isolated). Root cause: GPU-wide CUDA context time-slicing (the GPU time-slices contexts coarsely, and TP=2 amplify this via multiple kernel dispatches per layer), not just direct NCCL serialization. Do not retest without MPS.
+
+### NVIDIA MPS (Multi-Process Service) is skipped
+While MPS solves the context time-slicing issue above, it requires a privileged root daemon on the host which breaks our rootless podman invariant. sm_120 (consumer Blackwell) support is also unverified outside datacenter environments. A TP=1-per-GPU architecture avoids the problem entirely without root.
+
 ### System RAM is not VRAM for KV cache
 Offloading KV cache to DDR5 costs 50–80% decode speed (memory bandwidth gap: 83 GB/s vs 1790 GB/s). We keep working set in GDDR7. System RAM is fine for **weight storage during sleep** (see vLLM Sleep Mode) but not for active KV.
 
@@ -120,10 +126,8 @@ Inter-publisher AWQ quality variance is within noise for our tasks. QuantTrio an
 ### Abliterated variants — not pursued
 Orthogonal axis (refusal behavior), not a coding/infra capability axis. Irrelevant to our goals.
 
-### Single-GPU-per-model placement — deprioritized as default
-Was the default in the original phase plan. Supplanted by TP=2 as working default. Single-GPU placement is still useful when:
-- We want two concurrent models hot on separate cards (but this usually loses to TP=2 both + sleep mode due to memory imbalance).
-- A specific model's AWQ kernel can't tensor-parallelize (e.g. group_size=64 Marlin restriction — model-specific).
+### Single-GPU-per-model placement — reinstated as default for the hot pair
+Was deprioritized in R4, but T1.2's collapse under multi-process GPU sharing makes TP=1-per-GPU the mandatory topology for concurrent isolated execution (coder on GPU0, thinker on GPU1). TP=2 is now reserved exclusively for the behemoth model (which borrows both GPUs while the hot pair sleeps).
 
 ---
 
@@ -141,6 +145,9 @@ Affected models to re-evaluate if desired:
 
 ### OLD: "Qwen3-Coder-Next needs GGUF, 160B bf16 doesn't fit single GPU"
 **Superseded** — `cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` now exists. Fits TP=2 on 2×5090 with room for KV cache. Promoted to behemoth-tier test item.
+
+### OLD: "Two concurrent TP=2 processes sharing GPUs"
+**Superseded** — This assumption from R4 completely collapses due to CUDA context time-slicing reducing concurrent throughput to ~2% (see SETTLED). Architecture is pivoting to TP=1-per-GPU (coder GPU0, thinker GPU1) + behemoth TP=2 asleep.
 
 ### OLD: LiteLLM as router
 **Superseded** — OpenCode native routing replaces it. See PROVISIONAL entry above.

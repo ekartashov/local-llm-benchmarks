@@ -5,6 +5,9 @@ set -euo pipefail
 CONTAINERS=(
     bench-vllm-gpu0
     bench-vllm-gpu1
+    bench-vllm-tp2a
+    bench-vllm-tp2b
+    bench-vllm-tp2c
     bench-sglang-gpu0
     bench-sglang-gpu1
     bench-llamacpp-gpu0

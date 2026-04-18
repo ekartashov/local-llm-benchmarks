@@ -58,6 +58,9 @@ t1.1:
 t1.2:
     ./benchmarks/queue/T1.2_concurrent_dual_process.sh
 
+t1.2a:
+    ./benchmarks/queue/T1.2a_tp1_per_gpu.sh
+
 t1.3:
     ./benchmarks/queue/T1.3_coder_next_tp2.sh
 

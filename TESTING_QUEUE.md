@@ -120,32 +120,37 @@ These determine whether the three-tier architecture in `ARCHITECTURE.md` stands.
 
 ### T1.2 — concurrent_two_vllm_processes_shared_gpus — DONE (FAIL ✗)
 
-**Question:** Can two vLLM processes, each `--gpu-memory-utilization 0.40`, both TP=2 across GPU0+GPU1, coexist without CUDA graph corruption or allocator contention?
+**Superseded by:** T1.2a. See `RESEARCH_STATE.md` R6 log.
 
-**Procedure:**
-1. Start process A: Qwen3-Coder-30B-A3B-AWQ, TP=2, gpu-mem 0.40, port 30000.
-2. Start process B: Qwen3.5-27B-AWQ, TP=2, gpu-mem 0.40, port 30001, `--max-num-seqs 1`.
-3. Run single-request decode on A alone — record TPS_A_isolated.
-4. Run single-request decode on B alone — record TPS_B_isolated.
-5. Run both concurrently (two async clients) — record TPS_A_concurrent, TPS_B_concurrent.
-6. Run a prefill stress test: both clients prefill 16k prompts simultaneously, measure TTFT on both.
+---
 
-**Pass:** `TPS_concurrent ≥ 0.80 × TPS_isolated` for both, no crashes, no output corruption.
+### T1.2a — tp1_per_gpu_concurrent_decode — DONE (PASS ✓)
 
-**What failure means:**
-- Crash on second process start → CUDA context cannot accept second vLLM allocator. **Hand back to research**: redesign for one-hot-at-a-time via Sleep Mode for the small pair.
-- Concurrent TPS drops >30% from isolated → compute contention worse than math predicted. Not an architecture killer but implies gating prefill via a router-level semaphore. Note for `ARCHITECTURE.md` update.
-- Prefill TTFT balloons >3× under concurrent prefill → confirms prefill contention is significant. Add semaphore requirement to integration plan.
+**Question:** If we isolate Coder to GPU0 at TP=1 and Thinker to GPU1 at TP=1, do both models hit acceptable concurrency and throughput?
 
-**Deps:** T1.1 (we at least need to know Sleep Mode works as our fallback before committing to dual-process)
+**Result (2026-04-18):** PASS. Perfect 1.000 concurrent isolation.
+- Coder (30B A3B) isolated: 251.0 t/s. Concurrent: 251.0 t/s.
+- Thinker (27B dense) isolated: 76.5 t/s. Concurrent: 76.5 t/s.
+- Prefill contention: ~0x (cache hit dominance).
+Conclusion: TP=1-per-GPU cleanly solves the shared-GPU time-slicing issue. Coder single-GPU throughput is extremely healthy.
 
-**Hand-back trigger:** any crash, any output corruption, or concurrent-vs-isolated degradation >30%.
+---
+
+### T1.2b — sleep_mode_sequential_swap — CANCELLED
+
+**Triggered by:** T1.2a fails (T1.2a passed so this is skipped).
+
+---
+
+### T1.2c — mps_eval — CANCELLED
+
+**Triggered by:** T1.2a and T1.2b both fail (skipped).
 
 ---
 
 ### T1.3 — qwen3_coder_next_awq_tp2_viability
 
-**Question:** Does `cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` load and decode acceptably on TP=2 across our two 5090s?
+**Question:** Does `cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` load and decode acceptably on TP=2 across our two 5090s? (Note: now decoupled from the hot-pair architecture, as Behemoth borrows both GPUs during wakeup).
 
 **Procedure:**
 1. Deploy with `VLLM_ALLOW_LONG_MAX_MODEL_LEN=1`, TP=2, `--gpu-memory-utilization 0.85`, context 32768, `--tool-call-parser qwen3_coder`.
@@ -161,7 +166,7 @@ These determine whether the three-tier architecture in `ARCHITECTURE.md` stands.
 - Crashes during load → hybrid attention / vLLM version mismatch. **Hand back to research** to check vLLM release notes.
 - Tool-call parsing broken → separate fix path (parser or chat template). Track as a sub-item.
 
-**Deps:** none (independent of T1.1 / T1.2, though sequencing after T1.1 is cheaper because the vLLM image is the same)
+**Deps:** none (independent of T1.1 / T1.2a, though sequencing after T1.1 is cheaper because the vLLM image is the same)
 
 **Hand-back trigger:** load failure, tool-call parser failure.
 

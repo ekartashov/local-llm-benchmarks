@@ -241,7 +241,10 @@ echo "[deploy] Waiting for ${HEALTH_URL} (timeout=900s) ..."
 WAIT_RC=$?
 
 kill "${LOGS_PID}" 2>/dev/null || true
-wait "${LOGS_PID}" 2>/dev/null || true
+# Do NOT wait on LOGS_PID. $! is only the PID of the `sed` process at the end of the pipe,
+# so `kill` stops sed. But `podman logs -f` is asleep waiting for new logs and won't get
+# SIGPIPE until the next log line is produced. If we `wait` here, bash waits for the entire
+# pipeline to close, which causes a silent hang!
 
 if [[ ${WAIT_RC} -ne 0 ]]; then
     echo "" >&2

@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R5 closed — T1.1 PASS confirmed 2026-04-17; T1.2 FAIL confirmed 2026-04-18
-**Current mode:** RESEARCH NEEDED — T1.2 hit architectural wall, see `## Open from testing`
+**Current cycle:** R6 closed — T1.2a PASS confirms TP=1-per-GPU architecture.
+**Current mode:** TESTING READY — pull next OPEN item from the queue (T1.1 rerun or T1.3).
 
 ---
 
@@ -24,14 +24,13 @@ Living document. What we currently believe, what is still open, and the log of r
 
 ### Working architectural hypothesis
 
-Three-tier (coder + thinker concurrent via TP=2, behemoth asleep on standby). See `ARCHITECTURE.md`.
-
-**Status: HYPOTHESIS BROKEN. T1.2 FAIL — concurrent TP=2 processes produce 2% of isolated throughput. Architecture must be redesigned. See `## Open from testing`.**
+Two-GPU-two-role (coder TP=1 on GPU0, thinker TP=1 on GPU1, concurrent isolation) + behemoth TP=2 asleep. See `ARCHITECTURE.md`.
 
 Critical unknowns remaining:
 1. ~~Does Sleep Mode work?~~ **SETTLED — yes (T1.1 PASS)**
-2. ~~Do two vLLM processes coexist at gpu-mem 0.40 each on shared GPUs?~~ **SETTLED — FAIL. Both fit in memory, but NCCL allreduce serialization without MPS reduces concurrent decode to 4.2 t/s (2% of isolated). Not viable.**
-3. Does Qwen3-Coder-Next-80B-A3B-AWQ TP=2 hit ≥40 t/s? (T1.3 — relevance gated on architecture decision)
+2. ~~Do two vLLM processes coexist at gpu-mem 0.40 each on shared GPUs?~~ **SETTLED — FAIL. Both fit in memory, but CUDA context time-slicing reduces concurrent decode to ~2%. Not viable.**
+3. ~~Does TP=1-per-GPU provide sufficient TPS for coder and thinker?~~ **SETTLED — PASS (T1.2a). Perfect 1.0x concurrent isolation. Coder=251t/s, Thinker=76.5t/s.**
+4. Does Qwen3-Coder-Next-80B-A3B-AWQ TP=2 hit ≥40 t/s? (T1.3)
 
 ---
 
@@ -47,7 +46,27 @@ Critical unknowns remaining:
 
 ## Cycle log
 
-### R5 — April 17 2026 (evening) — current
+### R6 — April 18 2026 — current
+
+**Triggered by:** Claude Code hand-back from T1.2. Test reported FAIL: concurrent TP=2 processes sharing GPUs collapsed to 4.2 t/s each (~2% of isolate throughput).
+
+**Research findings:**
+1. **GPU-wide CUDA context time-slicing:** Without MPS, two CUDA processes on the same GPU time-slice at the context level. For TP=2, each decode step launches many kernels, generating massive context-switch amplification. The ~50x degradation is consistent with NVIDIA warnings about naive multi-process sharing.
+2. **MPS skipped:** MPS requires a root daemon on the host which breaks our rootless podman invariant. sm_120 support is also unverified outside datacenter environments.
+3. **TP=1-per-GPU is preferred solution:** Tying one engine process exactly to one GPU completely eliminates contention. Coder TPS is actually *higher* at TP=1 on one 5090 (251 t/s) than at TP=2 (212 t/s) due to missing allreduce overhead. Thinker degrades from 106 t/s to ~76 t/s, but this is an acceptable tradeoff for complete concurrent stability.
+
+**Decisions updated:**
+- `DECISIONS.md` SETTLED: "Two vLLM processes on shared GPUs without MPS collapse to ~2% throughput. Root cause: GPU-wide CUDA context time-slicing, not just NCCL serialization. Do not retest without MPS."
+- `DECISIONS.md` SETTLED: "MPS skipped — requires root daemon (breaks rootless invariant), sm_120 support unverified, and TP=1-per-GPU avoids the problem entirely."
+- `DECISIONS.md` SUPERSEDED: the "two concurrent TP=2 processes sharing GPUs" assumption from R4.
+- `ARCHITECTURE.md` updated: Pivot to Coder TP=1 on GPU0, Thinker TP=1 on GPU1, Behemoth TP=2 asleep. Swapping to Behemoth requires sleeping both hot models.
+- `TESTING_QUEUE.md`: T1.2 DONE (FAIL), superseded by T1.2a (TP=1-per-GPU). Added conditional T1.2b (sleep-mode sequential) and T1.2c (MPS). T1.3 updated to reflect Behemoth borrowing both GPUs.
+
+**Tests queued for the next testing cycle:** T1.2a (TP=1-per-GPU concurrent eval).
+
+**Open from research:** none — queue is ready for testing.
+
+### R5 — April 17 2026 (evening)
 
 **Triggered by:** Claude Code hand-back from T1.1. Test reported FAIL: VRAM freed 2.1% vs 80% threshold, RAM flat throughout, wake in 85 ms. Narrative: "does vLLM 0.19 sleep mode actually implement weight offload for AWQ/MoE on Blackwell, or is this a rootless podman CUDA VMM restriction?"
 
@@ -105,23 +124,12 @@ Phase 0/1 work: chat template verification, vLLM vs SGLang throughput comparison
 
 ## Open from testing
 
-### From T1.2, 2026-04-18
+### From T1.X, date YYYY-MM-DD
 
-**What happened:** Both vLLM TP=2 processes deployed successfully (memory fit after util/max_model_len tuning — see run summaries). Isolated TPS matched expectations: coder 212.4 t/s, thinker 106.3 t/s. Under concurrent decode load (asyncio.gather, both processes receiving decode requests simultaneously), both dropped to **4.2 t/s each** (coder ratio 0.020, thinker ratio 0.040). Combined concurrent throughput: 8.4 t/s vs 212 t/s for coder alone. The three-tier concurrent design is unviable.
-
-**Relevant results dir:** `results/T1.2_concurrent_two_vllm_processes_shared_gpus_20260418T084649Z/`
-
-**Why this needs research, not another test:** The failure is architectural, not a config parameter. Without NVIDIA MPS, two CUDA processes cannot execute NCCL allreduce kernels concurrently on the same GPU pair — one blocks the other. Any util/ctx/scheduler tweak would produce the same ~2% throughput. A different architecture is needed. The relevant alternatives have meaningfully different tradeoffs that need evaluation against our OpenCode routing model and hardware constraints before picking a path:
-1. **TP=1 per GPU** (coder GPU0, thinker GPU1): true concurrent isolation. Cost: half memory bandwidth per model, single-GPU KV cache. Does coder still hit acceptable TPS at TP=1? Does 30B-AWQ fit on one 32 GiB GPU? (It should: 7.92 GiB weights + KV.)
-2. **NVIDIA MPS**: allows genuine concurrent CUDA execution. Known to work on datacenter parts; behavior on RTX 5090 (consumer Blackwell sm_120) is unverified and may be blocked by driver policy.
-3. **Sleep-mode sequential** (T1.1 fallback): one model active at a time, swap on demand in 0.9s. OpenCode routing would need to handle the swap latency. Sufficient for low-concurrency personal use.
-4. **Single endpoint / one model**: abandon the two-role design. Run one model (behemoth) and rely on its generality.
-
-**Suggested direction:** Research mode should:
-- Determine whether MPS is available on RTX 5090 (consumer Blackwell) and whether vLLM + rootless podman + MPS is a supported combo.
-- Evaluate TP=1-per-GPU throughput for coder (30B-A3B MoE) and thinker (27B dense) against acceptable TPS thresholds.
-- Reconsider whether T1.3 (behemoth) is still needed under TP=1-per-GPU (behemoth would then need its own TP=2, displacing one or both hot models).
-- Update `ARCHITECTURE.md` with the chosen design.
+**What happened:** short narrative.
+**Relevant logs / result dirs:** paths under `results/`.
+**Why this needs research, not another test:** the specific reason a parameter tweak is not enough.
+**Suggested direction:** what the operator thinks the research should investigate.
 
 <!-- Template for testing mode to fill in:
 
