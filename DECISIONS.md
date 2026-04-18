@@ -82,10 +82,16 @@ Need ~8× datacenter-class GPUs at any serving quant that preserves capability. 
 
 ---
 
-## SETTLED — architecture rules of thumb
+## SETTLED — hardware/infra truth
+
+### Behemoth (80B A3B MoE) on TP=2 is extremely viable
+Verified in T1.3 (2026-04-18). 189.5 t/s seq=1 decode, 610 t/s at seq=4, 13007 t/s prefill at 32k context.
+- **Requirement**: `--gpu-memory-utilization 0.95` on 32GB cards. 0.85 OOM'd during CUDA graph capture.
+- **Requirement**: `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1` env var to allow vLLM to estimate graph memory without pre-allocating it; without this, graph capture itself triggers OOM.
+- **Requirement**: `--tool-call-parser hermes --enable-auto-tool-choice`. Do **NOT** add `--reasoning-parser qwen3` — this causes hard failure regardless of the tool-call parser used. With `hermes`, the reasoning parser intercepts XML-tagged content (including tool calls) into the `reasoning` field before the tool parser sees it, resulting in 100% `no_call`. With `qwen3_xml`, it causes 100% `exception`. This is not a "benchmark-only" restriction — avoid entirely for this model.
 
 ### Dense 70B via TP=2 on PCIe x8/x8 no-NVLink → slow
-Measured across community reports: 20–35 t/s. Our first-principles math says this is NOT a bandwidth issue (decode allreduce = ~390 MB/s at 40 t/s, < 2% of x8 PCIe). The cause is NCCL sync-point overhead and kernel launch latency accumulating over many layers at large hidden dims. Does not generalize to MoE with small active-parameter counts — see next.
+Community-measured: 20–35 t/s. Our first-principles math shows this is NOT a bandwidth issue (decode allreduce = ~390 MB/s at 40 t/s, <2% of x8 PCIe). The cause is NCCL sync-point overhead and kernel launch latency accumulating over many layers at large hidden dims. Does not generalize to MoE with small active-parameter counts — see "MoE with ≤20B active params via TP=2 → fine" below.
 
 ### MoE with ≤20B active params via TP=2 → fine
 First-principles: A3B decode allreduce is ~60 MB/s at 150 t/s, ~0.2% of x8 PCIe bandwidth. Prefill at 32k ctx adds ~500ms to TTFT (~8% overhead). Expected to deliver 85–95% of TP=1-equivalent throughput. Measured numbers for our specific stack are a test item, but the architectural viability is settled — we don't need to ask "does TP=2 work for A3B at all."
@@ -119,7 +125,7 @@ OpenCode v1.3+ (Feb 2026) supports native multi-endpoint subagent routing. Agent
 Retained LiteLLM use case: observability / failover / request logging across endpoints. Not routing.
 
 ### Alternative AWQ publishers — not pursued
-Inter-publisher AWQ quality variance is within noise for our tasks. QuantTrio and cyankiwi/cpatonn are known-good.
+Inter-publisher AWQ quality variance is within noise for our tasks. QuantTrio and cyankiwi are known-good. Note: `cpatonn/` returned HTTP 401 for Qwen3-Next-80B during T1.3 — do not use `cpatonn/` for that model; `cyankiwi/` is the working publisher.
 
 **Re-evaluate if:** a specific quality discrepancy is observed on a task where the quantizer is a plausible suspect.
 
@@ -144,7 +150,7 @@ Affected models to re-evaluate if desired:
 - Anything that OOM'd under single-GPU bf16 assumptions
 
 ### OLD: "Qwen3-Coder-Next needs GGUF, 160B bf16 doesn't fit single GPU"
-**Superseded** — `cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` now exists. Fits TP=2 on 2×5090 with room for KV cache. Promoted to behemoth-tier test item.
+**Superseded** — `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` exists and fits TP=2 on 2×5090 with room for KV cache. T1.3 PASS confirmed. Note: `cpatonn/` repo for this model returned HTTP 401 during T1.3 testing — use `cyankiwi/` exclusively.
 
 ### OLD: "Two concurrent TP=2 processes sharing GPUs"
 **Superseded** — This assumption from R4 completely collapses due to CUDA context time-slicing reducing concurrent throughput to ~2% (see SETTLED). Architecture is pivoting to TP=1-per-GPU (coder GPU0, thinker GPU1) + behemoth TP=2 asleep.

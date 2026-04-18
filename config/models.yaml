@@ -12,6 +12,8 @@
 #   ctx_default: --max-model-len value; actual workable context depends on KV cache dtype and
 #                concurrent model load (see ARCHITECTURE.md for TP=2 gpu-mem-util math).
 #   engines:     engines known to *load* the model. Does not imply all features work (see notes).
+#   flags.vllm:  SUPPLEMENTAL flags only. Do not include --model or --tensor-parallel-size;
+#                these are managed by the deployment infrastructure scripts.
 
 models:
 
@@ -166,16 +168,20 @@ models:
   qwen3_coder_next_awq:
     status: CANDIDATE
     role: behemoth
-    hf_repo: cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit
+    hf_repo: cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit
     quant: AWQ-INT4
     format: awq
     vram_gb: 42       # across TP=2 → ~22 GiB per card
     ctx_default: 32768           # 262144 supported with VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
     engines: [vllm]
     flags:
-      vllm: "--tool-call-parser qwen3_coder --enable-auto-tool-choice"
+      # --gpu-memory-utilization is also passed explicitly to deploy.sh; listed here so the
+      # model-level requirement is self-documenting. deploy.sh --gpu-mem-util takes precedence
+      # if both are supplied — ensure they agree.
+      vllm: "--tool-call-parser hermes --enable-auto-tool-choice --gpu-memory-utilization 0.95"
     env:
-      - "VLLM_ALLOW_LONG_MAX_MODEL_LEN=1   # required"
+      - "VLLM_ALLOW_LONG_MAX_MODEL_LEN=1                  # required: enables 262k context"
+      - "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1        # required: prevents OOM during CUDA graph capture at 0.95 gpu-mem"
     requires_vllm: ">=0.15.0"
     known_bugs:
       - "MTP (qwen3_next_mtp) spec decode: status on sm_120 unverified. Do not enable by default; test via T3.3."
@@ -184,8 +190,8 @@ models:
       80B-A3B MoE with hybrid attention. Originally blocked because GGUF-only
       and bf16 doesn't fit one GPU. AWQ-4bit publication makes TP=2 deployment
       viable. Serves as the on-demand behemoth via Sleep Mode — kept asleep
-      with gpu-mem-util 0.85, woken when the coder/thinker pair is insufficient.
-      Only path to behemoth tier — if T1.3 fails, we become two-tier.
+      with gpu-mem-util 0.95, woken when the coder/thinker pair is insufficient.
+      T1.3 showed 0.85 was insufficient for 32k context due to CUDA graph overhead.
 
   # ============================================================
   # ELIMINATED — do not re-add to queue without new reason

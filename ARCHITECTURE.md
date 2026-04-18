@@ -5,7 +5,13 @@ Working architectural source of truth.
 
 Everything here is contingent on the tests listed in `TESTING_QUEUE.md`. This is the plan; reality will adjust it.
 
-> **Gating status (R6, 2026-04-18):** the dual-concurrent design hinges on isolating CUDA contexts. T1.2a successfully proved that isolating the Coder to GPU0 and Thinker to GPU1 preserves 100% of their isolated baseline speed. The architecture is now officially TP=1-per-GPU for the always-hot models to guarantee physical concurrent isolation. Behemoth remains TP=2-asleep and borrows both GPUs on demand.
+> **Gating status (R6+T1.3, 2026-04-18):** all four Tier-1 architecture questions answered.
+> The architecture is officially TP=1-per-GPU for the always-hot models to guarantee physical concurrent isolation. Behemoth remains TP=2-asleep and borrows both GPUs on demand.
+>
+> **Behemoth (Qwen3-Coder-Next-80B-A3B-AWQ) — T1.3 PASS:**
+> - **Verified performance**: 189 t/s seq=1 decode, 13 kt/s prefill at 32k context.
+> - **Deployment**: TP=2 (spanning both GPUs) via vLLM with `--tool-call-parser hermes`.
+> - **Headroom**: Requires `--gpu-memory-utilization 0.95` on 32GB cards to accommodate weights + CUDA graphs + 32k KV cache.
 
 ---
 
@@ -30,7 +36,7 @@ Everything here is contingent on the tests listed in `TESTING_QUEUE.md`. This is
 │  │  ┌───────┴────────┐    │    │  ┌───────┴────────┐     │     │
 │  │  │ Process C      │    │    │  │ Process C      │     │     │
 │  │  │ BEHEMOTH       │┈┈┈┈┼┈┈┈┈┼┈┈┤ (TP=2 across   │     │     │
-│  │  │ gpu-mem 0.85   │    │    │  │ GPU 0+1)       │     │     │
+│  │  │ gpu-mem 0.95   │    │    │  │ GPU 0+1)       │     │     │
 │  │  │ ASLEEP L1      │    │    │  │ ASLEEP L1      │     │     │
 │  │  └───────┬────────┘    │    │  └───────┬────────┘     │     │
 │  └──────────┼─────────────┘    └──────────┼──────────────┘     │
@@ -102,8 +108,8 @@ Consequence: all three processes are started **once** at system boot and sleep/w
 
 These are the items that can kill or modify this architecture. Listed in rough blast-radius order:
 
-1. **Sleep Mode works under rootless podman with our socket setup.** Endpoints require `VLLM_SERVER_DEV_MODE=1` on trusted networks — the operational path through podman + OpenCode has not been verified end-to-end.
-2. **Qwen3-Coder-Next-80B-A3B-AWQ TP=2 decode speed.** If it lands below ~40 t/s, the behemoth tier is not viable and we become two-tier.
+1. ~~**Sleep Mode works under rootless podman with our socket setup.**~~ **SETTLED — T1.1 PASS.** Sleep Mode frees 92.8% VRAM in ~4s, wakes in 0.9s, post-wake TPS within 0.1% of baseline.
+2. ~~**Qwen3-Coder-Next-80B-A3B-AWQ TP=2 decode speed.**~~ **SETTLED — T1.3 PASS.** 189 t/s seq=1, 13 kt/s prefill@32k. Behemoth tier is viable.
 3. **GLM-4.7-Flash MLA auto-detection** in our current vLLM. A known bug had MLA not triggering → 10× KV cache bloat. One-line fix landed; we need to verify per-token KV size matches MLA (~54 KB) not GQA (~98 KB).
 4. **CPU prefix cache survival across sleep/wake.** Would let a re-woken model keep most of its prompt cache in DRAM. Not verified; if false, each wake pays full prefill on first request.
 

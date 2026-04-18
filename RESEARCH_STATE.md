@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R6 closed — T1.2a PASS confirms TP=1-per-GPU architecture.
-**Current mode:** TESTING READY — pull next OPEN item from the queue (T1.1 rerun or T1.3).
+**Current cycle:** R6 closed — T1.3 PASS confirms Behemoth tier (189 t/s).
+**Current mode:** TESTING READY — pull next OPEN item from the queue (T2.1 or T1.4).
 
 ---
 
@@ -15,6 +15,7 @@ Living document. What we currently believe, what is still open, and the log of r
 - Qwen3.5-27B-AWQ on vLLM, single GPU: 76 t/s, quality 4.0/5 on 8-task thinker suite. Needs `--max-num-seqs 1`. One unresolved defect: th03 exhausts 8k token budget — needs raise to 16k+ (T1.4).
 - vLLM is our primary engine. vLLM launches cleanly with our rootless podman setup on Blackwell sm_120 at TP=2. AWQ-Marlin kernel path confirmed functional (T1.1 run loaded 18 GiB weights across TP=2 cleanly).
 - Sleep Mode confirmed working end-to-end (T1.1 PASS 2026-04-17): `VLLM_SERVER_DEV_MODE=1` + `--enable-sleep-mode` frees 92.8% VRAM (59 → 4 GiB) in ~4s, wake in 0.9s, post-wake TPS 212.3 t/s (ratio 1.000). vLLM 0.19 reasoning-parser streaming field is `delta.reasoning`, not `delta.reasoning_content`.
+- Qwen3-Coder-Next-80B-A3B-AWQ (behemoth) on vLLM TP=2: 189.5 t/s seq=1, 610 t/s aggregate at seq=4, 13007 t/s prefill@32k. Tool calls 100% reliable with `--tool-call-parser hermes` and **no** `--reasoning-parser`. Requires `--gpu-memory-utilization 0.95` and env `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`. HF repo: `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit`. Measured T1.3 (2026-04-18).
 
 ### Known bad / excluded
 
@@ -30,7 +31,7 @@ Critical unknowns remaining:
 1. ~~Does Sleep Mode work?~~ **SETTLED — yes (T1.1 PASS)**
 2. ~~Do two vLLM processes coexist at gpu-mem 0.40 each on shared GPUs?~~ **SETTLED — FAIL. Both fit in memory, but CUDA context time-slicing reduces concurrent decode to ~2%. Not viable.**
 3. ~~Does TP=1-per-GPU provide sufficient TPS for coder and thinker?~~ **SETTLED — PASS (T1.2a). Perfect 1.0x concurrent isolation. Coder=251t/s, Thinker=76.5t/s.**
-4. Does Qwen3-Coder-Next-80B-A3B-AWQ TP=2 hit ≥40 t/s? (T1.3)
+4. ~~Does Qwen3-Coder-Next-80B-A3B-AWQ TP=2 hit ≥40 t/s?~~ **SETTLED — PASS (T1.3). 189 t/s seq=1 decode, 100% tool reliability with `hermes` parser.**
 
 ---
 
@@ -40,7 +41,7 @@ Critical unknowns remaining:
 |-------|----------------|---------------|-----------|
 | GLM-4.7-Flash (30B-A3B) | Coder alternative | Yes: cyankiwi/cpatonn | MLA detection in vLLM (T2.1); MTP regression on Blackwell (T3.2) |
 | GLM-4.5-Air (106B/12B) | Thinker alternative | Yes: cpatonn | Marlin MoE group_size=64 caps TP=2 (fine for us) |
-| Qwen3-Coder-Next (80B-A3B) | Behemoth | Yes: cpatonn | TP=2 viability on x8/x8 PCIe; MTP on sm_120 |
+| Qwen3-Coder-Next (80B-A3B) | Behemoth | Yes: cyankiwi | ~~TP=2 viability~~ SETTLED T1.3 PASS; MTP on sm_120 (T3.3) |
 
 ---
 
@@ -63,6 +64,39 @@ Critical unknowns remaining:
 - `TESTING_QUEUE.md`: T1.2 DONE (FAIL), superseded by T1.2a (TP=1-per-GPU). Added conditional T1.2b (sleep-mode sequential) and T1.2c (MPS). T1.3 updated to reflect Behemoth borrowing both GPUs.
 
 **Tests queued for the next testing cycle:** T1.2a (TP=1-per-GPU concurrent eval).
+
+**Open from research:** none — queue is ready for testing.
+
+### T1.3 testing cycle — April 18 2026
+
+**Triggered by:** T1.2a PASS. Behemoth viability (T1.3) was next in queue.
+
+**Testing findings:**
+
+1. **Wrong HF repo (`cpatonn/`):** First three runs (`105618Z`–`112638Z`) used `cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` — failed with HTTP 401 Unauthorized. Correct repo is `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit`. `config/models.yaml` hf_repo corrected.
+
+2. **`gpu-memory-utilization 0.85` is insufficient:** With the correct repo, the initial planned gpu-mem (0.85) caused OOM during CUDA graph capture. Fix: raise to 0.95. Also required: `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1` env var to allow estimating graph memory without allocating it; without this, vLLM OOMs before graphs are captured.
+
+3. **Parser trial sequence (all at 0.95 gpu-mem, correct repo):**
+   - `--tool-call-parser qwen3_coder` → 9/9 `no_call`. Parser does not emit tool calls for this model's output format.
+   - `--tool-call-parser qwen3_xml` → 9/9 `wrong_tool`. Format parsed but tool name/schema mismatch.
+   - `--tool-call-parser qwen3_xml --reasoning-parser qwen3` → 9/9 `exception`. Reasoning parser causes hard exceptions.
+   - `--tool-call-parser hermes --reasoning-parser qwen3` → 9/9 `no_call`. Reasoning parser intercepts XML-tagged content (including tool calls) into the `reasoning` field before the tool-call parser sees it, starving it entirely.
+   - `--tool-call-parser hermes` (no reasoning parser) → 9/9 PASS. 100% tool-call reliability.
+
+4. **Working config:** `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit`, TP=2, `--gpu-memory-utilization 0.95`, `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`, `--tool-call-parser hermes --enable-auto-tool-choice`. No `--reasoning-parser`.
+
+5. **Performance:** 189.5 t/s seq=1 decode, 610 t/s aggregate at seq=4, 13007 t/s prefill at 32k context. Verdict: PASS.
+
+**Decisions updated:**
+- `DECISIONS.md` SETTLED: "Behemoth (80B A3B MoE) on TP=2 is extremely viable — T1.3 PASS."
+- `DECISIONS.md` SETTLED: `--tool-call-parser hermes` is required; `--reasoning-parser qwen3` must NOT be added (hard failures at all parser combinations).
+- `config/models.yaml`: hf_repo corrected to `cyankiwi/`, flags updated to `hermes`, gpu-mem-util 0.95, added `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1` to env.
+- `ARCHITECTURE.md`: Behemoth deployment details updated; Known unknowns items 1 and 2 settled.
+- `TESTING_QUEUE.md`: T1.3 marked DONE (PASS ✓), result block added, procedure corrected.
+- `infra/scripts/deploy.sh`: `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS` passthrough added.
+
+**Tests queued for next testing cycle:** T2.1 (GLM-4.7-Flash MLA verification) or T1.4 (thinker token budget fix) — both are independent and cheap.
 
 **Open from research:** none — queue is ready for testing.
 

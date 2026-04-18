@@ -148,16 +148,28 @@ Conclusion: TP=1-per-GPU cleanly solves the shared-GPU time-slicing issue. Coder
 
 ---
 
-### T1.3 — qwen3_coder_next_awq_tp2_viability
+### T1.3 — qwen3_coder_next_awq_tp2_viability — DONE (PASS ✓)
 
-**Question:** Does `cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` load and decode acceptably on TP=2 across our two 5090s? (Note: now decoupled from the hot-pair architecture, as Behemoth borrows both GPUs during wakeup).
+**Question:** Does `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` load and decode acceptably on TP=2 across our two 5090s? (Note: now decoupled from the hot-pair architecture, as Behemoth borrows both GPUs during wakeup).
 
-**Procedure:**
-1. Deploy with `VLLM_ALLOW_LONG_MAX_MODEL_LEN=1`, TP=2, `--gpu-memory-utilization 0.85`, context 32768, `--tool-call-parser qwen3_coder`.
+**Result (2026-04-18):** PASS. 189.5 t/s seq=1 decode, 610 t/s aggregate at seq=4, 13007 t/s prefill at 32k context, 100% tool-call pass rate (9/9) with `--tool-call-parser hermes`.
+Conclusion: Behemoth tier is fully viable. Three-tier architecture confirmed.
+
+Parser trial history (failures before working config):
+- `--tool-call-parser qwen3_coder` → 9/9 `no_call` (parser does not emit tool calls for this model)
+- `--tool-call-parser qwen3_xml` → 9/9 `wrong_tool` (format mismatch)
+- `--tool-call-parser qwen3_xml --reasoning-parser qwen3` → 9/9 `exception` (reasoning parser causes hard failure)
+- `--tool-call-parser hermes --reasoning-parser qwen3` → 9/9 `no_call` (reasoning parser intercepts XML tool tags into the `reasoning` field)
+- `--tool-call-parser hermes` (no reasoning parser) → 9/9 PASS
+
+Also required for successful load: `--gpu-memory-utilization 0.95` (0.85 OOM'd during CUDA graph capture) and `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`.
+
+**Procedure (as executed — for reproducibility):**
+1. Deploy `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` with `VLLM_ALLOW_LONG_MAX_MODEL_LEN=1`, `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`, TP=2, `--gpu-memory-utilization 0.95`, context 32768, `--tool-call-parser hermes --enable-auto-tool-choice`. No `--reasoning-parser`.
 2. Measure decode TPS at seq=1 and concurrency=4.
 3. Measure prefill throughput at 8k, 16k, 32k prompts.
-4. Run a smoke subset of Phase 0 tool-call tasks (5 tasks) to verify tool-call parsing still works on the Next variant.
-5. Do NOT enable MTP spec decode. Measure first without; MTP is a separate item (T3.x).
+4. Run all Phase 0 tool-call tasks (9 tasks) to verify tool-call parsing works on the Next variant.
+5. Do NOT enable MTP spec decode. Measure first without; MTP is a separate item (T3.3).
 
 **Pass (as behemoth):** decode TPS ≥ 40 t/s at seq=1, no prefill pathology, tool calling works.
 
