@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R6 closed — T1.3 PASS confirms Behemoth tier (189 t/s).
-**Current mode:** TESTING READY — pull next OPEN item from the queue (T2.1 or T1.4).
+**Current cycle:** R7 closed — architectural doubts answered (Qwen3.6 / multi-model-in-one-vLLM / kvcached / 4 GiB residual / behemoth diversity).
+**Current mode:** TESTING READY — pull next OPEN item from the queue (T1.5, T2.1, T2.5, or T1.4).
 
 ---
 
@@ -42,12 +42,49 @@ Critical unknowns remaining:
 | GLM-4.7-Flash (30B-A3B) | Coder alternative | Yes: cyankiwi/cpatonn | MLA detection in vLLM (T2.1); MTP regression on Blackwell (T3.2) |
 | GLM-4.5-Air (106B/12B) | Thinker alternative | Yes: cpatonn | Marlin MoE group_size=64 caps TP=2 (fine for us) |
 | Qwen3-Coder-Next (80B-A3B) | Behemoth | Yes: cyankiwi | ~~TP=2 viability~~ SETTLED T1.3 PASS; MTP on sm_120 (T3.3) |
+| Qwen3.6-35B-A3B (Apache 2.0, 2026-04-14) | Coder alternative | Yes: cyankiwi | 22 GiB weights tight at TP=1 (may need TP=2); thinking-by-default (disable flag needed); tool parser `qwen3_coder` per model card — test T2.5 |
 
 ---
 
 ## Cycle log
 
-### R6 — April 18 2026 — current
+### R7 — April 18 2026 — architectural doubts + Qwen3.6
+
+**Triggered by:** operator raised four questions after the T1.3 pass:
+1. Qwen3.6 lineup (just released) — candidacy as higher-quality endpoint.
+2. Is TP=1-per-GPU really the only way? Can vLLM engines be coordinated, or two models merged into one process?
+3. KV cache: per-role distribution + dynamic resizing.
+4. Reducing the ~4 GiB Sleep-Mode residual to revive TP=2.
+5. (Implicit) Behemoth archetype diversity — context-rich vs knowledge-rich.
+
+**Research findings:**
+
+1. **Qwen3.6-35B-A3B is a genuine coder candidate.** Apache 2.0, released 2026-04-14. 35B total / 3B active MoE. 262k native context (extensible to 1M via YaRN). Thinking-by-default (can be disabled via `enable_thinking: False` in tokenizer or request). Tool-call parser `qwen3_coder` per model card. AWQ published as `cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit` — the same publisher that worked for Qwen3-Next-80B. Weight size (~22 GiB) is the same class as the old `qwen35_35b_a3b_awq` REVIEW entry, but this is a fresh generation that supersedes it as the 35B-A3B candidate of record. Qwen3.6-Plus is proprietary API-only (1M context), not relevant for local hosting.
+
+2. **Multi-model in a single vLLM process is not supported.** Verified upstream: open feature request, no ETA. Community workarounds are separate instances behind an nginx router, or third-party `llmux` for zero-reload switching. This closes path "merge two models into one vLLM process."
+
+3. **`kvcached` is a real third path for concurrent GPU sharing.** `ovg-project/kvcached` provides a virtualized elastic KV cache that decouples GPU virtual addressing from physical memory, allowing multiple vLLM instances to share a GPU KV pool dynamically. Supports MHA/GQA/MLA. Explicitly tested with vLLM 0.19.0 (our exact version). Red Hat endorsement, v0.1.5 active maintenance. This operates at the memory layer, not the CUDA context layer, so it may sidestep the context time-slicing that killed naive concurrent-TP=2 in T1.2 — without requiring MPS or root. Queued as T1.5 spike.
+
+4. **The ~4 GiB Sleep-Mode residual is a design floor at level=1.** Level 1 deliberately preserves the caching allocator instance, captured CUDA graphs, JIT-compiled kernels, and process state. This is what buys <1s wake. Cannot be shrunk without breaking the wake-time guarantee. Level 2 offloads more but has the gibberish-on-wake bug we already documented. `wake_up(tags=["weights"])` exists for selective wake granularity but not sleep footprint. Conclusion: to "make TP=2 viable again," change the sharing model (kvcached), not the residual.
+
+5. **Behemoth diversity is a meaningful axis.** The behemoth slot is on-demand and tolerates archetype diversity (different models for different escalation types). Two candidate archetypes: context-rich mid-large (50–70B with 256k+ context) for long-document/repo-wide work, vs knowledge-rich (Qwen3-Coder-Next-80B-A3B, currently settled). Reserved as a standing design item T2.6 to prompt candidate scouting without committing to a test yet.
+
+**Decisions updated:**
+- `DECISIONS.md` SETTLED: "Multi-model in a single vLLM process is not supported upstream — do not plan around it."
+- `DECISIONS.md` SETTLED: "Sleep Mode level=1 ~4 GiB residual is a design floor, not a tunable."
+- `DECISIONS.md` PROVISIONAL: "`kvcached` as a third concurrent-GPU sharing path — test in T1.5."
+- `DECISIONS.md` SUPERSEDED: `qwen35_35b_a3b_awq` as the 35B-A3B candidate-of-record is replaced by `qwen36_35b_a3b_awq` (Qwen3.6, Apache 2.0, fresh generation).
+- `TESTING_QUEUE.md`: added **T1.5** (kvcached spike), **T2.5** (Qwen3.6-35B-A3B shootout), **T2.6** (behemoth archetype scouting — design item).
+- `config/models.yaml`: added `qwen36_35b_a3b_awq` as CANDIDATE coder; old `qwen35_35b_a3b_awq` REVIEW entry annotated as superseded by Qwen3.6.
+
+**Tests queued for the next testing cycle:**
+- T1.5 (kvcached spike) — unblocks potential TP=2 revival.
+- T2.5 (Qwen3.6-35B-A3B shootout) — can run solo-TP=1 today; concurrent-dual re-run gated on T1.5.
+- Plus previously-queued: T2.1 (GLM-4.7-Flash MLA), T1.4 (thinker token budget fix).
+
+**Open from research:** none — queue is ready for testing.
+
+### R6 — April 18 2026 — T1.2 hand-back, TP=1-per-GPU pivot
 
 **Triggered by:** Claude Code hand-back from T1.2. Test reported FAIL: concurrent TP=2 processes sharing GPUs collapsed to 4.2 t/s each (~2% of isolate throughput).
 

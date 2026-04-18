@@ -184,6 +184,36 @@ Also required for successful load: `--gpu-memory-utilization 0.95` (0.85 OOM'd d
 
 ---
 
+### T1.5 — kvcached_shared_gpu_kv_pool (SPIKE)
+
+**Question:** Can `ovg-project/kvcached` enable two vLLM instances to cohabit a single GPU (or a pair, TP=2-on-both) with a shared, elastic KV-cache pool — without the CUDA context time-slicing collapse we hit in T1.2?
+
+**Why this matters:** `kvcached` operates at the GPU memory layer (decouples virtual from physical addressing) rather than the CUDA context layer. If it works on our stack, it opens a third path between (a) the current TP=1-per-GPU isolation and (b) the failed naive concurrent TP=2. It could enable concurrent TP=2 without MPS/root, and make per-role KV budgets dynamically resizable — directly addressing the "distribute KV cache per model efficiently" concern.
+
+**Procedure (spike — small, time-boxed):**
+1. Read `kvcached` README and install matrix. Verify vLLM 0.19.0 support is explicit (it is, per current research). Note exact patch/plugin mechanism (whether it ships as a vLLM plugin or an LD_PRELOAD-style shim).
+2. Build/extend our vLLM container image with `kvcached` installed. Record image digest.
+3. Phase A (baseline sanity): single vLLM instance with `kvcached` enabled, TP=1, Qwen3-Coder-30B-AWQ. Verify no regression vs T1.2a numbers (seq=1 ≥ 240 t/s, no load/wake regressions).
+4. Phase B (the point): two vLLM instances, both TP=1 on the same GPU, sharing the KV pool via kvcached. Coder + thinker (Qwen3-Coder-30B-AWQ + Qwen3.5-27B-AWQ). Run T1.2a concurrent-decode workload.
+5. Phase C (stretch): two vLLM instances both TP=2 sharing both GPUs via kvcached — the original failed T1.2 topology, retried.
+
+**Pass:**
+- Phase A: baseline intact (within 5% of T1.2a numbers).
+- Phase B: combined TPS ≥ 80% of the sum of isolated TPS (coder 251 + thinker 76.5 = 327.5 → ≥ 262 combined).
+- Phase C: combined TPS ≥ 2% (i.e. not the catastrophic collapse seen in T1.2). ≥ 50% would be a genuine architectural win and would reopen TP=2-for-both-hot.
+
+**What failure means:**
+- Phase A fails → `kvcached` incompatibility with our engine version or podman setup. Investigate (hand-back). No architectural change.
+- Phase B fails → `kvcached` doesn't solve the context-slicing problem (it addresses memory, not scheduling). Architecture stays TP=1-per-GPU. Not a research block.
+- Phase C fails but B passes → the CUDA-context problem is orthogonal to KV sharing; memory sharing alone isn't enough for TP=2 concurrent. Accept status quo + note in DECISIONS.md.
+- Phase C passes → TP=2-for-both-hot is revived. Major architecture rewrite — hand back to research.
+
+**Deps:** none (orthogonal to everything currently queued; needs working baseline from T1.2a which is DONE).
+
+**Hand-back trigger:** Phase B passes (validates new sharing primitive — operator needs to decide whether to rework architecture around it), or Phase C passes (forces architecture rewrite), or any install/load crash whose cause is outside documented kvcached issues.
+
+---
+
 ### T1.4 — th03_token_budget_fix
 
 **Question:** Does raising `--max-tokens` to 16384 on the thinker endpoint resolve the `th03_architecture_tradeoffs` empty-output defect?
@@ -276,6 +306,53 @@ Run after T1 is settled (or mid-T1 if cycles allow).
 **Deps:** T1.4 (th03 fix); T1.2 for confidence that concurrent-dual works.
 
 **Hand-back trigger:** GLM-4.5-Air has undocumented parser issues we cannot resolve from the model card.
+
+---
+
+### T2.5 — coder_shootout_qwen36_35b_a3b_vs_qwen3coder30b
+
+**Question:** Does Qwen3.6-35B-A3B-AWQ (released 2026-04-14, Apache 2.0) beat the Qwen3-Coder-30B-A3B-AWQ baseline on the current task suite?
+
+**Why this item exists:** Qwen3.6 is a fresh-generation 35B-A3B MoE (3B active, 262k native context). It supersedes the old `qwen35_35b_a3b_awq` REVIEW entry as the 35B-A3B candidate of record. Same active-param budget as our baseline coder (3B) so decode TPS should be in the same class; improvements would come from training quality and context budget.
+
+**Procedure (solo — no concurrent-dual yet):**
+1. Deploy `cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit` on vLLM, TP=1 on one GPU, context 32768. Parser `--tool-call-parser qwen3_coder`. Investigate whether `--reasoning-parser qwen3` helps or hurts (model is thinking-by-default; may need `enable_thinking: False` in chat template or request).
+2. Verify load succeeds. 22 GiB weights at TP=1 on 32 GB card leaves tight headroom (~7–8 GiB for graphs + KV) — same class as the old 35B-A3B single-GPU failure. If CUDA graphs can't capture, retry at TP=2 on one card-pair (borrowing both GPUs, hot pair sleeping).
+3. Run Phase 0 tool-reliability suite (20 tasks) + Phase 2.1 coder quality suite (10 tasks).
+4. Score: tool-call PASS rate, quality 1–5 per task, TTFT p50, decode TPS at seq=1 and seq=4.
+5. Compare head-to-head against Qwen3-Coder-30B-A3B-AWQ on the same suite.
+
+**Pass for Qwen3.6 winning:** ≥95% tool-call PASS, quality sum ≥ baseline on ≥60% of tasks, no TPS regression worse than 20%.
+
+**What failure means:**
+- Qwen3.6 loses on quality → Qwen3-Coder-30B-AWQ stays baseline. Mark Qwen3.6 ELIMINATED in `DECISIONS.md`.
+- Qwen3.6 wins solo but can't run concurrent-dual at TP=1 (weight size makes CUDA graphs tight alongside thinker) → re-test concurrent viability via T1.5 (kvcached) once that spike settles. Gate the coder swap on concurrent numbers, not solo numbers.
+- Mixed results → same hand-back pattern as T2.2.
+
+**Deps:** none for solo run. For concurrent-dual eligibility: T1.5 (kvcached spike) or a successful TP=2-for-both-hot revival.
+
+**Hand-back trigger:** mixed results; or CUDA graph capture fails at TP=1 and we need to decide TP=2 vs accept graph-disabled slowdown.
+
+---
+
+### T2.6 — behemoth_archetype_scouting (DESIGN)
+
+**Question:** Which behemoth archetype(s) deserve a slot beyond the currently-settled Qwen3-Coder-Next-80B-A3B? Candidate axes: knowledge-rich (current) vs context-rich (e.g. 50–70B AWQ with 256k+ usable context) vs precision-rich (a mid-size model run at higher precision).
+
+**Why this item exists:** the behemoth tier is on-demand (woken via sleep mode). Because only one behemoth is active at a time, the slot can host archetype diversity — different models for different escalation types — without costing concurrent VRAM. Operator flagged this as a direction to "leave space for."
+
+**This is a design / scouting item, not a runnable benchmark.** It produces:
+1. A candidate archetype taxonomy (2–3 archetypes, short rationale each).
+2. A per-archetype 1–2 model shortlist (HF repos, VRAM at TP=2 AWQ, native context, tool-parser status).
+3. For each shortlist entry, a list of concrete runnable sub-items (T2.6.1, T2.6.2, …) to be queued only after archetype triage.
+
+**Out of scope here:** running any benchmark. That moves to sub-items.
+
+**Pass:** a written-up design note added to `ARCHITECTURE.md` (behemoth section) and 1+ sub-items queued.
+
+**Deps:** T1.3 (behemoth tier viability is confirmed — ✓ DONE), T2.4 (behemoth value vs coder — gate on "is the tier worth diversifying" evidence before spending cycles).
+
+**Hand-back trigger:** N/A — this is a research-mode item by construction.
 
 ---
 

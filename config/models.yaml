@@ -66,9 +66,37 @@ models:
       Their published comparison is against Qwen3-30B-A3B general, NOT our
       Qwen3-Coder-30B-A3B baseline — real gap vs our coder is unknown until T2.2.
 
-  # ── REVIEW (decided on old single-GPU assumption) ──────────────────────
+  # ── CANDIDATE coder (Qwen3.6 generation — supersedes old Qwen3.5-35B-A3B) ─
+  qwen36_35b_a3b_awq:
+    status: CANDIDATE
+    role: coder
+    hf_repo: cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 22
+    ctx_default: 32768        # 262144 native per model card; YaRN extensible to 1M
+    engines: [vllm]
+    flags:
+      vllm: "--tool-call-parser qwen3_coder"
+      # Thinking-by-default model. To disable thinking, set `enable_thinking: False`
+      # in tokenizer chat template or per-request. Do NOT add --reasoning-parser
+      # unless explicitly tested — Qwen3-Next-80B (same family) had 100% failure
+      # with any reasoning-parser combo. Verify in T2.5 before trusting results.
+    requires_vllm: ">=0.15.0"   # conservative — Qwen3.6 landed after this
+    test_items: [T2.5]
+    notes: >
+      35B total / 3B active MoE. Apache 2.0, released 2026-04-14. Same active-param
+      class as our Qwen3-Coder-30B baseline, so decode TPS should be comparable;
+      improvements should come from training quality and larger context budget.
+      22 GiB weights at TP=1 on 32 GB card leaves ~7–8 GiB headroom — tight for
+      CUDA graphs + KV. If graph capture fails, fall back to TP=2 on the card-pair
+      (borrows both GPUs, hot pair sleeps) — test protocol in T2.5 covers both.
+      Concurrent-dual viability at TP=1 is gated on T1.5 (kvcached spike) if the
+      weight pressure makes co-residency with the thinker infeasible.
+
+  # ── SUPERSEDED: old Qwen3.5-35B-A3B (kept as historical record only) ────
   qwen35_35b_a3b_awq:
-    status: REVIEW
+    status: ELIMINATED
     role: coder
     hf_repo: QuantTrio/Qwen3.5-35B-A3B-AWQ
     quant: AWQ-INT4
@@ -76,19 +104,22 @@ models:
     vram_gb: 22
     ctx_default: 32768
     engines: [vllm]
+    superseded_by: qwen36_35b_a3b_awq
     known_bugs:
       - "SGLang PERMANENTLY INCOMPATIBLE: qwen3_5.py:1662 weight-loader expects fused experts.w2_weight but QuantTrio stores per-expert tensors. Code bug, not config. Skip SGLang for this model until patched upstream."
       - "vLLM PR #39055 (think+tool drop): use --reasoning-parser qwen3 as workaround."
-    why_review: >
-      Eliminated at 22 t/s with --enforce-eager on SINGLE GPU because 22 GiB
-      weights left <1 GiB headroom (CUDA graph profiling needs ~1.03 GiB, so
-      graphs had to be disabled → 10× penalty). On TP=2, per-card weight load
-      drops to ~11 GiB leaving ~16+ GiB per card for graphs + KV. The original
-      failure reason does not apply to TP=2. Not currently a priority (our coder
-      baseline is strong), but this model is not dead in principle. If revived,
-      queue as new T-item.
+    elimination_reason: >
+      Measured at 22 t/s with --enforce-eager on SINGLE GPU (22 GiB weights left
+      <1 GiB headroom, below the ~1.03 GiB CUDA graph profiling needs → graphs
+      disabled → 10× penalty). Qwen3.6-35B-A3B-AWQ (Apache 2.0, released
+      2026-04-14) is the fresh-generation successor and the 35B-A3B candidate of
+      record going forward. Do not revive this entry as a coder candidate — use
+      qwen36_35b_a3b_awq instead.
     notes: >
-      Keep the SGLang incompatibility note above — that is permanent until patched.
+      Kept only as a historical record for the single-GPU failure mode.
+      The SGLang incompatibility note is permanent until patched upstream, and
+      likely applies to the Qwen3.6 weights too — verify in T2.5 if SGLang is
+      ever considered for Qwen3.6.
 
   # ============================================================
   # THINKER ROLE

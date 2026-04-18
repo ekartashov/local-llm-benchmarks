@@ -28,6 +28,12 @@ Two parallel vLLM processes sharing the same GPU(s) without NVIDIA MPS experienc
 ### NVIDIA MPS (Multi-Process Service) is skipped
 While MPS solves the context time-slicing issue above, it requires a privileged root daemon on the host which breaks our rootless podman invariant. sm_120 (consumer Blackwell) support is also unverified outside datacenter environments. A TP=1-per-GPU architecture avoids the problem entirely without root.
 
+### Multi-model in a single vLLM process is not supported
+vLLM does not support hosting more than one model weight set in one server process. This is an open upstream feature request with no ETA. Community workarounds are separate vLLM instances behind an nginx router, or third-party `llmux` for zero-reload switching. Do not plan around "merge coder + thinker into one vLLM" — it is not a path.
+
+### Sleep Mode level=1 ~4 GiB residual is a design floor, not a tunable
+When a vLLM instance sleeps at level=1, it retains ~4 GiB GPU VRAM (measured in T1.1). This is the caching allocator instance, captured CUDA graphs, JIT-compiled kernels, and process state — deliberately preserved to enable <1s wake. It cannot be shrunk without breaking the wake-time guarantee. Level=2 offloads more but is unusable (gibberish-on-wake, see separate entry). `wake_up(tags=[...])` affects wake granularity, not sleep footprint. The way to reclaim GPU memory while "sleeping" is to fully stop the container (T1.1c fallback path), not to tune level=1 lower.
+
 ### System RAM is not VRAM for KV cache
 Offloading KV cache to DDR5 costs 50–80% decode speed (memory bandwidth gap: 83 GB/s vs 1790 GB/s). We keep working set in GDDR7. System RAM is fine for **weight storage during sleep** (see vLLM Sleep Mode) but not for active KV.
 
@@ -71,8 +77,8 @@ Quality 2.6/5 dominated by Qwen3.5-27B 4.0/5 across task categories. Not margina
 ### Devstral is eliminated
 bf16 OOMs at 30.4 GiB, and at any quant its quality is below Qwen3-Coder-30B-AWQ on our tasks. No path to viability.
 
-### Qwen3.5-35B-A3B-AWQ on single GPU is dead, but **not** in general
-Measured: 22 t/s with `--enforce-eager` (forced because the 22 GiB bf16 weight load leaves <1 GiB headroom, below the ~1.03 GiB CUDA graph profiling needs). 10× slowdown. **Status on TP=2 is unknown** — more VRAM headroom could allow graphs. Not currently a priority; if retested, queue item should be explicit. SGLang is separately incompatible (see config note on `qwen3_5.py:1662` weight-map bug — a code bug in SGLang, not a config problem).
+### Qwen3.5-35B-A3B-AWQ is superseded by Qwen3.6-35B-A3B-AWQ
+Old REVIEW status retained for the single-GPU failure record (22 t/s with `--enforce-eager`, <1 GiB headroom, 10× slowdown). **Qwen3.6-35B-A3B-AWQ** (Apache 2.0, released 2026-04-14, publisher `cyankiwi`) is the fresh-generation 35B-A3B candidate of record — same active-param class (3B), 262k native context, tool parser `qwen3_coder`, thinking-by-default. Queued as T2.5. The old Qwen3.5-35B-A3B entry should not be revived as a coder candidate; any 35B-A3B re-evaluation targets Qwen3.6. SGLang is separately incompatible with the QuantTrio Qwen3.5 weights (see config note on `qwen3_5.py:1662` weight-map bug — a code bug in SGLang, not a config problem).
 
 ### GLM-4.6-Air does not exist
 Z.ai released GLM-4.6V (vision, Air-sized) but skipped text-only Air. They went to GLM-4.7 flagship + GLM-4.7-Flash. No research gap — it was simply never released.
@@ -134,6 +140,15 @@ Orthogonal axis (refusal behavior), not a coding/infra capability axis. Irreleva
 
 ### Single-GPU-per-model placement — reinstated as default for the hot pair
 Was deprioritized in R4, but T1.2's collapse under multi-process GPU sharing makes TP=1-per-GPU the mandatory topology for concurrent isolated execution (coder on GPU0, thinker on GPU1). TP=2 is now reserved exclusively for the behemoth model (which borrows both GPUs while the hot pair sleeps).
+
+**Re-evaluate if:** T1.5 (`kvcached` spike) Phase B or Phase C passes — that would validate a memory-layer sharing primitive that sidesteps the context time-slicing problem without requiring MPS or root, and could revive TP=2-for-both-hot.
+
+### kvcached as a third GPU-sharing path — provisional, test in T1.5
+`ovg-project/kvcached` provides virtualized elastic KV cache (decouples GPU virtual from physical addressing), allowing multiple vLLM instances to share a KV pool dynamically on the same GPU. Tested with vLLM 0.19.0 (our version), supports MHA/GQA/MLA, actively maintained (v0.1.5, Red Hat endorsement). Operates at the memory layer, not the CUDA context layer, so it may sidestep the problem that killed naive concurrent TP=2 in T1.2 — without needing MPS or root.
+
+**Status:** promising on paper. Not validated on our stack. Queued as T1.5 spike.
+
+**Re-evaluate if:** T1.5 Phase B/C settles (either confirming it works — possibly reviving TP=2-for-both-hot — or confirming that context-slicing is orthogonal to KV sharing).
 
 ---
 
