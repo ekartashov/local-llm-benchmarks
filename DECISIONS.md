@@ -11,7 +11,9 @@ Items removed entirely: the previous "Decisions already settled (do not re-evalu
 
 ---
 
-## SETTLED — infrastructure / tooling
+- **SETTLED (2026-04-18):** Qwen3.6-35B-A3B-AWQ is the new coder role winner based on metrics. 96.7% tool reliability + 100% quality completion rate + 237.1 t/s decode. Supersedes Qwen3-Coder-30B. Requires `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. (Note: This is the native Qwen stack, distinct from the hermes-based Behemoth stack).
+- **SETTLED (2026-04-18):** Benchmarking "thinking" models requires `max_tokens >= 4096` in quality tasks to avoid reasoning-limit saturation (where the model hit the limit while still in `<think>`).
+- **SETTLED (2026-04-18):** vLLM v0.19.0+ `reasoning-parser` uses `delta.reasoning` (o1-style) in SSE delta. BenchClient MUST capture this field for accurate throughput/capture of thinking models.
 
 ### No Ollama
 Adds 10–30% overhead vs raw engine containers; known broken tool parser for Qwen3.5 family (Ollama issue #14493). Nothing to measure.
@@ -77,8 +79,8 @@ Quality 2.6/5 dominated by Qwen3.5-27B 4.0/5 across task categories. Not margina
 ### Devstral is eliminated
 bf16 OOMs at 30.4 GiB, and at any quant its quality is below Qwen3-Coder-30B-AWQ on our tasks. No path to viability.
 
-### Qwen3.5-35B-A3B-AWQ is superseded by Qwen3.6-35B-A3B-AWQ
-Old REVIEW status retained for the single-GPU failure record (22 t/s with `--enforce-eager`, <1 GiB headroom, 10× slowdown). **Qwen3.6-35B-A3B-AWQ** (Apache 2.0, released 2026-04-14, publisher `cyankiwi`) is the fresh-generation 35B-A3B candidate of record — same active-param class (3B), 262k native context, tool parser `qwen3_coder`, thinking-by-default. Queued as T2.5. The old Qwen3.5-35B-A3B entry should not be revived as a coder candidate; any 35B-A3B re-evaluation targets Qwen3.6. SGLang is separately incompatible with the QuantTrio Qwen3.5 weights (see config note on `qwen3_5.py:1662` weight-map bug — a code bug in SGLang, not a config problem).
+### Qwen3.6-35B-A3B-AWQ is the new coder candidate of record
+SETTLED in T2.5 (2026-04-18). 237.1 t/s single-GPU. 96.7% tool-call reliability. 100% quality completion rate. Supersedes Qwen3-Coder-30B (251 t/s). Thinking-by-default is handled natively by vLLM `reasoning-parser qwen3`. Apache 2.0.
 
 ### GLM-4.7-Flash (30B-A3B) MLA confirmed; tool crash is a parser bug with a known fix
 

@@ -79,9 +79,11 @@ class BenchClient:
                         content_parts.append(delta.content)
 
                     # vLLM reasoning parser puts <think> tokens in reasoning_content
-                    # (a non-standard field surfaced via model_extra). Capture it so
-                    # token counts and decode_tps are accurate even in thinking mode.
-                    reasoning = (delta.model_extra or {}).get("reasoning_content") if hasattr(delta, "model_extra") else None
+                    # (a non-standard field surfaced via model_extra) or 'reasoning'
+                    # (OpenAI o1/o3 style). Capture both so token counts and
+                    # decode_tps are accurate even in thinking mode.
+                    extras = (delta.model_extra or {}) if hasattr(delta, "model_extra") else {}
+                    reasoning = extras.get("reasoning_content") or extras.get("reasoning")
                     if reasoning:
                         content_parts.append(reasoning)
 

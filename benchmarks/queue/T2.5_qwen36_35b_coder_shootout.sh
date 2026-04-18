@@ -111,6 +111,8 @@ if VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 "${REPO_ROOT}/infra/scripts/deploy
         --gpu-mem-util 0.95 \
         --ctx 32768 \
         --tool-call-parser qwen3_coder \
+        --reasoning-parser qwen3 \
+        --enable-auto-tool-choice \
         2>&1 | tee -a "${LOG}"; then
     PLACEMENT="tp=1 (gpu0)"
     ENDPOINT="http://localhost:${PORT_VLLM_GPU0}/v1"
@@ -130,6 +132,8 @@ else
         --gpu-mem-util 0.85 \
         --ctx 32768 \
         --tool-call-parser qwen3_coder \
+        --reasoning-parser qwen3 \
+        --enable-auto-tool-choice \
         2>&1 | tee -a "${LOG}"
     PLACEMENT="tp=2 (tp2c)"
     ENDPOINT="http://localhost:${PORT_VLLM_TP2_C}/v1"
@@ -161,6 +165,7 @@ python3 -m benchmarks.phase0_tool_reliability.bench \
     --endpoint "${ENDPOINT}" \
     --results-dir "${RESULTS_DIR}/phase0" \
     --tasks "${REPO_ROOT}/benchmarks/phase0_tool_reliability/tasks/" \
+    --model "${MODEL}" \
     --max-tokens 2048 \
     2>&1 | tee -a "${LOG}" || {
     log "WARNING: phase0 bench exited non-zero — check for exceptions."
@@ -187,8 +192,8 @@ except Exception:
 " 2>/dev/null || echo 0)
 
 if (( NO_CALL_COUNT > 5 )); then
-    log "ALERT: ${NO_CALL_COUNT} tasks scored no_call — qwen3_coder parser may not work for this model."
-    log "SUGGESTION: stop this script, redeploy with '--tool-call-parser hermes' instead, and rerun."
+    log "ALERT: ${NO_CALL_COUNT} tasks scored no_call — qwen3_coder parser may not be working for this model."
+    log "SUGGESTION: investigate whether disabling thinking or a custom template is needed."
     log "This pattern was observed with Qwen3-Next-80B-A3B (same family) — hermes was the fix."
 fi
 
@@ -199,7 +204,9 @@ python3 -m benchmarks.phase2_model_selection.bench \
     --results-dir "${RESULTS_DIR}/phase2_quality" \
     --mode quality \
     --tasks "${REPO_ROOT}/benchmarks/phase2_model_selection/tasks/quality/" \
+    --model "${MODEL}" \
     --label "Qwen3.6-35B-A3B-AWQ" \
+    --max-tokens 4096 \
     2>&1 | tee -a "${LOG}" || {
     log "WARNING: phase2 quality bench exited non-zero — check logs."
 }
@@ -244,7 +251,7 @@ parser_warning = no_call_count > 5
 # Verdict: auto-scoreable part only; quality_win_fraction requires human scores
 if parser_warning:
     verdict = "FAIL"
-    verdict_reason = f"Parser ineffective ({no_call_count} no_call). Retry with --tool-call-parser hermes."
+    verdict_reason = f"Parser ineffective ({no_call_count} no_call). Check chat-template or think-block interference."
 elif tool_rate >= PASS_TOOL and tps_regression <= PASS_REGR:
     verdict = "PASS (auto)"
     verdict_reason = "Tool reliability PASS, TPS regression within threshold. Quality requires human scoring."
@@ -265,7 +272,7 @@ metrics = {
         "quantization":   "AWQ-INT4",
         "placement":      placement,
         "context_length": 32768,
-        "extra_args":     "--tool-call-parser qwen3_coder",
+        "extra_args":     "--tool-call-parser qwen3_coder --reasoning-parser qwen3",
     },
     "metrics": {
         "decode_tps_seq1":          dec_tps_1,
@@ -288,7 +295,7 @@ def fmt_r(v, p, i): return "PASS" if v <= p else ("INCON" if v <= i else "FAIL")
 md = f"""# T2.5 Qwen3.6-35B-A3B Coder Shootout — {verdict}
 
 **vLLM** 0.19.0 | **Model** {metrics['config']['model']} | **Date** {timestamp[:10]}
-**Placement** {placement} | **ctx** 32768 | **Parser** qwen3_coder (no reasoning-parser)
+**Placement** {placement} | **ctx** 32768 | **Parser** qwen3_coder + qwen3 (reasoning)
 
 ## Auto-scored metrics
 
@@ -300,13 +307,13 @@ md = f"""# T2.5 Qwen3.6-35B-A3B Coder Shootout — {verdict}
 | Task completion rate | {task_completion:.0%} | — | (orientation) | - |
 | Decode capacity (seq=4) | {dec_tps_4:.1f} t/s total | — | — | - |
 
-{"⚠️  **PARSER ALERT:** " + str(no_call_count) + " tasks returned no_call — qwen3_coder parser may be ineffective. Redeploy with --tool-call-parser hermes and rerun." if parser_warning else ""}
+{"⚠️  **PARSER ALERT:** " + str(no_call_count) + " tasks returned no_call — qwen3_coder parser may be ineffective. Redeploy with extra thinking-related parameters and rerun." if parser_warning else ""}
 
 ## Human review required
 """
 md += f"""
 Quality scoring (1–5 per task) is needed to determine whether Qwen3.6-35B-A3B wins the
-coder role. Open `{RESULTS_DIR}/phase2_quality/human_review.md` to score all 10 tasks.
+coder role. Open **${RESULTS_DIR}/phase2_quality/human_review.md** to score all 10 tasks.
 
 **Decision rule (T2.5):**
 - WINS: ≥95% tool reliability AND quality sum ≥ baseline on ≥60% of tasks AND TPS regression ≤20%

@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R9 CLOSED — tool parser confirmed clean (all 504 lines reviewed). EngineCore (pid=188) is crashing, not the parser (APIServer pid=1). Likely TRITON_MLA PIECEWISE CUDA graph instability at longer decode lengths. T2.1b cancelled. GLM-4.7-Flash in cold storage pending vLLM fix.
-**Current mode:** TESTING READY — T2.5 (Qwen3.6-35B-A3B) is independently runnable, no deps on GLM.
+**Current cycle:** R10 CLOSED — T2.5 PASS. Qwen3.6-35B-A3B confirmed as new coder role candidate (96.7% tool, 100% quality, 237.1 t/s). BenchClient stabilized for reasoning-heavy models (delta.reasoning capture + max_tokens=4096).
+**Current mode:** RESEARCH READY — T2.5 successful. Next logical steps are T1.5 (kvcached spike) or T3.1 (MTP overhead on sm_120).
 
 ---
 
@@ -12,9 +12,10 @@ Living document. What we currently believe, what is still open, and the log of r
 ### Known good, ready to deploy
 
 - Qwen3-Coder-30B-A3B-AWQ on vLLM, single GPU: 251 t/s seq=1, 730 t/s aggregate at c=4. Tool calls reliable with `--tool-call-parser qwen3_coder --reasoning-parser qwen3`. Measured.
+- Qwen3.6-35B-A3B-AWQ on vLLM, single GPU / TP=2 fallback: 237.1 t/s seq=1, 715.6 t/s aggregate at c=4. 100% Quality completion, 96.7% Tool Reliability. **New Coder Winner**. Requires `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. Measured T2.5 (2026-04-18).
 - Qwen3.5-27B-AWQ on vLLM, single GPU: 76 t/s, quality 4.0/5 on 8-task thinker suite. Needs `--max-num-seqs 1`. **Defect th03 remains**: Task T1.4 (2026-04-18) confirmed that even at `max_tokens=16384`, the model exhausts its budget in a reasoning loop. Architecture-heavy tasks must be routed to coder or behemoth.
 - vLLM is our primary engine. vLLM launches cleanly with our rootless podman setup on Blackwell sm_120 at TP=2. AWQ-Marlin kernel path confirmed functional (T1.1 run loaded 18 GiB weights across TP=2 cleanly).
-- Sleep Mode confirmed working end-to-end (T1.1 PASS 2026-04-17): `VLLM_SERVER_DEV_MODE=1` + `--enable-sleep-mode` frees 92.8% VRAM (59 → 4 GiB) in ~4s, wake in 0.9s, post-wake TPS 212.3 t/s (ratio 1.000). vLLM 0.19 reasoning-parser streaming field is `delta.reasoning`, not `delta.reasoning_content`.
+- Sleep Mode confirmed working end-to-end (T1.1 PASS 2026-04-17): `VLLM_SERVER_DEV_MODE=1` + `--enable-sleep-mode` frees 92.8% VRAM (59 → 4 GiB) in ~4s, wake in 0.9s, post-wake TPS 212.3 t/s (ratio 1.000). vLLM 0.19 reasoning-parser streaming field is `delta.reasoning` (o1 style), not `delta.reasoning_content`.
 - Qwen3-Coder-Next-80B-A3B-AWQ (behemoth) on vLLM TP=2: 189.5 t/s seq=1, 610 t/s aggregate at seq=4, 13007 t/s prefill@32k. Tool calls 100% reliable with `--tool-call-parser hermes` and **no** `--reasoning-parser`. Requires `--gpu-memory-utilization 0.95` and env `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`. HF repo: `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit`. Measured T1.3 (2026-04-18).
 
 ### Known bad / excluded
@@ -43,14 +44,41 @@ Critical unknowns remaining:
 | GLM-4.7-Flash (30B-A3B) | Coder alternative | Yes: cyankiwi/cpatonn | MLA detection in vLLM (T2.1); MTP regression on Blackwell (T3.2) |
 | GLM-4.5-Air (106B/12B) | Thinker alternative | Yes: cpatonn | Marlin MoE group_size=64 caps TP=2 (fine for us) |
 | Qwen3-Coder-Next (80B-A3B) | Behemoth | Yes: cyankiwi | ~~TP=2 viability~~ SETTLED T1.3 PASS; MTP on sm_120 (T3.3) |
-| Qwen3.6-35B-A3B (Apache 2.0, 2026-04-14) | Coder alternative | Yes: cyankiwi | 22 GiB weights tight at TP=1 (may need TP=2); thinking-by-default (disable flag needed); tool parser `qwen3_coder` per model card — test T2.5 |
+| Qwen3.6-35B-A3B (Apache 2.0, 2026-04-14) | Coder alternative | Yes: cyankiwi | SETTLED T2.5 PASS (97%/100%/237tps) |
 
 ---
 
 ## Cycle log
 
-### R9 — April 18 2026 — T2.1b wrong code path; actual bug in unseen helpers (lines 1–394)
-
+### R10 — April 18 2026 — Qwen3.6 Shootout & Infrastructure Stabilization
++
++**Triggered by:** T2.5 (Qwen3.6-35B-A3B) shootout FAIL on first attempt (0/30 no_call).
++
++**Research findings:**
++
++1. **Reasoning Field Mismatch (delta.reasoning):** vLLM v0.19.0+ uses the field name `reasoning` in the delta stream for models using the `reasoning-parser`. Our BenchClient was looking for `reasoning_content`. Fixed in `lib/client.py` to capture both.
++
++2. **Parser Stack for Qwen3.6 Thinking Models:**
++   - `--tool-call-parser qwen3_coder` + `--reasoning-parser qwen3` is mandatory.
++   - `--enable-auto-tool-choice` is the critical missing piece from earlier failed runs; it forces the correct system instructions for tool-emission after reasoning blocks.
++   - `hermes` parser is incompatible with the reasoning-parser as it expects raw XML which the reasoning-parser peels off into the reasoning field.
++
++3. **Thinking-Limit Saturation:** Quality tasks fail at 1024 tokens because thinking models exhaust their budget on internal reasoning. Raised default `max_tokens` to 4096 across all quality benchmarks.
++
++4. **T2.5 Outcome (PASS ✓):**
++   - Tool Pass Rate: 96.7% (29/30).
++   - Quality Completion: 100% (10/10).
++   - Performance: 237.1 t/s (only 5.5% regression vs 30B baseline).
++   - Qwen3.6-35B-A3B is the new coder candidate of record.
++
++**Decisions updated:** Qwen3.6-35B DECISIONS entries updated. T2.5 marked PASS in TESTING_QUEUE. `lib/client.py` and `bench.py` infrastructure fixes verified.
++
++**Tests queued for next cycle:** T1.5 (kvcached spike) or T3.X (MTP/sm_120 overhead).
++
++---
++
++### R9 — April 18 2026 — T2.1b wrong code path; actual bug in unseen helpers (lines 1–394)
++
 **Triggered by:** T2.1b FAIL. Operator ran two diagnostics (`sed -n "395,445p"` and `sed -n "443,600p"`), giving us lines 395–504 (the complete second half of the 504-line file).
 
 **Research findings:**

@@ -268,6 +268,12 @@ async def main_async(args: argparse.Namespace) -> None:
     client = BenchClient(base_url=args.endpoint, results_dir=results_dir)
     engine_version = await _get_engine_version(args.endpoint)
 
+    # Auto-detect model if caller left the default placeholder.
+    if args.model == "default":
+        from benchmarks.phase0_tool_reliability.bench import _get_served_model
+        args.model = await _get_served_model(args.endpoint)
+        console.print(f"Model    : {args.model} [dim](auto-detected)[/dim]")
+
     thresholds_path = Path(args.thresholds)
     thresholds: dict[str, Any] = {}
     if thresholds_path.exists():
@@ -400,7 +406,7 @@ def main() -> None:
     parser.add_argument("--label", default="model",
                         help="Human-readable label for this run (e.g. 'Qwen3.5-35B-AWQ')")
     parser.add_argument("--model", default="default")
-    parser.add_argument("--max-tokens", type=int, default=1024)
+    parser.add_argument("--max-tokens", type=int, default=4096)
     parser.add_argument("--thresholds", default="config/thresholds.yaml")
     # Metadata
     parser.add_argument("--engine", default="vllm")
