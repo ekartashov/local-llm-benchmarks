@@ -118,7 +118,7 @@ These determine whether the three-tier architecture in `ARCHITECTURE.md` stands.
 
 ---
 
-### T1.2 — concurrent_two_vllm_processes_shared_gpus
+### T1.2 — concurrent_two_vllm_processes_shared_gpus — DONE (FAIL ✗)
 
 **Question:** Can two vLLM processes, each `--gpu-memory-utilization 0.40`, both TP=2 across GPU0+GPU1, coexist without CUDA graph corruption or allocator contention?
 

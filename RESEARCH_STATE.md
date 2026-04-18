@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R5 (research, April 17 2026 evening)
-**Current mode:** RESEARCH → pending operator to switch to TESTING and rerun T1.1 with the fix
+**Current cycle:** R5 closed — T1.1 PASS confirmed 2026-04-17; T1.2 FAIL confirmed 2026-04-18
+**Current mode:** RESEARCH NEEDED — T1.2 hit architectural wall, see `## Open from testing`
 
 ---
 
@@ -14,7 +14,7 @@ Living document. What we currently believe, what is still open, and the log of r
 - Qwen3-Coder-30B-A3B-AWQ on vLLM, single GPU: 251 t/s seq=1, 730 t/s aggregate at c=4. Tool calls reliable with `--tool-call-parser qwen3_coder --reasoning-parser qwen3`. Measured.
 - Qwen3.5-27B-AWQ on vLLM, single GPU: 76 t/s, quality 4.0/5 on 8-task thinker suite. Needs `--max-num-seqs 1`. One unresolved defect: th03 exhausts 8k token budget — needs raise to 16k+ (T1.4).
 - vLLM is our primary engine. vLLM launches cleanly with our rootless podman setup on Blackwell sm_120 at TP=2. AWQ-Marlin kernel path confirmed functional (T1.1 run loaded 18 GiB weights across TP=2 cleanly).
-- Sleep Mode API endpoints (`/sleep`, `/wake_up`, `/is_sleeping`, `/collective_rpc`, `/pause`, `/resume`) register correctly when `VLLM_SERVER_DEV_MODE=1` is set. Control-plane verified.
+- Sleep Mode confirmed working end-to-end (T1.1 PASS 2026-04-17): `VLLM_SERVER_DEV_MODE=1` + `--enable-sleep-mode` frees 92.8% VRAM (59 → 4 GiB) in ~4s, wake in 0.9s, post-wake TPS 212.3 t/s (ratio 1.000). vLLM 0.19 reasoning-parser streaming field is `delta.reasoning`, not `delta.reasoning_content`.
 
 ### Known bad / excluded
 
@@ -26,12 +26,12 @@ Living document. What we currently believe, what is still open, and the log of r
 
 Three-tier (coder + thinker concurrent via TP=2, behemoth asleep on standby). See `ARCHITECTURE.md`.
 
-**Status: hypothesis intact, gated on T1.1 rerun.** The first T1.1 attempt was invalid (engine missing `--enable-sleep-mode` flag; see R4 cycle log). A clean rerun is the current blocker.
+**Status: HYPOTHESIS BROKEN. T1.2 FAIL — concurrent TP=2 processes produce 2% of isolated throughput. Architecture must be redesigned. See `## Open from testing`.**
 
-Critical unknowns that can kill it:
-1. Does Sleep Mode free weights when `--enable-sleep-mode` is actually passed, on vLLM 0.19.0 + Blackwell sm_120? (T1.1 rerun)
-2. Do two vLLM processes coexist at gpu-mem 0.40 each on shared GPUs? (T1.2)
-3. Does Qwen3-Coder-Next-80B-A3B-AWQ TP=2 hit ≥40 t/s? (T1.3)
+Critical unknowns remaining:
+1. ~~Does Sleep Mode work?~~ **SETTLED — yes (T1.1 PASS)**
+2. ~~Do two vLLM processes coexist at gpu-mem 0.40 each on shared GPUs?~~ **SETTLED — FAIL. Both fit in memory, but NCCL allreduce serialization without MPS reduces concurrent decode to 4.2 t/s (2% of isolated). Not viable.**
+3. Does Qwen3-Coder-Next-80B-A3B-AWQ TP=2 hit ≥40 t/s? (T1.3 — relevance gated on architecture decision)
 
 ---
 
@@ -105,7 +105,23 @@ Phase 0/1 work: chat template verification, vLLM vs SGLang throughput comparison
 
 ## Open from testing
 
-*(empty — research cycle R5 complete, testing cycle ready)*
+### From T1.2, 2026-04-18
+
+**What happened:** Both vLLM TP=2 processes deployed successfully (memory fit after util/max_model_len tuning — see run summaries). Isolated TPS matched expectations: coder 212.4 t/s, thinker 106.3 t/s. Under concurrent decode load (asyncio.gather, both processes receiving decode requests simultaneously), both dropped to **4.2 t/s each** (coder ratio 0.020, thinker ratio 0.040). Combined concurrent throughput: 8.4 t/s vs 212 t/s for coder alone. The three-tier concurrent design is unviable.
+
+**Relevant results dir:** `results/T1.2_concurrent_two_vllm_processes_shared_gpus_20260418T084649Z/`
+
+**Why this needs research, not another test:** The failure is architectural, not a config parameter. Without NVIDIA MPS, two CUDA processes cannot execute NCCL allreduce kernels concurrently on the same GPU pair — one blocks the other. Any util/ctx/scheduler tweak would produce the same ~2% throughput. A different architecture is needed. The relevant alternatives have meaningfully different tradeoffs that need evaluation against our OpenCode routing model and hardware constraints before picking a path:
+1. **TP=1 per GPU** (coder GPU0, thinker GPU1): true concurrent isolation. Cost: half memory bandwidth per model, single-GPU KV cache. Does coder still hit acceptable TPS at TP=1? Does 30B-AWQ fit on one 32 GiB GPU? (It should: 7.92 GiB weights + KV.)
+2. **NVIDIA MPS**: allows genuine concurrent CUDA execution. Known to work on datacenter parts; behavior on RTX 5090 (consumer Blackwell sm_120) is unverified and may be blocked by driver policy.
+3. **Sleep-mode sequential** (T1.1 fallback): one model active at a time, swap on demand in 0.9s. OpenCode routing would need to handle the swap latency. Sufficient for low-concurrency personal use.
+4. **Single endpoint / one model**: abandon the two-role design. Run one model (behemoth) and rely on its generality.
+
+**Suggested direction:** Research mode should:
+- Determine whether MPS is available on RTX 5090 (consumer Blackwell) and whether vLLM + rootless podman + MPS is a supported combo.
+- Evaluate TP=1-per-GPU throughput for coder (30B-A3B MoE) and thinker (27B dense) against acceptable TPS thresholds.
+- Reconsider whether T1.3 (behemoth) is still needed under TP=1-per-GPU (behemoth would then need its own TP=2, displacing one or both hot models).
+- Update `ARCHITECTURE.md` with the chosen design.
 
 <!-- Template for testing mode to fill in:
 
