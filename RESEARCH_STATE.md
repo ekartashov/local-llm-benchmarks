@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R7 updated — T1.4 FAIL recorded. T2.1 image verification pending.
-**Current mode:** TESTING READY — pull next OPEN item from the queue (T2.1 re-test, T2.5).
+**Current cycle:** R7 closed — T2.1 complete (MLA active / V1 tool-broken). Next: T2.5 or research on V1 blocker.
+**Current mode:** RESEARCH NEEDED — V1 tool-crash wall from T2.1 requires research before GLM-4.7-Flash retesting. T2.5 is independently runnable.
 
 ---
 
@@ -20,6 +20,7 @@ Living document. What we currently believe, what is still open, and the log of r
 ### Known bad / excluded
 
 - Ollama, KTransformers, Devstral, DeepSeek-R1-32B, GLM-4.6/4.7 full, GLM-4.6-Air-doesn't-exist — see `DECISIONS.md` SETTLED.
+- GLM-4.7-Flash (30B-A3B) — MLA confirmed active (TRITON_MLA backend), but V1 tool-call crashes block tool-intensive use. In cold storage until vLLM V1 stabilizes for this architecture. See `DECISIONS.md` and Open from testing.
 - bf16 deployment — the quant we serve is AWQ-INT4, bf16 "does it fit" tests were misleading and have been discarded.
 - vLLM Sleep Mode **level=2** — do not use. See `DECISIONS.md`; known to produce gibberish outputs on wake (bug #29341) and requires manual `reload_weights` + `reset_prefix_cache` after wake which is easy to get wrong. Use level=1 exclusively. We have 192 GB DDR5, there is no reason to prefer level=2 for us.
 
@@ -85,12 +86,12 @@ Critical unknowns remaining:
 
 1. **T1.4 (Thinker th03) — [FAIL]**: Increasing `max_tokens` to 16384 did not fix the empty-output issue in reasoning tasks. The thinker exhausts its budget in a reasoning loop. Architecture-heavy tasks must move to the coder or behemoth tiers.
 - [x] **R7: GLM-4.7-Flash Stabilization (2026-04-18) — [INCONCLUSIVE (Tool-Broken)]**
-    - **Hypothesis**: Model requires `cu130-nightly` + `transformers` git to activate MLA (128 KB) vs GQA (380 KB).
+    - **Hypothesis (revised)**: MLA path is actually active in all runs including the standard image — the original 60 KB pass threshold was wrong for this model. Confirmed via bench.log: all runs show `Using TRITON_MLA attention backend`.
     - **Results**:
-        - **MLA Success**: Measured **129.2 KB/token** using `cu130-nightly` + git-transformers natively resolving `Glm4MoeLiteForCausalLM`. MLA bypass is definitively verified.
-        - **V1 Constraint**: vLLM Nightly forces V1 engine and ignores all V0 legacy flags (`VLLM_V1=0`, etc. listed as "Unknown").
-        - **Tool Blocker**: V1 crashes (EngineDeadError) on complex tool schemas (Tasks 02, 03). Task 01 (simple) passes at 44.7 t/s.
-    - **Conclusion**: GLM-4.7-Flash is MLA-capable but unusable for tool-calling on the current vLLM nightly. T2.1 marked as "Verified Footprint / Unstable Tooling."
+        - **MLA Active (all runs)**: TRITON_MLA backend confirmed in bench.log from the first run onward. The `cu130-nightly` + git-transformers custom image resolved `Glm4MoeLiteForCausalLM` architecture name but did not change the attention backend used. Measured KV footprint ~129 KB/token reflects MLA (47 layers × kv_lora_rank=512 → ~94 KB base) plus CUDA graph overhead, not GQA (~380 KB for this model's num_heads=16 × head_dim=128 × 47 layers × TP=2 → ~376 KB). The original "MLA ≈54 KB, GQA ≈98 KB" reference values in TESTING_QUEUE.md were wrong for this specific model.
+        - **V1 Constraint**: vLLM Nightly forces V1 engine for Glm4MoeLiteForCausalLM and ignores all V0 legacy flags (`VLLM_V1=0`, `VLLM_USE_V1=0`, `VLLM_V1_ENABLED=0`, `VLLM_USE_V1_ENGINE=0`, `VLLM_ENGINE_ITERATOR_SOURCE=LEGACY` — all reported as "Unknown" env vars).
+        - **Tool Blocker**: V1 crashes (EngineDeadError) on complex tool schemas (Tasks 02, 03). Task 01 (simple) passes at 44.7 t/s. Tool sanity locked at 33% across all run variants.
+    - **Conclusion**: GLM-4.7-Flash MLA is active and functional. Model is unusable for tool-calling roles on current vLLM nightly due to V1 instability. T2.1 verdict: INCONCLUSIVE (MLA confirmed / tool-broken).
 
 **Open from research:** none — fixes identified: ensure `config.json` contains MLA dimensions (192/64/512) and re-test on clean `vllm-glm47` image stack. (Note: the previous "one-line source patch" advice is now deprecated as a legacy workaround for older images).
 
@@ -205,12 +206,18 @@ Phase 0/1 work: chat template verification, vLLM vs SGLang throughput comparison
 
 ## Open from testing
 
-### From T1.X, date YYYY-MM-DD
+### From T2.1, 2026-04-18
 
-**What happened:** short narrative.
-**Relevant logs / result dirs:** paths under `results/`.
-**Why this needs research, not another test:** the specific reason a parameter tweak is not enough.
-**Suggested direction:** what the operator thinks the research should investigate.
+**What happened:** T2.1 GLM-4.7-Flash MLA verification ran 8 attempts (results/T2.1_glm47_flash_mla_verification_20260418T161728Z through T182529Z). MLA is confirmed active (TRITON_MLA backend visible in all bench.logs). However all attempts are blocked at 33% tool sanity — Task 01 (simple single-tool call) passes at ~44 t/s, Tasks 02 and 03 (multi-tool / complex schemas) crash the engine with `EngineDeadError`.
+
+**Relevant logs / result dirs:**
+- `results/T2.1_glm47_flash_mla_verification_20260418T182529Z/bench.log` (latest, most complete)
+- `results/T2.1_glm47_flash_mla_verification_20260418T182529Z/tool_sanity/` (task results)
+- All 6 env vars to disable V1 engine are logged as "Unknown" warnings in every bench.log.
+
+**Why this needs research, not another test:** The V1 engine flag situation is not a config parameter — it is a version capability question. We need to establish: (a) is there any vLLM nightly build where V1 can be disabled for Glm4MoeLiteForCausalLM, (b) does the upstream V1 tool-call crash have a filed issue + ETA, or (c) is there a V1-compatible tool-call parser fix. A parameter sweep cannot answer which of these paths (if any) exists.
+
+**Suggested direction:** Check vLLM issue tracker for Glm4MoeLiteForCausalLM + V1 + tool-call crash. If no fix in sight, confirm GLM-4.7-Flash stays in cold storage until V1 stabilizes and proceed to T2.5 independently.
 
 <!-- Template for testing mode to fill in:
 

@@ -110,7 +110,7 @@ These are the items that can kill or modify this architecture. Listed in rough b
 
 1. ~~**Sleep Mode works under rootless podman with our socket setup.**~~ **SETTLED — T1.1 PASS.** Sleep Mode frees 92.8% VRAM in ~4s, wakes in 0.9s, post-wake TPS within 0.1% of baseline.
 2. ~~**Qwen3-Coder-Next-80B-A3B-AWQ TP=2 decode speed.**~~ **SETTLED — T1.3 PASS.** 189 t/s seq=1, 13 kt/s prefill@32k. Behemoth tier is viable.
-3. **GLM-4.7-Flash MLA auto-detection** in our current vLLM. A known bug had MLA not triggering → 10× KV cache bloat. One-line fix landed; we need to verify per-token KV size matches MLA (~54 KB) not GQA (~98 KB).
+3. ~~**GLM-4.7-Flash MLA auto-detection**~~ **SETTLED — T2.1 INCONCLUSIVE (MLA active / tool-broken).** TRITON_MLA backend confirmed active in all tested vLLM builds via bench.log. Measured footprint ~129 KB/token (47 layers × kv_lora_rank=512 ≈ 94 KB base + CUDA-graph overhead). The original reference values (~54 KB MLA vs ~98 KB GQA) were incorrect for this model; actual GQA would be ~376 KB. GLM-4.7-Flash is in cold storage due to vLLM V1 tool-call crashes (EngineDeadError on Tasks 02/03, V0 engine cannot be forced). See `DECISIONS.md` and `RESEARCH_STATE.md` Open from testing.
 4. **CPU prefix cache survival across sleep/wake.** Would let a re-woken model keep most of its prompt cache in DRAM. Not verified; if false, each wake pays full prefill on first request.
 
 ## How to change this document

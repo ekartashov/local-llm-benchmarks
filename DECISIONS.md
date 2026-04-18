@@ -81,11 +81,11 @@ bf16 OOMs at 30.4 GiB, and at any quant its quality is below Qwen3-Coder-30B-AWQ
 Old REVIEW status retained for the single-GPU failure record (22 t/s with `--enforce-eager`, <1 GiB headroom, 10× slowdown). **Qwen3.6-35B-A3B-AWQ** (Apache 2.0, released 2026-04-14, publisher `cyankiwi`) is the fresh-generation 35B-A3B candidate of record — same active-param class (3B), 262k native context, tool parser `qwen3_coder`, thinking-by-default. Queued as T2.5. The old Qwen3.5-35B-A3B entry should not be revived as a coder candidate; any 35B-A3B re-evaluation targets Qwen3.6. SGLang is separately incompatible with the QuantTrio Qwen3.5 weights (see config note on `qwen3_5.py:1662` weight-map bug — a code bug in SGLang, not a config problem).
 
 ### GLM-4.7-Flash (30B-A3B) MLA is active but tool-broken in vLLM V1
-- **MLA Status**: **PASS**. Verified by measurement at **129.2 KB/token** (TP=2).
-- **Infrastructure**: Requires `cu130-nightly` image and `transformers` from git to natively support `Glm4MoeLiteForCausalLM`.
-- **Engine Status**: **BLOCKED**. vLLM forces the V1 engine for this architecture and ignores all V0 legacy-disable flags.
-- **Quality Status**: **UNSTABLE**. V1 crashes (EngineDeadError) during tool generation for complex schemas (Tasks 02, 03).
-- **Decision**: Avoid for tool-intensive roles until vLLM V1 stabilizes.
+- **MLA Status**: **CONFIRMED**. TRITON_MLA attention backend is active in all tested vLLM builds (visible in bench.log: `Using TRITON_MLA attention backend out of potential backends: ['TRITON_MLA']`). This was true from the first run on the standard image — the custom `cu130-nightly` image resolves the `Glm4MoeLiteForCausalLM` architecture name correctly but does not change the attention backend. Measured footprint ~129 KB/token reflects MLA (47 layers × kv_lora_rank=512 ≈ 94 KB base + CUDA-graph overhead). The original reference values in TESTING_QUEUE.md ("MLA ≈54 KB, GQA ≈98 KB") were wrong; GQA for this model would be ~376 KB (16 kv_heads × 128 head_dim × 47 layers).
+- **Infrastructure**: `cu130-nightly` + git-transformers image correctly resolves `Glm4MoeLiteForCausalLM` and is the recommended build for this model. Standard vLLM images may fail to resolve the architecture name depending on version.
+- **Engine Status**: **BLOCKED**. vLLM forces the V1 engine for `Glm4MoeLiteForCausalLM` and ignores all V0 legacy-disable flags (`VLLM_V1=0`, `VLLM_USE_V1=0`, `VLLM_V1_ENABLED=0`, `VLLM_USE_V1_ENGINE=0`, `VLLM_ENGINE_ITERATOR_SOURCE=LEGACY` — all reported as unknown).
+- **Quality Status**: **UNSTABLE**. V1 crashes (EngineDeadError) during tool generation for complex schemas (Tasks 02, 03). Task 01 (simple) passes at ~44 t/s. Tool sanity locked at 33% across all run variants.
+- **Decision**: Avoid for tool-intensive roles until vLLM V1 stabilizes or a V1-compatible fix for this architecture lands upstream.
 
 ### GLM-4.6-Air does not exist
 Z.ai released GLM-4.6V (vision, Air-sized) but skipped text-only Air. They went to GLM-4.7 flagship + GLM-4.7-Flash. No research gap — it was simply never released.

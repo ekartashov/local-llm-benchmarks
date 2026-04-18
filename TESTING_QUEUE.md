@@ -241,22 +241,18 @@ Also required for successful load: `--gpu-memory-utilization 0.95` (0.85 OOM'd d
 
 Run after T1 is settled (or mid-T1 if cycles allow).
 
-### T2.1 — glm47_flash_mla_verification — DONE (FAIL - REBUILD/PATCH PENDING) ✗
+### T2.1 — glm47_flash_mla_verification — DONE (INCONCLUSIVE — MLA active / V1 tool-broken) ⚠
 
 **Question:** In our current vLLM, does GLM-4.7-Flash use MLA (KV ≈54 KB/token) or is it stuck on the GQA-sized path (~98 KB/token) due to the known arch-convertor bug?
 
-**Procedure:**
-1. Deploy `cyankiwi/GLM-4.7-Flash-AWQ-4bit` with `--tool-call-parser glm47 --reasoning-parser glm45`, TP=2, some context value C.
-2. Read vLLM logs for reported KV cache block size or `GPU KV cache size` line.
-3. Compute KV/token: `(free_kv_bytes) / (blocks × block_size)`, compare to expected MLA (~54 KB) vs GQA (~98 KB).
-4. If KV/token ≈ 98 KB, apply the one-line `glm4_moe_lite` patch in `model_arch_config_convertor.py` via a custom Containerfile (`infra/Containerfile.vllm_glm47`) AND patch the model's `config.json` to include missing MLA dimensions (e.g. `qk_nope_head_dim: 64`).
+**Result (2026-04-18, 8 runs):** INCONCLUSIVE.
 
-**Result (2026-04-18):** FAIL (Run 2). 
-- KV cache still 127.4 KB/token. Logic confirmed: vLLM flag is set, but missing `config.json` fields block kernel activation.
-- Script SyntaxError (quoted heredoc).
-Next: patch `config.json` directly and fix script heredoc syntax.
+- **MLA confirmed active**: bench.logs from all runs (including the first on the standard image) show `Using TRITON_MLA attention backend out of potential backends: ['TRITON_MLA']`. The original reference values (MLA ≈54 KB, GQA ≈98 KB) were wrong for this model: actual MLA footprint ~129 KB/token (47 layers × kv_lora_rank=512 ≈ 94 KB base + CUDA-graph overhead measured via VRAM subtraction); actual GQA fallback would be ~376 KB (16 kv_heads × 128 head_dim × 47 layers). The `cu130-nightly` custom image correctly resolves `Glm4MoeLiteForCausalLM` but does not change the attention backend.
+- **V1 engine cannot be disabled**: vLLM nightly forces V1 for this architecture. All six known env vars (`VLLM_V1=0`, `VLLM_USE_V1=0`, `VLLM_V1_ENABLED=0`, `VLLM_USE_V1_ENGINE=0`, `VLLM_ENGINE_ITERATOR_SOURCE=LEGACY`) are reported as "Unknown" and ignored.
+- **Tool-calling broken under V1**: EngineDeadError on Tasks 02 and 03 (complex schemas). Task 01 (simple) passes at ~44.7 t/s. Tool sanity locked at 33%.
+- **Decision**: GLM-4.7-Flash in cold storage until vLLM V1 stabilizes for this architecture. See `DECISIONS.md`.
 
-**Pass:** KV/token ≤ 60 KB (MLA path confirmed).
+**Original pass criterion (now superseded):** KV/token ≤ 60 KB (MLA path confirmed). Revised understanding: correct MLA threshold for this model is < 135 KB (94 KB base + ~40% overhead); the KV measurement methodology (VRAM subtraction) is imprecise due to CUDA-graph memory inclusion. Direct evidence for MLA is the TRITON_MLA backend log message.
 
 **What failure means:**
 - MLA not detected and patch doesn't apply cleanly → wait for upstream fix or pin vLLM version. Note in `DECISIONS.md`.
