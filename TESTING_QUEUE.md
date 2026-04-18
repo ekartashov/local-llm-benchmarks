@@ -214,7 +214,7 @@ Also required for successful load: `--gpu-memory-utilization 0.95` (0.85 OOM'd d
 
 ---
 
-### T1.4 — th03_token_budget_fix
+### T1.4 — th03_token_budget_fix — DONE (FAIL) ✗
 
 **Question:** Does raising `--max-tokens` to 16384 on the thinker endpoint resolve the `th03_architecture_tradeoffs` empty-output defect?
 

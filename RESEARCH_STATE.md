@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R7 closed — architectural doubts answered (Qwen3.6 / multi-model-in-one-vLLM / kvcached / 4 GiB residual / behemoth diversity).
-**Current mode:** TESTING READY — pull next OPEN item from the queue (T1.5, T2.1, T2.5, or T1.4).
+**Current cycle:** R7 updated — T1.4 FAIL recorded. T2.1/T2.5 pending.
+**Current mode:** TESTING READY — pull next OPEN item from the queue (T2.1, T2.5).
 
 ---
 
@@ -12,7 +12,7 @@ Living document. What we currently believe, what is still open, and the log of r
 ### Known good, ready to deploy
 
 - Qwen3-Coder-30B-A3B-AWQ on vLLM, single GPU: 251 t/s seq=1, 730 t/s aggregate at c=4. Tool calls reliable with `--tool-call-parser qwen3_coder --reasoning-parser qwen3`. Measured.
-- Qwen3.5-27B-AWQ on vLLM, single GPU: 76 t/s, quality 4.0/5 on 8-task thinker suite. Needs `--max-num-seqs 1`. One unresolved defect: th03 exhausts 8k token budget — needs raise to 16k+ (T1.4).
+- Qwen3.5-27B-AWQ on vLLM, single GPU: 76 t/s, quality 4.0/5 on 8-task thinker suite. Needs `--max-num-seqs 1`. **Defect th03 remains**: Task T1.4 (2026-04-18) confirmed that even at `max_tokens=16384`, the model exhausts its budget in a reasoning loop. Architecture-heavy tasks must be routed to coder or behemoth.
 - vLLM is our primary engine. vLLM launches cleanly with our rootless podman setup on Blackwell sm_120 at TP=2. AWQ-Marlin kernel path confirmed functional (T1.1 run loaded 18 GiB weights across TP=2 cleanly).
 - Sleep Mode confirmed working end-to-end (T1.1 PASS 2026-04-17): `VLLM_SERVER_DEV_MODE=1` + `--enable-sleep-mode` frees 92.8% VRAM (59 → 4 GiB) in ~4s, wake in 0.9s, post-wake TPS 212.3 t/s (ratio 1.000). vLLM 0.19 reasoning-parser streaming field is `delta.reasoning`, not `delta.reasoning_content`.
 - Qwen3-Coder-Next-80B-A3B-AWQ (behemoth) on vLLM TP=2: 189.5 t/s seq=1, 610 t/s aggregate at seq=4, 13007 t/s prefill@32k. Tool calls 100% reliable with `--tool-call-parser hermes` and **no** `--reasoning-parser`. Requires `--gpu-memory-utilization 0.95` and env `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`. HF repo: `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit`. Measured T1.3 (2026-04-18).

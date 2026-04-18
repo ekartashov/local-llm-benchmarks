@@ -141,7 +141,7 @@ models:
       single_gpu_seq1_tps: 76
       quality_mean_8task: 4.0
     outstanding_defect:
-      - "th03_architecture_tradeoffs: <think> consistently exhausts 8192-token budget, empty output. Fix: raise to 16384 (test T1.4). Until fixed, route architecture-heavy tasks elsewhere."
+      - "th03_architecture_tradeoffs: <think> consistently exhausts budget (tested up to 16384 tokens in T1.4), empty output. Not a budget issue, likely a density/infinite-loop pathology. Route architecture-heavy tasks elsewhere."
     notes: >
       Hybrid SSM/transformer (Qwen3_5ForConditionalGeneration, GDN/FLA layers).
       --max-num-seqs 1 required to keep CUDA graphs active on single GPU (graph
