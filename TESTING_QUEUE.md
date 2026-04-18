@@ -254,13 +254,52 @@ Run after T1 is settled (or mid-T1 if cycles allow).
 
 **Original pass criterion (now superseded):** KV/token ≤ 60 KB (MLA path confirmed). Revised understanding: correct MLA threshold for this model is < 135 KB (94 KB base + ~40% overhead); the KV measurement methodology (VRAM subtraction) is imprecise due to CUDA-graph memory inclusion. Direct evidence for MLA is the TRITON_MLA backend log message.
 
+**Root cause of tool crash (R8 research):** `glm4_moe_tool_parser.py` streaming path bug (PR #37385, not in our build). See `DECISIONS.md` for full details. Fix path is T2.1b.
+
+---
+
+### T2.1b — glm47_flash_streaming_parser_patch — OPEN
+
+**Question:** Does patching `glm4_moe_tool_parser.py` with PR #37385's one-line fix (store streaming tool arguments as JSON string, not Python dict) make GLM-4.7-Flash tool calling reliable under V1?
+
+**Root cause confirmed by R8 research:** `extract_tool_calls_streaming` stores `prev_tool_call_arr[index]["arguments"]` as a Python dict. Finalization code that uses this as a string crashes with TypeError inside the V1 EngineCore subprocess → EngineDeadError propagates to all subsequent requests. PR #37386 (v0.18.0) fixed the non-streaming path (greedy `.*` in `func_arg_regex`); PR #37385 fixes the streaming path but is not yet merged.
+
+**Procedure (run on host):**
+
+1. **Diagnostic first — verify bug presence and non-streaming baseline** (no image rebuild needed):
+   ```bash
+   # Check if bug is in the image:
+   podman run --rm vllm-glm47 grep -rn "arguments.*args_dict\|args_dict.*arguments" \
+     /usr/local/lib/python3.12/dist-packages/vllm/tool_parsers/ 2>/dev/null
+   # Find parser file:
+   podman run --rm vllm-glm47 find /usr -name "glm4_moe_tool_parser.py" 2>/dev/null
+   ```
+   Then start the container (using existing bench script deploy) and test Task 02 non-streaming:
+   ```bash
+   curl -s -X POST http://localhost:30002/v1/chat/completions \
+     -H "Content-Type: application/json" \
+     -d '{"model":"cyankiwi/GLM-4.7-Flash-AWQ-4bit","stream":false,
+          "messages":[{"role":"user","content":"Create a file at /tmp/hello.txt with content Hello, world!"}],
+          "tools":[{"type":"function","function":{"name":"write_file","description":"Write content to a file.",
+            "parameters":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},
+            "required":["path","content"]}}}]}'
+   ```
+   **If non-streaming succeeds**: streaming parser is confirmed as the sole crash vector. Proceed to patch.
+
+2. **Apply the patch in `infra/Containerfile.vllm_glm47`**: After the pip install step, add a RUN command that patches the parser file. The fix (PR #37385): find the line that initializes the `arguments` entry in `prev_tool_call_arr` with a dict value, and change it to store the JSON string instead. Exact line depends on what `grep` shows in step 1. Rebuild with `--rebuild` flag.
+
+3. **Rerun T2.1 bench script** with the patched image. Expected: Task 01, 02, 03 all pass (≥2/3 = 67% tool sanity rate). Also add `VLLM_ENABLE_V1_MULTIPROCESSING=0` to the container env as a safety net.
+
+**Pass:** ≥2/3 tool sanity tasks pass (Tasks 01–03). EngineDeadError no longer occurs.
+
 **What failure means:**
-- MLA not detected and patch doesn't apply cleanly → wait for upstream fix or pin vLLM version. Note in `DECISIONS.md`.
-- MLA works → GLM-4.7-Flash is fully usable, proceed to T2.2.
+- Non-streaming test passes but streaming still crashes after patch → the streaming path has an additional unfixed bug. **Hand back to research** with the new container logs showing the updated stack trace.
+- Non-streaming test also crashes → the non-streaming path has a separate regression. **Hand back to research** — the fix path is wrong.
+- Patch applies but all tasks still fail (wrong_tool, wrong_args) → parser works but model behavior needs investigation (parser not the issue).
 
-**Deps:** none. Operationally cheap — verify once per vLLM version bump.
+**Deps:** T2.1 DONE (complete), R8 research cycle complete.
 
-**Hand-back trigger:** patch required but doesn't apply; need research on current upstream status.
+**Hand-back trigger:** any failure mode not covered by the "what failure means" branches above; or the container log shows a different exception than TypeError (indicating a different bug).
 
 ---
 

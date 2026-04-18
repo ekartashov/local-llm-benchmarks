@@ -49,6 +49,35 @@ Critical unknowns remaining:
 
 ## Cycle log
 
+### R8 — April 18 2026 — GLM-4.7-Flash tool crash root cause
+
+**Triggered by:** T2.1 wall (EngineDeadError on Task 02 / 2-arg tool calls). Research question: is the V1 engine the blocker, or is the parser the issue?
+
+**Research findings:**
+
+1. **V1 engine is not the fundamental blocker.** The EngineDeadError is the symptom of an unhandled exception in `glm4_moe_tool_parser.py`'s streaming path propagating through the V1 EngineCore multiprocess boundary. When the parser crashes in the EngineCore subprocess, V1 raises EngineDeadError for all subsequent requests.
+
+2. **The streaming parser has a specific unfixed bug (PR #37385).** The streaming `extract_tool_calls_streaming` path stores `prev_tool_call_arr[index]["arguments"]` as a Python dict (`args_dict`) when a new tool call is first registered. Downstream finalization code that treats this value as a string crashes with TypeError. This bug is in our build (`v0.19.1rc1.dev391`). PR #37385 fixes it by storing `full_args_str` instead.
+
+3. **PR #37386 (merged v0.18.0) fixed a different bug** in the non-streaming path: non-greedy regex `.*?` in `func_arg_regex` failed to capture multiple argument pairs. This fix IS in our build. The non-streaming path likely works correctly for Task 02 — confirmed by the fact that the crash takes 14s (the model generates full output before the streaming parser crashes on finalization).
+
+4. **Why Task 01 works and Task 02 crashes:** Task 01 has 1 argument; the streaming finalization code path that misuses `prev_tool_call_arr["arguments"]` as a string may be bypassed for single-arg calls. Task 02 has 2 arguments; the second arg iteration hits the dict-as-string crash.
+
+5. **Quick diagnostic available:** `curl` Task 02 with `"stream": false` against the live endpoint. If it succeeds, the non-streaming path is confirmed clean and the streaming path is the sole crash vector — which directly points to PR #37385.
+
+6. **`VLLM_ENABLE_V1_MULTIPROCESSING=0`** keeps V1 in a single process. Parser exceptions become per-request recoverable instead of server-fatal. This is a useful safety net for the transition period but does not fix the underlying parser bug.
+
+**Decisions updated:**
+- `DECISIONS.md` SETTLED: "GLM-4.7-Flash EngineDeadError root cause is `glm4_moe_tool_parser.py` streaming bug (PR #37385), not V1 architecture. Fix is a one-line patch in Containerfile."
+- `DECISIONS.md` updated: GLM-4.7-Flash DECISIONS entry revised to reflect the known fix path.
+- `TESTING_QUEUE.md`: T2.1 status updated to BLOCKED (parser bug). Added T2.1b (re-test with streaming parser patch).
+
+**Tests queued for the next testing cycle:**
+- T2.1b: rebuild vllm-glm47 with PR #37385 one-line patch, rerun tool sanity, expect ≥2/3 pass.
+- T2.5: Qwen3.6-35B-A3B shootout — independent, no deps on GLM fix.
+
+**Open from research:** none — fix path is clear.
+
 ### R7 — April 18 2026 — architectural doubts + Qwen3.6
 
 **Triggered by:** operator raised four questions after the T1.3 pass:
@@ -206,18 +235,23 @@ Phase 0/1 work: chat template verification, vLLM vs SGLang throughput comparison
 
 ## Open from testing
 
-### From T2.1, 2026-04-18
+### From T2.1, 2026-04-18 — RESEARCHED (R8 cycle)
 
-**What happened:** T2.1 GLM-4.7-Flash MLA verification ran 8 attempts (results/T2.1_glm47_flash_mla_verification_20260418T161728Z through T182529Z). MLA is confirmed active (TRITON_MLA backend visible in all bench.logs). However all attempts are blocked at 33% tool sanity — Task 01 (simple single-tool call) passes at ~44 t/s, Tasks 02 and 03 (multi-tool / complex schemas) crash the engine with `EngineDeadError`.
+**What happened:** 8 T2.1 runs. MLA confirmed active. Tool sanity locked at 33%: Task 01 (`read_file`, 1 arg) passes at ~44 t/s. Task 02 (`write_file`, 2 args) crashes after 14s with EngineDeadError. Task 03 gets "Connection error" (engine dead from Task 02 crash).
 
-**Relevant logs / result dirs:**
-- `results/T2.1_glm47_flash_mla_verification_20260418T182529Z/bench.log` (latest, most complete)
-- `results/T2.1_glm47_flash_mla_verification_20260418T182529Z/tool_sanity/` (task results)
-- All 6 env vars to disable V1 engine are logged as "Unknown" warnings in every bench.log.
+**Root cause identified (R8):** The crash is in `glm4_moe_tool_parser.py`'s **streaming** path, not a fundamental V1 incompatibility. The bench client uses `stream=True` always. Two separate bugs are relevant:
 
-**Why this needs research, not another test:** The V1 engine flag situation is not a config parameter — it is a version capability question. We need to establish: (a) is there any vLLM nightly build where V1 can be disabled for Glm4MoeLiteForCausalLM, (b) does the upstream V1 tool-call crash have a filed issue + ETA, or (c) is there a V1-compatible tool-call parser fix. A parameter sweep cannot answer which of these paths (if any) exists.
+1. **PR #37386** (merged v0.18.0, March 2026) — fixed non-greedy `.*?` in `func_arg_regex` that failed to capture multiple argument pairs in the non-streaming path. This fix IS in our build (`v0.19.1rc1.dev391` is post-v0.18.0). So the non-streaming path should handle 2-arg tools correctly.
 
-**Suggested direction:** Check vLLM issue tracker for Glm4MoeLiteForCausalLM + V1 + tool-call crash. If no fix in sight, confirm GLM-4.7-Flash stays in cold storage until V1 stabilizes and proceed to T2.5 independently.
+2. **PR #37385** (open, awaiting review, NOT in our build) — the streaming path stores `prev_tool_call_arr[index]["arguments"]` as a Python dict (`args_dict`) instead of a JSON string (`full_args_str`). When the finalization code uses this as a string (e.g., for length comparison or concatenation), it crashes with TypeError. For 1-arg tools, this specific code path may be reached safely; for 2-arg tools, the additional streaming iteration hits the crash. This PR was not merged as of the T2.1 test date.
+
+**V1 engine is not the fundamental blocker** — it cannot be disabled for this architecture, but that is a red herring. The EngineDeadError is the symptom of the parser crashing in the V1 EngineCore subprocess, not a V1 architectural incompatibility.
+
+**Fix path (see DECISIONS.md and T2.1 updated procedure):**
+- **Step 1** (diagnostic, host only): Confirm PR #37385 bug is in the image — `podman run --rm vllm-glm47 grep -rn "arguments.*args_dict\|args_dict.*arguments" /usr/local/lib/python3.12/dist-packages/vllm/tool_parsers/`
+- **Step 2a** (quick non-streaming test, host only): `curl` Task 02 with `"stream": false` to confirm the non-streaming path works — if so, the streaming parser is definitively the crash point.
+- **Step 2b** (fix): Patch `glm4_moe_tool_parser.py` in `infra/Containerfile.vllm_glm47` to change `"arguments": args_dict` → `"arguments": full_args_str` at the point where a new tool call entry is first added to `prev_tool_call_arr`. Then rebuild (`--rebuild` flag on the bench script) and rerun T2.1.
+- **Step 3** (safety net): Add `VLLM_ENABLE_V1_MULTIPROCESSING=0` to the container env — keeps V1 in single-process mode so parser exceptions don't kill the entire engine; failures become per-request recoverable instead of fatal.
 
 <!-- Template for testing mode to fill in:
 

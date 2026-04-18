@@ -80,12 +80,21 @@ bf16 OOMs at 30.4 GiB, and at any quant its quality is below Qwen3-Coder-30B-AWQ
 ### Qwen3.5-35B-A3B-AWQ is superseded by Qwen3.6-35B-A3B-AWQ
 Old REVIEW status retained for the single-GPU failure record (22 t/s with `--enforce-eager`, <1 GiB headroom, 10× slowdown). **Qwen3.6-35B-A3B-AWQ** (Apache 2.0, released 2026-04-14, publisher `cyankiwi`) is the fresh-generation 35B-A3B candidate of record — same active-param class (3B), 262k native context, tool parser `qwen3_coder`, thinking-by-default. Queued as T2.5. The old Qwen3.5-35B-A3B entry should not be revived as a coder candidate; any 35B-A3B re-evaluation targets Qwen3.6. SGLang is separately incompatible with the QuantTrio Qwen3.5 weights (see config note on `qwen3_5.py:1662` weight-map bug — a code bug in SGLang, not a config problem).
 
-### GLM-4.7-Flash (30B-A3B) MLA is active but tool-broken in vLLM V1
-- **MLA Status**: **CONFIRMED**. TRITON_MLA attention backend is active in all tested vLLM builds (visible in bench.log: `Using TRITON_MLA attention backend out of potential backends: ['TRITON_MLA']`). This was true from the first run on the standard image — the custom `cu130-nightly` image resolves the `Glm4MoeLiteForCausalLM` architecture name correctly but does not change the attention backend. Measured footprint ~129 KB/token reflects MLA (47 layers × kv_lora_rank=512 ≈ 94 KB base + CUDA-graph overhead). The original reference values in TESTING_QUEUE.md ("MLA ≈54 KB, GQA ≈98 KB") were wrong; GQA for this model would be ~376 KB (16 kv_heads × 128 head_dim × 47 layers).
-- **Infrastructure**: `cu130-nightly` + git-transformers image correctly resolves `Glm4MoeLiteForCausalLM` and is the recommended build for this model. Standard vLLM images may fail to resolve the architecture name depending on version.
-- **Engine Status**: **BLOCKED**. vLLM forces the V1 engine for `Glm4MoeLiteForCausalLM` and ignores all V0 legacy-disable flags (`VLLM_V1=0`, `VLLM_USE_V1=0`, `VLLM_V1_ENABLED=0`, `VLLM_USE_V1_ENGINE=0`, `VLLM_ENGINE_ITERATOR_SOURCE=LEGACY` — all reported as unknown).
-- **Quality Status**: **UNSTABLE**. V1 crashes (EngineDeadError) during tool generation for complex schemas (Tasks 02, 03). Task 01 (simple) passes at ~44 t/s. Tool sanity locked at 33% across all run variants.
-- **Decision**: Avoid for tool-intensive roles until vLLM V1 stabilizes or a V1-compatible fix for this architecture lands upstream.
+### GLM-4.7-Flash (30B-A3B) MLA confirmed; tool crash is a parser bug with a known fix
+
+- **MLA Status**: **CONFIRMED**. TRITON_MLA attention backend is active in all tested vLLM builds (visible in bench.log: `Using TRITON_MLA attention backend out of potential backends: ['TRITON_MLA']`). Footprint ~129 KB/token (47 layers × kv_lora_rank=512 ≈ 94 KB base + CUDA-graph overhead from the VRAM-subtraction measurement method).
+
+- **Infrastructure**: `cu130-nightly` + git-transformers custom image (`vllm-glm47`) correctly resolves `Glm4MoeLiteForCausalLM`. The config.json patch (adding `qk_nope_head_dim`, `qk_rope_head_dim`) is applied by the bench script. Standard vLLM images may fail architecture name resolution.
+
+- **V1 engine cannot be disabled** for `Glm4MoeLiteForCausalLM`. All six env vars (`VLLM_V1=0`, `VLLM_USE_V1=0`, `VLLM_V1_ENABLED=0`, `VLLM_USE_V1_ENGINE=0`, `VLLM_ENGINE_ITERATOR_SOURCE=LEGACY`) are "Unknown" in vLLM 0.19.x nightly. This is not the root cause of the tool crash.
+
+- **Tool crash root cause: PR #37385, streaming parser bug (NOT in our build).** The `glm4_moe_tool_parser.py` streaming path (`extract_tool_calls_streaming`) stores `prev_tool_call_arr[index]["arguments"]` as a Python dict when a new tool call is first registered. Finalization code that treats this as a string crashes with TypeError. This crash occurs in the V1 EngineCore subprocess and propagates as EngineDeadError, killing the server for all subsequent requests. Fix: change `"arguments": args_dict` → `"arguments": full_args_str` in `infra/Containerfile.vllm_glm47` (one-line patch to the parser source after pip install). Tracked as T2.1b.
+
+- **Note**: PR #37386 (merged v0.18.0) fixed the non-streaming `func_arg_regex` non-greedy bug. That fix IS in our build. The non-streaming path likely handles 2-arg tool calls correctly — `curl` with `stream=false` can confirm this as a quick diagnostic.
+
+- **Workaround (does not fix parser):** `VLLM_ENABLE_V1_MULTIPROCESSING=0` keeps V1 in single-process mode, making parser exceptions per-request recoverable instead of server-fatal. Useful during transition.
+
+- **Decision**: Do not use for tool-intensive roles until T2.1b (streaming parser patch) passes. The fix is narrow and testable — this is not a "wait for upstream" situation.
 
 ### GLM-4.6-Air does not exist
 Z.ai released GLM-4.6V (vision, Air-sized) but skipped text-only Air. They went to GLM-4.7 flagship + GLM-4.7-Flash. No research gap — it was simply never released.
