@@ -85,12 +85,13 @@ Critical unknowns remaining:
 
 1. **T1.4 (Thinker th03) — [FAIL]**: Increasing `max_tokens` to 16384 did not fix the empty-output issue in reasoning tasks. The thinker exhausts its budget in a reasoning loop. Architecture-heavy tasks must move to the coder or behemoth tiers.
 2. **T2.1 (GLM-4.7-Flash) — [FAIL]**: 
-    - **Load failure**: vLLM 0.19/latest didn't recognize `glm4_moe_lite` architecture.
-    - **MLA Bloat**: Initial run with `cu130-nightly` image reported **127.4 KB/token** KV cache. This confirms the MLA regression on Blackwell still persists in the nightly build.
-    - **Tool Sanity**: Filter `'01 02 03'` failed due to literal string matching.
-    - **Script Bug**: Shell expansion in the metrics heredoc caused syntax errors.
+    - **Attempt 1**: Load failure (no `transformers` support) + initial MLA bloat.
+    - **Attempt 2 (2026-04-18 — RE-RUN)**: 
+        - **MLA Bloat Remains**: Still **127.4 KB/token**. ANALYSIS: The `is_deepseek_mla=True` flag in vLLM is necessary but NOT sufficient. The attention kernel requires specific dimensions like `qk_nope_head_dim` (missing in HF `config.json`) to be populated.
+        - **Script SyntaxError**: Quoted heredoc (`<<'PYEOF'`) blocked bash variable expansion (e.g. `${CTX}` became a literal string in Python).
+        - **Tool Sanity**: Sub-tasks 02 and 03 failed with exceptions; likely related to the high-VRAM pressure or chat template issues.
 
-**Open from research:** none — fixes identified; re-test T2.1 queued with custom image patch.
+**Open from research:** none — fixes identified (patching `config.json` directly); re-test T2.1 v2 queued.
 
 ### R6 — April 18 2026 — T1.2 hand-back, TP=1-per-GPU pivot
 

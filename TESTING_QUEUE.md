@@ -246,12 +246,15 @@ Run after T1 is settled (or mid-T1 if cycles allow).
 **Question:** In our current vLLM, does GLM-4.7-Flash use MLA (KV ≈54 KB/token) or is it stuck on the GQA-sized path (~98 KB/token) due to the known arch-convertor bug?
 
 **Procedure:**
-
-**Procedure:**
 1. Deploy `cyankiwi/GLM-4.7-Flash-AWQ-4bit` with `--tool-call-parser glm47 --reasoning-parser glm45`, TP=2, some context value C.
 2. Read vLLM logs for reported KV cache block size or `GPU KV cache size` line.
 3. Compute KV/token: `(free_kv_bytes) / (blocks × block_size)`, compare to expected MLA (~54 KB) vs GQA (~98 KB).
-4. If KV/token ≈ 98 KB, apply the one-line `glm4_moe_lite` patch in `model_arch_config_convertor.py` (or pin a known-good vLLM version) and retest.
+4. If KV/token ≈ 98 KB, apply the one-line `glm4_moe_lite` patch in `model_arch_config_convertor.py` via a custom Containerfile (`infra/Containerfile.vllm_glm47`) AND patch the model's `config.json` to include missing MLA dimensions (e.g. `qk_nope_head_dim: 64`).
+
+**Result (2026-04-18):** FAIL (Run 2). 
+- KV cache still 127.4 KB/token. Logic confirmed: vLLM flag is set, but missing `config.json` fields block kernel activation.
+- Script SyntaxError (quoted heredoc).
+Next: patch `config.json` directly and fix script heredoc syntax.
 
 **Pass:** KV/token ≤ 60 KB (MLA path confirmed).
 
