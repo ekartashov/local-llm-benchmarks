@@ -18,6 +18,7 @@ TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RESULTS_DIR="${REPO_ROOT}/results/${ITEM_ID}_${TIMESTAMP}"
 MODEL="cyankiwi/GLM-4.7-Flash-AWQ-4bit"
 CONTAINER="bench-vllm-tp2c"
+PATCH_IMAGE="vllm-glm47"
 ENDPOINT="http://localhost:${PORT_VLLM_TP2_C}/v1"
 CTX=32768
 GPU_MEM_UTIL=0.85
@@ -33,6 +34,23 @@ die()  { log "FATAL: $*"; exit 1; }
 
 vram_mib() { nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i "$1" | tr -d ' '; }
 
+REBUILD=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --rebuild) REBUILD=1; shift ;;
+        *) shift ;;
+    esac
+done
+
+if [[ "${REBUILD}" == "1" ]] || ! podman image exists "${PATCH_IMAGE}"; then
+    log "Building custom vLLM image ${PATCH_IMAGE} (expected ~3-5 mins) ..."
+    podman build -f "${REPO_ROOT}/infra/Containerfile.vllm_glm47" -t "${PATCH_IMAGE}" "${REPO_ROOT}"
+else
+    log "Using existing custom image ${PATCH_IMAGE} (pass --rebuild to force fresh build)."
+fi
+
+export BENCH_IMAGE="${PATCH_IMAGE}"
+
 # ── Step 1: Deploy GLM-4.7-Flash on tp2c (TP=2) ───────────────────────────────
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1   # model supports 65536; we use 32768 here
 
@@ -42,7 +60,6 @@ log "Deploying ${MODEL} on tp2c (TP=2), ctx=${CTX}, gpu-mem-util=${GPU_MEM_UTIL}
     --ctx "${CTX}" \
     --tool-call-parser glm47 \
     --reasoning-parser glm45 \
-    --trust-remote-code \
     2>&1 | tee -a "${LOG}"
 
 # ── Step 2: Read GPU block count from container logs ──────────────────────────
@@ -59,10 +76,20 @@ for attempt in 1 2 3 4 5; do
     sleep 5
 done
 
-if [[ -z "${GPU_BLOCKS}" ]]; then
-    # Fallback: search for alternative log pattern seen in some vLLM versions
+if [[ -z "${GPU_BLOCKS}" ]] || [[ "${GPU_BLOCKS}" == "0" ]]; then
+    # Fallback 1: num_gpu_blocks=
     raw=$(podman logs "${CONTAINER}" 2>&1 | grep -oP 'num_gpu_blocks=\K[0-9]+' | tail -1 || true)
     GPU_BLOCKS="${raw:-0}"
+fi
+
+if [[ -z "${GPU_BLOCKS}" ]] || [[ "${GPU_BLOCKS}" == "0" ]]; then
+    # Fallback 2: GPU KV cache size: ... tokens
+    log "Trying token-based fallback ..."
+    raw_tokens=$(podman logs "${CONTAINER}" 2>&1 | grep -oP 'GPU KV cache size: \K[0-9,]+' | tail -1 | tr -d ',' || true)
+    if [[ -n "${raw_tokens}" ]]; then
+        GPU_BLOCKS=$(( raw_tokens / BLOCK_SIZE ))
+        log "  Derived GPU blocks from ${raw_tokens} tokens: ${GPU_BLOCKS}"
+    fi
 fi
 
 log "GPU blocks reported by vLLM: ${GPU_BLOCKS}"
@@ -124,28 +151,32 @@ log "KV bytes/token: ${KV_KB} KB"
 # ── Step 5: Tool-call sanity check (3 tasks) ──────────────────────────────────
 # Uses the first 3 Phase 0 tasks to verify the glm47+glm45 parser combo works.
 log "Running 3-task tool-call sanity check ..."
-python3 -m benchmarks.phase0_tool_reliability.bench \
-    --endpoint "${ENDPOINT}" \
-    --results-dir "${RESULTS_DIR}/tool_sanity" \
-    --tasks "${REPO_ROOT}/benchmarks/phase0_tool_reliability/tasks/" \
-    --task-filter "01 02 03" \
-    --max-tokens 2048 \
-    2>&1 | tee -a "${LOG}" || {
-    log "WARNING: tool-call sanity bench exited non-zero. Continuing to write metrics."
-}
+for t_idx in 01 02 03; do
+    python3 -m benchmarks.phase0_tool_reliability.bench \
+        --endpoint "${ENDPOINT}" \
+        --results-dir "${RESULTS_DIR}/tool_sanity/${t_idx}" \
+        --tasks "${REPO_ROOT}/benchmarks/phase0_tool_reliability/tasks/" \
+        --task-filter "${t_idx}" \
+        --max-tokens 2048 \
+        2>&1 | tee -a "${LOG}" || log "WARNING: task ${t_idx} failed."
+done
 
 TOOL_PASS_RATE="0.0"
-if [[ -f "${RESULTS_DIR}/tool_sanity/metrics.json" ]]; then
+# Aggregate pass rate from the sub-results if possible, or just check the first one
+if [[ -f "${RESULTS_DIR}/tool_sanity/01/metrics.json" ]]; then
     TOOL_PASS_RATE=$(python3 -c "
-import json
-d = json.load(open('${RESULTS_DIR}/tool_sanity/metrics.json'))
-print(d['metrics'].get('tool_call_success_rate', 0.0))
+import json, pathlib
+rates = []
+for p in pathlib.Path('${RESULTS_DIR}/tool_sanity/').glob('*/metrics.json'):
+    d = json.load(p.open())
+    rates.append(d['metrics'].get('tool_call_success_rate', 0.0))
+print(round(sum(rates)/len(rates), 2) if rates else 0.0)
 ")
-    log "Tool sanity pass rate: ${TOOL_PASS_RATE}"
+    log "Aggregated tool sanity pass rate: ${TOOL_PASS_RATE}"
 fi
 
 # ── Step 6: Write final metrics and summary ────────────────────────────────────
-python3 - <<PYEOF
+python3 - <<'PYEOF'
 import json, pathlib
 
 item_id   = "${ITEM_ID}"

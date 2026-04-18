@@ -1,0 +1,20 @@
+# Custom vLLM image for GLM-4.7-Flash support
+# Based on cu130-nightly as recommended for sm_120 + Glm4MoeLite support.
+
+FROM docker.io/vllm/vllm-openai:cu130-nightly
+
+# Install git for pip-git installs
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Update pip and install latest transformers from source for Glm4MoeLite recognition
+RUN python3 -m pip install --no-cache-dir -U pip && \
+    python3 -m pip install --no-cache-dir -U "git+https://github.com/huggingface/transformers.git"
+
+# Patch vLLM's model mapping to enable MLA support for glm4_moe_lite
+# Adding it to ARCH_CONFIG_CONVERTOR registers the MLA-aware convertor.
+RUN CONV_PATH="/usr/local/lib/python3.12/dist-packages/vllm/transformers_utils/model_arch_config_convertor.py" && \
+    sed -i '/"glm4_moe_mtp": GLM4MoeMTPModelArchConfigConvertor,/a \    "glm4_moe_lite": GLM4MoeMTPModelArchConfigConvertor,' ${CONV_PATH}
+
+LABEL org.opencontainers.image.description="vLLM with native GLM-4.7-Flash (Glm4MoeLite) support and MLA fix"

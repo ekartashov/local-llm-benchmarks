@@ -68,29 +68,29 @@ EXTRA_ARGS=("${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}")
 TP_SIZE=1  # overridden for tp2* placements
 case "${ENGINE}-${PLACEMENT}" in
     vllm-gpu0)
-        IMAGE="vllm/vllm-openai:latest"
+        IMAGE="${BENCH_IMAGE:-vllm/vllm-openai:latest}"
         PORT="${PORT_VLLM_GPU0}"
         GPU_IDS=("${GPU_0_ID}")
         ;;
     vllm-gpu1)
-        IMAGE="vllm/vllm-openai:latest"
+        IMAGE="${BENCH_IMAGE:-vllm/vllm-openai:latest}"
         PORT="${PORT_VLLM_GPU1}"
         GPU_IDS=("${GPU_1_ID}")
         ;;
     vllm-tp2|vllm-tp2a)
-        IMAGE="vllm/vllm-openai:latest"
+        IMAGE="${BENCH_IMAGE:-vllm/vllm-openai:latest}"
         PORT="${PORT_VLLM_TP2_A}"
         GPU_IDS=("${GPU_0_ID}" "${GPU_1_ID}")
         TP_SIZE=2
         ;;
     vllm-tp2b)
-        IMAGE="vllm/vllm-openai:latest"
+        IMAGE="${BENCH_IMAGE:-vllm/vllm-openai:latest}"
         PORT="${PORT_VLLM_TP2_B}"
         GPU_IDS=("${GPU_0_ID}" "${GPU_1_ID}")
         TP_SIZE=2
         ;;
     vllm-tp2c)
-        IMAGE="vllm/vllm-openai:latest"
+        IMAGE="${BENCH_IMAGE:-vllm/vllm-openai:latest}"
         PORT="${PORT_VLLM_TP2_C}"
         GPU_IDS=("${GPU_0_ID}" "${GPU_1_ID}")
         TP_SIZE=2
