@@ -191,11 +191,10 @@ Also required for successful load: `--gpu-memory-utilization 0.95` (0.85 OOM'd d
 **Why this matters:** `kvcached` operates at the GPU memory layer (decouples virtual from physical addressing) rather than the CUDA context layer. If it works on our stack, it opens a third path between (a) the current TP=1-per-GPU isolation and (b) the failed naive concurrent TP=2. It could enable concurrent TP=2 without MPS/root, and make per-role KV budgets dynamically resizable — directly addressing the "distribute KV cache per model efficiently" concern.
 
 **Procedure (spike — small, time-boxed):**
-1. Read `kvcached` README and install matrix. Verify vLLM 0.19.0 support is explicit (it is, per current research). Note exact patch/plugin mechanism (whether it ships as a vLLM plugin or an LD_PRELOAD-style shim).
-2. Build/extend our vLLM container image with `kvcached` installed. Record image digest.
-3. Phase A (baseline sanity): single vLLM instance with `kvcached` enabled, TP=1, Qwen3-Coder-30B-AWQ. Verify no regression vs T1.2a numbers (seq=1 ≥ 240 t/s, no load/wake regressions).
-4. Phase B (the point): two vLLM instances, both TP=1 on the same GPU, sharing the KV pool via kvcached. Coder + thinker (Qwen3-Coder-30B-AWQ + Qwen3.5-27B-AWQ). Run T1.2a concurrent-decode workload.
-5. Phase C (stretch): two vLLM instances both TP=2 sharing both GPUs via kvcached — the original failed T1.2 topology, retried.
+1. Pull `ghcr.io/ovg-project/kvcached-vllm:latest` (tagged `kvcached-v0.1.5-vllm-v0.19.0`). No build step — kvcached ships a pre-built vLLM image. Integration is via env vars: `ENABLE_KVCACHED=true` + `KVCACHED_AUTOPATCH=1`. Do NOT pass `--gpu-memory-utilization`; kvcached manages allocation automatically. Add `--no-enable-prefix-caching` for a clean measurement baseline.
+2. Phase A (baseline sanity): single kvcached instance, TP=1, gpu0. Coder (Qwen3-Coder-30B-AWQ) then thinker (Qwen3.5-27B-AWQ) separately. Verify no regression vs T1.2a numbers (seq=1 ≥ 95% of 251/76.5 t/s).
+3. Phase B (the point): two kvcached instances, both TP=1 on the SAME GPU (gpu0), sharing the KV pool. Combined weight footprint (~32 GiB) saturates physical VRAM — kvcached must handle this via virtual memory mapping. Run T1.2a-style concurrent-decode workload.
+4. Phase C (stretch — only if B passes): two kvcached instances both TP=2 on all GPUs — the original failed T1.2 topology, retried.
 
 **Pass:**
 - Phase A: baseline intact (within 5% of T1.2a numbers).
