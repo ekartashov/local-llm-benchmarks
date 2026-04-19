@@ -24,6 +24,15 @@ Items removed entirely: the previous "Decisions already settled (do not re-evalu
 
 ## SETTLED — infrastructure / tooling
 
+### kvcached: zero overhead for coder; re-evaluate after thinker selection
+**PROVISIONAL (2026-04-19, T1.5 partial — coder PASS, thinker blocked).** Phase A coder PASS: 250.8 t/s on Qwen3.6-35B-AWQ with kvcached, identical to raw vLLM. Zero overhead for Transformer/MoE models.
+
+Phase B blocked by two issues specific to the current thinker (Qwen3.5-27B-AWQ):
+1. **MambaSpec incompatibility:** Qwen3.5-27B has hybrid Mamba (SSM) layers. kvcached v0.1.5 supports `FullAttentionSpec`, `SlidingWindowSpec`, `MLAAttentionSpec` only — raises `ValueError: got MambaSpec` at KV init. This is a thinker-model constraint, not a kvcached bug.
+2. **Weight footprint:** kvcached virtual memory applies to KV cache pages only, not weights. Combined weights must still fit in physical VRAM.
+
+**Re-run T1.5 Phase B after thinker model selection (T2.3).** If the new thinker is pure Transformer/MoE (no Mamba) and combined weights fit comfortably under ~28 GiB, Phase B is worth retrying. Do not retest with Qwen3.5-27B.
+
 ### No Ollama
 Adds 10–30% overhead vs raw engine containers; known broken tool parser for Qwen3.5 family (Ollama issue #14493). Nothing to measure.
 

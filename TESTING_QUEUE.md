@@ -184,9 +184,16 @@ Also required for successful load: `--gpu-memory-utilization 0.95` (0.85 OOM'd d
 
 ---
 
-### T1.5 — kvcached_shared_gpu_kv_pool (SPIKE)
+### T1.5 — kvcached_shared_gpu_kv_pool — PARTIAL ⚠ (coder PASS / thinker blocked, re-run after T2.3)
 
-**Question:** Can `ovg-project/kvcached` enable two vLLM instances to cohabit a single GPU (or a pair, TP=2-on-both) with a shared, elastic KV-cache pool — without the CUDA context time-slicing collapse we hit in T1.2?
+**Result (2026-04-19):**
+- Phase A coder: PASS — 250.8 t/s (baseline 251.0). kvcached adds zero overhead for Transformer/MoE models.
+- Phase A thinker: BLOCKED — Qwen3.5-27B-AWQ uses hybrid Mamba (SSM) layers. kvcached v0.1.5 raises `ValueError: got MambaSpec` at KV init. Thinker-specific, not a kvcached bug.
+- Phase B: FAIL — thinker OOM'd during weight loading. kvcached virtual memory applies to KV cache pages only, not weights. Combined 18+14 GiB saturated the GPU before KV allocation.
+
+kvcached is viable in principle; the Phase B block is entirely due to the current thinker model. **Re-run Phase B after T2.3 selects a non-Mamba thinker**, if combined weights fit under ~28 GiB.
+
+**Original question:** Can `ovg-project/kvcached` enable two vLLM instances to cohabit a single GPU (or a pair, TP=2-on-both) with a shared, elastic KV-cache pool — without the CUDA context time-slicing collapse we hit in T1.2?
 
 **Why this matters:** `kvcached` operates at the GPU memory layer (decouples virtual from physical addressing) rather than the CUDA context layer. If it works on our stack, it opens a third path between (a) the current TP=1-per-GPU isolation and (b) the failed naive concurrent TP=2. It could enable concurrent TP=2 without MPS/root, and make per-role KV budgets dynamically resizable — directly addressing the "distribute KV cache per model efficiently" concern.
 

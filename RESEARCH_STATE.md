@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R10 CLOSED — T2.5 PASS. Qwen3.6-35B-A3B confirmed as new coder role candidate (96.7% tool, 100% quality, 237.1 t/s). BenchClient stabilized for reasoning-heavy models (delta.reasoning capture + max_tokens=4096).
-**Current mode:** RESEARCH READY — T2.5 successful. Next logical steps are T1.5 (kvcached spike) or T3.1 (MTP overhead on sm_120).
+**Current cycle:** R11 CLOSED — T1.5 kvcached partial. Coder PASS (zero overhead). Thinker blocked: Qwen3.5-27B uses MambaSpec (kvcached doesn't support it) and combined weights OOM. kvcached is viable for pure-Transformer/MoE models; re-evaluate after thinker selection.
+**Current mode:** RESEARCH READY — thinker model selection (T2.3) is the next logical step; it unblocks both T1.5 Phase B re-run and the thinker role question.
 
 ---
 
@@ -49,6 +49,35 @@ Critical unknowns remaining:
 ---
 
 ## Cycle log
+
+### R11 — April 19 2026 — T1.5 kvcached spike: two hard blockers, architecture stays TP=1-per-GPU
+
+**Triggered by:** T1.5 run (kvcached spike for shared-GPU KV pool).
+
+**Findings:**
+
+1. **Phase A coder: PASS.** kvcached adds zero overhead on a single instance. Qwen3-Coder-30B-AWQ on gpu0 with kvcached: 250.8 t/s (baseline 251.0 t/s, within 0.1%).
+
+2. **Phase A thinker: hard incompatibility.** Qwen3.5-27B-AWQ crashes at KV cache init:
+   ```
+   ValueError: kvcached only supports FullAttentionSpec, SlidingWindowSpec, and MLAAttentionSpec,
+   got MambaSpec in group 0
+   ```
+   Qwen3.5-27B has Mamba (SSM) attention layers in its hybrid architecture. kvcached v0.1.5 does not support `MambaSpec`. This is a model incompatibility, not a configuration issue.
+
+3. **Phase B: OOM.** Even in Phase B (both TP=1 instances on gpu0 simultaneously), the thinker OOM'd during weight loading: `38.62 MiB free on a 31.33 GiB GPU` after coder loaded. Root cause: **kvcached's virtual memory mapping applies to KV cache pages, not to model weight tensors**. The model weights still require contiguous physical VRAM during loading. Coder (~18 GiB) + Thinker (~14 GiB) = ~32 GiB, which saturates the physical 32 GB GPU before KV cache allocation even begins.
+
+**Conclusion:**
+- kvcached is viable for pure-Transformer/MoE models — zero overhead confirmed on coder.
+- Current thinker (Qwen3.5-27B) is a dead end for kvcached: MambaSpec incompatibility is a model-level constraint, not a kvcached bug.
+- kvcached's virtual memory helps with KV cache elasticity, not weight loading — combined weights still need physical VRAM headroom.
+- T1.5 Phase B should be retried after T2.3 selects the thinker, if the new thinker is non-Mamba and combined weights fit under ~28 GiB.
+
+**Architecture stays TP=1-per-GPU for now.** T1.5 Phase B is deferred, not abandoned.
+
+**Decisions updated:** kvcached marked PROVISIONAL in DECISIONS.md with re-run conditions. T1.5 marked PARTIAL in queue.
+
+---
 
 ### R10 — April 18 2026 — Qwen3.6 Shootout & Infrastructure Stabilization
 +

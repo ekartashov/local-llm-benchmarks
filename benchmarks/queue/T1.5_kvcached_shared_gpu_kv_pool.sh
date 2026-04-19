@@ -63,17 +63,20 @@ stop_container() {
 }
 
 wait_ready() {
-    local url="$1" name="$2" timeout="${3:-300}"
+    local url="$1" label="$2" cname="$3" timeout="${4:-600}"
     local deadline=$(( $(date +%s) + timeout ))
-    log "Waiting for ${name} at ${url} (timeout ${timeout}s)..."
+    log "Waiting for ${label} (${cname}) at ${url} (timeout ${timeout}s)..."
     while (( $(date +%s) < deadline )); do
-        if curl -sf "${url}/health" >/dev/null 2>&1; then
-            log "${name} is ready."
+        if curl -sf "${url%/v1}/health" >/dev/null 2>&1; then
+            log "${label} is ready."
             return 0
         fi
         sleep 5
     done
-    log "ERROR: ${name} did not become ready within ${timeout}s."
+    log "ERROR: ${label} did not become ready within ${timeout}s."
+    log "--- container logs: ${cname} (last 80 lines) ---"
+    podman logs --tail 80 "${cname}" 2>&1 | tee -a "${LOG}" || true
+    log "--- end container logs ---"
     return 1
 }
 
@@ -109,6 +112,7 @@ launch_kvcached() {
         --restart=no \
         -v "${MODEL_CACHE}:/root/.cache/huggingface:z" \
         "${KVCACHED_IMAGE}" \
+        python3 -m vllm.entrypoints.openai.api_server \
         --model "${model}" \
         --port 8000 \
         --max-model-len "${CTX}" \
@@ -207,7 +211,7 @@ launch_kvcached "bench-t15-coder" "${PORT_PHASEAB_CODER}" "${GPU_0_ID}" 1 "${COD
     --enable-auto-tool-choice
 
 EP_CODER="http://localhost:${PORT_PHASEAB_CODER}/v1"
-if wait_ready "${EP_CODER}" "kvcached-coder" 300; then
+if wait_ready "${EP_CODER}" "kvcached-coder" "bench-t15-coder"; then
     log "Warming up coder..."
     python3 "${MEASURE_PY}" isolated "${EP_CODER}" "${CODER_MODEL}" /dev/null 2>/dev/null || true
 
@@ -221,10 +225,9 @@ if wait_ready "${EP_CODER}" "kvcached-coder" 300; then
         PHASE_A_CODER_PASS=true
         log "Phase A coder: PASS"
     else
-        log "Phase A coder: FAIL — TPS below 95% of baseline. kvcached overhead is significant or incompatible."
+        log "Phase A coder: FAIL — TPS below 95% of baseline. kvcached overhead is significant."
         log "HAND-BACK: kvcached may not be functional on our stack. Stopping spike."
         stop_container "bench-t15-coder"
-        # Write a minimal failure record and exit
         python3 -c "
 import json, pathlib
 pathlib.Path('${RESULTS_DIR}/metrics.json').write_text(json.dumps({
@@ -241,7 +244,7 @@ pathlib.Path('${RESULTS_DIR}/summary.md').write_text(
         exit 1
     fi
 else
-    log "HAND-BACK: kvcached container failed to start within 300s. Likely image/compat issue."
+    log "HAND-BACK: kvcached container failed to start. Check container logs above."
     stop_container "bench-t15-coder"
     exit 1
 fi
@@ -254,7 +257,7 @@ launch_kvcached "bench-t15-thinker" "${PORT_PHASEAB_THINKER}" "${GPU_0_ID}" 1 "$
     --max-num-seqs 1
 
 EP_THINKER="http://localhost:${PORT_PHASEAB_THINKER}/v1"
-if wait_ready "${EP_THINKER}" "kvcached-thinker" 300; then
+if wait_ready "${EP_THINKER}" "kvcached-thinker" "bench-t15-thinker"; then
     log "Warming up thinker..."
     python3 "${MEASURE_PY}" isolated "${EP_THINKER}" "${THINKER_MODEL}" /dev/null 2>/dev/null || true
 
@@ -302,11 +305,11 @@ launch_kvcached "bench-t15-thinker" "${PORT_PHASEAB_THINKER}" "${GPU_0_ID}" 1 "$
     --max-num-seqs 1
 
 PHASE_B_LOADED=true
-if ! wait_ready "${EP_CODER}" "kvcached-coder(B)" 300; then
+if ! wait_ready "${EP_CODER}" "kvcached-coder(B)" "bench-t15-coder"; then
     log "Phase B: coder failed to start. Likely OOM or kvcached virtual memory failure."
     PHASE_B_LOADED=false
 fi
-if ! wait_ready "${EP_THINKER}" "kvcached-thinker(B)" 300; then
+if ! wait_ready "${EP_THINKER}" "kvcached-thinker(B)" "bench-t15-thinker"; then
     log "Phase B: thinker failed to start. Likely OOM or kvcached virtual memory failure."
     PHASE_B_LOADED=false
 fi
@@ -390,10 +393,10 @@ if [[ "${PHASE_B_PASS}" == "true" ]]; then
         --max-num-seqs 1
 
     PHASE_C_LOADED=true
-    if ! wait_ready "${EP_C_CODER}" "kvcached-tp2-coder(C)" 300; then
+    if ! wait_ready "${EP_C_CODER}" "kvcached-tp2-coder(C)" "bench-t15-c-coder"; then
         PHASE_C_LOADED=false
     fi
-    if ! wait_ready "${EP_C_THINKER}" "kvcached-tp2-thinker(C)" 300; then
+    if ! wait_ready "${EP_C_THINKER}" "kvcached-tp2-thinker(C)" "bench-t15-c-thinker"; then
         PHASE_C_LOADED=false
     fi
 
@@ -521,7 +524,7 @@ def r(v, good, incon, hi=True):
 
 summary = f"""# T1.5 kvcached Shared-GPU KV Pool Spike — {verdict}
 
-**Image** {metrics['config']['engine_image']} | **Date** ${TIMESTAMP[:10]}
+**Image** {metrics['config']['engine_image']} | **Date** ${TIMESTAMP:0:10}
 **Coder** ${CODER_MODEL} | **Thinker** ${THINKER_MODEL}
 
 ## Phase A — baseline sanity (single kvcached instance, gpu0)
