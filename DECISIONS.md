@@ -11,9 +11,18 @@ Items removed entirely: the previous "Decisions already settled (do not re-evalu
 
 ---
 
-- **SETTLED (2026-04-18):** Qwen3.6-35B-A3B-AWQ is the new coder role winner based on metrics. 96.7% tool reliability + 100% quality completion rate + 237.1 t/s decode. Supersedes Qwen3-Coder-30B. Requires `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. (Note: This is the native Qwen stack, distinct from the hermes-based Behemoth stack).
-- **SETTLED (2026-04-18):** Benchmarking "thinking" models requires `max_tokens >= 4096` in quality tasks to avoid reasoning-limit saturation (where the model hit the limit while still in `<think>`).
-- **SETTLED (2026-04-18):** vLLM v0.19.0+ `reasoning-parser` uses `delta.reasoning` (o1-style) in SSE delta. BenchClient MUST capture this field for accurate throughput/capture of thinking models.
+## SETTLED — model selection
+
+### Qwen3.6-35B-A3B-AWQ is the new coder role winner
+**SETTLED (2026-04-18, T2.5 PASS).** 96.7% tool reliability + 100% quality completion rate + 237.1 t/s decode. Supersedes Qwen3-Coder-30B. Requires `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. (Note: This is the native Qwen stack, distinct from the hermes-based Behemoth stack.)
+
+### Thinking models require max_tokens ≥ 4096 in quality benchmarks
+**SETTLED (2026-04-18).** At 1024 tokens, thinking models exhaust their budget while still inside `<think>`, producing no answer. Raising to 4096 is the floor for any quality-scored task. Default changed in `bench.py`.
+
+### vLLM 0.19 reasoning-parser field is `delta.reasoning`
+**SETTLED (2026-04-18).** vLLM v0.19.0+ emits thinking tokens under `delta.reasoning` (OpenAI o1-style), not `delta.reasoning_content`. BenchClient now captures both. Token counts and decode TPS are accurate for thinking models.
+
+## SETTLED — infrastructure / tooling
 
 ### No Ollama
 Adds 10–30% overhead vs raw engine containers; known broken tool parser for Qwen3.5 family (Ollama issue #14493). Nothing to measure.
