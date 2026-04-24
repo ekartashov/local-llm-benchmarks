@@ -60,30 +60,12 @@ die() { log "FATAL: $*"; exit 1; }
 BASELINE_TPS=76.5
 BASELINE_QUALITY=4.0
 
-# ── Preflight: log transformers version ───────────────────────────────────────
+# ── Preflight ─────────────────────────────────────────────────────────────────
 log "=== T2.4 Qwen3.6-27B-AWQ Arclight Thinker Candidate ==="
 log "Timestamp: ${TIMESTAMP}"
-TRANSFORMERS_VER=$(python3 -c "import transformers; print(transformers.__version__)" 2>/dev/null || echo "UNKNOWN")
-log "transformers version: ${TRANSFORMERS_VER}  (required: >=5.5.4)"
-if python3 -c "
-import transformers, sys
-def parse_ver(v):
-    parts = v.split('.')
-    major = int(parts[0])
-    minor = int(parts[1]) if len(parts) > 1 else 0
-    patch = int(parts[2].split('+')[0].split('a')[0].split('b')[0].split('rc')[0]) if len(parts) > 2 else 0
-    return (major, minor, patch)
-
-current = parse_ver(transformers.__version__)
-required = (5, 5, 4)
-sys.exit(0 if current >= required else 1)
-" 2>/dev/null; then
-    log "transformers version OK."
-else
-    log "WARNING: transformers < 5.5.4 detected (${TRANSFORMERS_VER}). Qwen3.6 architecture may not load correctly."
-    log "         Consider updating: pip install 'transformers>=5.5.4'"
-    log "         Proceeding anyway — deploy will fail if incompatible."
-fi
+log "NOTE: transformers>=5.5.4 required inside the vLLM container (not this .venv)."
+log "      Cannot verify from bench script. If deploy fails with architecture errors,"
+log "      check/update transformers inside the vLLM image."
 
 # ── Decode measurement helper ──────────────────────────────────────────────────
 MEASURE_PY="$(mktemp --suffix=.py)"
@@ -336,7 +318,7 @@ Open **{out}/phase2_quality/human_review.md** and score all 8 tasks 1–5.
 **Special attention — th03 (architecture_tradeoffs):**
 Qwen3.5-27B ALWAYS emits empty output on this task (thinking budget exhaustion — known defect).
 Record whether Qwen3.6-27B produces a non-empty answer — this is a key differentiator.
-Set `th03_non_empty: true/false` in metrics.json.
+Set \`th03_non_empty: true/false\` in metrics.json.
 
 **Pay attention to th02 and th05:**
 These are the tasks Gemma4-31B (T2.3b) failed on (scores 2 and 3).
@@ -345,9 +327,9 @@ These are the tasks Gemma4-31B (T2.3b) failed on (scores 2 and 3).
 These reveal depth-of-reasoning under production constraints.
 
 After scoring, update **{out}/metrics.json**:
-- Set `quality_mean_8task` to the mean score
-- Set `th03_non_empty` to true/false
-- Set `verdict` to PASS/FAIL/INCONCLUSIVE
+- Set \`quality_mean_8task\` to the mean score
+- Set \`th03_non_empty\` to true/false
+- Set \`verdict\` to PASS/FAIL/INCONCLUSIVE
 
 **Decision rule (T2.4):**
 - PASS: mean >= {baseline_quality}/5 AND tool calling works
