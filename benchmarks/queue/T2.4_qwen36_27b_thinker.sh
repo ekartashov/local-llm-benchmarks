@@ -19,7 +19,7 @@
 #            Note: 21 GiB + vision encoder (~2 GiB) = ~23 GiB on 28.8 GiB usable
 #            (gpu-mem-util 0.90) → 5.8 GiB headroom. If CUDA graphs OOM, add
 #            --max-num-seqs 1 (same fix as Qwen3.5-27B).
-# Suite:     Phase 2.2 thinker quality suite (8 tasks, max_tokens=4096).
+# Suite:     Phase 2.2 thinker quality suite (8 tasks, max_tokens=8192).
 #            Infra-shaped tasks not yet authored (T6.1) — running base suite only.
 # Baseline:  Qwen3.5-27B — quality 4.0/5, 76.5 t/s seq=1.
 # Special:   Watch th03 (architecture_tradeoffs). Qwen3.5-27B emits empty output
@@ -144,56 +144,44 @@ _deploy_gpu1() {
     VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
         "${REPO_ROOT}/infra/scripts/deploy.sh" vllm gpu1 "${MODEL}" \
         --gpu-mem-util 0.90 \
-        --ctx 32768 \
+        --ctx 49152 \
+        --kv-cache-dtype fp8 \
+        --max-num-seqs 1 \
         --tool-call-parser qwen3_coder \
         --reasoning-parser qwen3 \
-        --enable-auto-tool-choice \
         ${extra_flags} \
         2>&1 | tee -a "${LOG}"
 }
 
-log "Attempt 1: TP=1 on GPU1 with --language-model-only (sheds vision encoder) ..."
+log "Attempt 1: TP=1 on GPU1 with --max-num-seqs 1 (baseline fix) ..."
 if [[ "${DRY_RUN}" -eq 1 ]]; then
-    log "WOULD DEPLOY: _deploy_gpu1 --language-model-only"
-    log "WOULD DEPLOY (fallback): _deploy_gpu1 \"\""
-    log "WOULD DEPLOY (fallback): _deploy_gpu1 --max-num-seqs 1"
+    log "WOULD DEPLOY: _deploy_gpu1 \"\""
     log "WOULD DEPLOY (fallback): _deploy_tp2"
 else
-    if _deploy_gpu1 "--language-model-only"; then
-        log "Deployed with --language-model-only."
+    if _deploy_gpu1 ""; then
+        log "Deployed successfully on GPU1."
     else
-        log "Attempt 1 FAILED. Retrying without --language-model-only ..."
-        log "(Either the flag is unsupported in this vLLM build, or OOM with vision encoder.)"
-        if _deploy_gpu1 ""; then
-            log "Deployed without --language-model-only (vision encoder included in VRAM)."
-        else
-            log "TP=1 on GPU1 FAILED entirely. Possible CUDA graph OOM."
-            log "Fallback A: Try --max-num-seqs 1 (same fix as Qwen3.5-27B baseline)..."
-            if _deploy_gpu1 "--max-num-seqs 1"; then
-                log "Deployed with --max-num-seqs 1."
-            else
-                log "All GPU1 TP=1 attempts failed. Falling back to TP=2 (borrows both GPUs)..."
-                log "Stopping conflicting containers if any..."
-                for c in bench-vllm-gpu0 bench-vllm-gpu1; do
-                    if podman container exists "${c}" 2>/dev/null; then
-                        log "Stopping ${c} ..."
-                        podman stop "${c}" 2>/dev/null || true
-                        podman rm   "${c}" 2>/dev/null || true
-                    fi
-                done
-                VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-                    "${REPO_ROOT}/infra/scripts/deploy.sh" vllm tp2b "${MODEL}" \
-                    --gpu-mem-util 0.85 \
-                    --ctx 32768 \
-                    --tool-call-parser qwen3_coder \
-                    --reasoning-parser qwen3 \
-                    --enable-auto-tool-choice \
-                    2>&1 | tee -a "${LOG}" || die "All deployment attempts failed. Check bench.log."
-                PLACEMENT="tp=2 (tp2b)"
-                ENDPOINT="http://localhost:${PORT_VLLM_TP2_B}/v1"
-                log "TP=2 fallback deployed."
+        log "TP=1 on GPU1 FAILED. Falling back to TP=2 (borrows both GPUs)..."
+        log "Stopping conflicting containers if any..."
+        for c in bench-vllm-gpu0 bench-vllm-gpu1; do
+            if podman container exists "${c}" 2>/dev/null; then
+                log "Stopping ${c} ..."
+                podman stop "${c}" 2>/dev/null || true
+                podman rm   "${c}" 2>/dev/null || true
             fi
-        fi
+        done
+        VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+            "${REPO_ROOT}/infra/scripts/deploy.sh" vllm tp2b "${MODEL}" \
+            --gpu-mem-util 0.85 \
+            --ctx 49152 \
+            --kv-cache-dtype fp8 \
+            --max-num-seqs 1 \
+            --tool-call-parser qwen3_coder \
+            --reasoning-parser qwen3 \
+            2>&1 | tee -a "${LOG}" || die "All deployment attempts failed. Check bench.log."
+        PLACEMENT="tp=2 (tp2b)"
+        ENDPOINT="http://localhost:${PORT_VLLM_TP2_B}/v1"
+        log "TP=2 fallback deployed."
     fi
 fi
 
@@ -225,7 +213,7 @@ else
 
     # ── Step 4: Phase 2.2 thinker quality suite (8 tasks) ─────────────────────────
     log "Running Phase 2.2 thinker quality suite (8 tasks) ..."
-    log "max_tokens=4096 (thinking models exhaust 1024 budget — settled in DECISIONS.md)."
+    log "max_tokens=16384 (run 4 sweet spot — sufficient for th02 trace, no over-generation)."
     log "Special watch: th03_architecture_tradeoffs — Qwen3.5-27B emits empty here."
     python3 -m benchmarks.phase2_model_selection.bench \
         --endpoint "${ENDPOINT}" \
@@ -234,7 +222,7 @@ else
         --tasks "${REPO_ROOT}/benchmarks/phase2_model_selection/tasks/thinker/" \
         --model "${MODEL}" \
         --label "Qwen3.6-27B-AWQ" \
-        --max-tokens 4096 \
+        --max-tokens 16384 \
         2>&1 | tee -a "${LOG}" || {
         log "WARNING: phase2 quality bench exited non-zero — check logs."
     }
@@ -272,9 +260,10 @@ metrics = {
         "engine_version": "0.19.x",
         "model":          "QuantTrio/Qwen3.6-27B-AWQ",
         "quantization":   "AWQ-INT4",
+        "kv_cache_dtype": "fp8",
         "placement":      placement,
-        "context_length": 32768,
-        "extra_args":     "--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice",
+        "context_length": 49152,
+        "extra_args":     "--kv-cache-dtype fp8 --max-num-seqs 1 --tool-call-parser qwen3_coder --reasoning-parser qwen3",
     },
     "metrics": {
         "decode_tps_seq1":          dec_tps_1,
@@ -294,7 +283,7 @@ metrics = {
 md = f"""# T2.4 Qwen3.6-27B-AWQ — Arclight Thinker Candidate
 
 **vLLM** 0.19.x | **Model** {metrics['config']['model']} | **Date** {timestamp[:10]}
-**Placement** {placement} | **ctx** 32768 | **Parsers** qwen3_coder + reasoning-parser qwen3
+**Placement** {placement} | **ctx** 49152 | **kv** fp8 | **Parsers** qwen3_coder + reasoning-parser qwen3
 
 ## Auto-scored metrics
 
