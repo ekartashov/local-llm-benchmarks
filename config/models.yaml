@@ -170,6 +170,37 @@ models:
       VRAM footprint than Qwen3.5-27B-AWQ means the concurrent-dual assumption
       needs re-validation if GLM-4.5-Air wins T2.3.
 
+  # ── ELIMINATED thinker (Gemma4 generation) ─────────────────────────────────
+  gemma4_31b_it_awq:
+    status: ELIMINATED
+    role: thinker
+    hf_repo: QuantTrio/gemma-4-31B-it-AWQ
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 20      # actual; T2.3b spec estimated ~16 GiB — wrong
+    ctx_default: 32768   # native 256k; limited here for KV budget
+    engines: [vllm]
+    flags:
+      vllm: "--tool-call-parser gemma4 --trust-remote-code"
+      # DO NOT add --reasoning-parser gemma4: streaming path waits for </think> before
+      # activating tool parser; model skips reasoning → tools never intercepted.
+      # Same root cause as Qwen3-Next-80B requiring hermes alone. See DECISIONS.md.
+    vllm_image: "vllm/vllm-openai:gemma4"
+      # NOT :latest — vLLM 0.19.0/0.19.1 has tool-call JSON bug #39468 (malformed
+      # <|"|> wrapping in arg values). Fixed in the gemma4 docker tag.
+      # Pass via: BENCH_IMAGE=vllm/vllm-openai:gemma4 ./infra/scripts/deploy.sh ...
+    known_bugs:
+      - "vLLM 0.19.0/0.19.1 #39468: tool-call arg strings wrapped with <|\"|> chars. Fixed in gemma4 tag."
+      - "vLLM 0.19.0 streaming: --reasoning-parser gemma4 + --tool-call-parser gemma4 drops tool calls when model skips reasoning. Omit --reasoning-parser."
+    test_items: [T2.3b]
+    notes: >
+      Dense 31B, Apache 2.0. REJECTED for Arclight Thinker role (2026-04-24).
+      Mean quality 4.0/5. Demonstrated 'Surface-Level Reasoning' pathologies:
+      failed th02 (logic hierarchy), th03 (architecture naivety - Nginx),
+      and th05 (optimization - discarding valid cache). Strong on textbook
+      Python but lacks first-principles depth for engineering role.
+      Retained in registry for potential coder-role re-evaluation.
+
   # ── ELIMINATED thinker ─────────────────────────────────────────────────
   deepseek_r1_32b_awq:
     status: ELIMINATED

@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R11 CLOSED — T1.5 kvcached partial. Coder PASS (zero overhead). Thinker blocked: Qwen3.5-27B uses MambaSpec (kvcached doesn't support it) and combined weights OOM. kvcached is viable for pure-Transformer/MoE models; re-evaluate after thinker selection.
-**Current mode:** RESEARCH READY — thinker model selection (T2.3) is the next logical step; it unblocks both T1.5 Phase B re-run and the thinker role question.
+**Current cycle:** T2.3b DONE — Gemma4-31B rejected as thinker; redirected to coder candidate T2.3c. T_CV1–T_CV3 (Convergence benchmarking) open in parallel.
+**Current mode:** TESTING READY — T_CV1 and T2.3c have no deps; run either next.
 
 ---
 
@@ -24,6 +24,7 @@ Living document. What we currently believe, what is still open, and the log of r
 - GLM-4.7-Flash (30B-A3B) — MLA confirmed active (TRITON_MLA backend), but V1 tool-call crashes block tool-intensive use. In cold storage until vLLM V1 stabilizes for this architecture. See `DECISIONS.md` and Open from testing.
 - bf16 deployment — the quant we serve is AWQ-INT4, bf16 "does it fit" tests were misleading and have been discarded.
 - vLLM Sleep Mode **level=2** — do not use. See `DECISIONS.md`; known to produce gibberish outputs on wake (bug #29341) and requires manual `reload_weights` + `reset_prefix_cache` after wake which is easy to get wrong. Use level=1 exclusively. We have 192 GB DDR5, there is no reason to prefer level=2 for us.
+- **Gemma4-31B-it-AWQ** (Arclight Thinker candidate) — REJECTED as primary thinker. Mean quality 4.0/5 matches Qwen3.5-27B but fails depth-of-reasoning bar on th02/th03/th05. Redirected: strong 5/8 task profile (th01, th04, th06, th07, th08 all scored 5), 100% task completion, dense/no-MambaSpec → queued as **coder** candidate T2.3c.
 
 ### Working architectural hypothesis
 
@@ -50,32 +51,214 @@ Critical unknowns remaining:
 
 ## Cycle log
 
-### R11 — April 19 2026 — T1.5 kvcached spike: two hard blockers, architecture stays TP=1-per-GPU
+### R13 — April 23 2026 — Gemma4-31B thinker candidate research
 
-**Triggered by:** T1.5 run (kvcached spike for shared-GPU KV pool).
+**Triggered by:** Operator decision to proceed with T2.3b (Gemma4-31B as Arclight thinker).
 
-**Findings:**
+**Research findings:**
 
-1. **Phase A coder: PASS.** kvcached adds zero overhead on a single instance. Qwen3-Coder-30B-AWQ on gpu0 with kvcached: 250.8 t/s (baseline 251.0 t/s, within 0.1%).
+**Finding 1: Model confirmed — QuantTrio/gemma-4-31B-it-AWQ.**
 
-2. **Phase A thinker: hard incompatibility.** Qwen3.5-27B-AWQ crashes at KV cache init:
-   ```
-   ValueError: kvcached only supports FullAttentionSpec, SlidingWindowSpec, and MLAAttentionSpec,
-   got MambaSpec in group 0
-   ```
-   Qwen3.5-27B has Mamba (SSM) attention layers in its hybrid architecture. kvcached v0.1.5 does not support `MambaSpec`. This is a model incompatibility, not a configuration issue.
+Gemma 4 was released April 2, 2026 under Apache 2.0. Dense 31B (no Mamba/SSM layers — pure Transformer, FullAttentionSpec). Published benchmarks: GPQA Diamond 84.3%, AIME 2026 89.2%, Arena Elo 1452 (ranks #3 open model globally). QuantTrio/gemma-4-31B-it-AWQ is the AWQ-4bit quant from our trusted publisher.
 
-3. **Phase B: OOM.** Even in Phase B (both TP=1 instances on gpu0 simultaneously), the thinker OOM'd during weight loading: `38.62 MiB free on a 31.33 GiB GPU` after coder loaded. Root cause: **kvcached's virtual memory mapping applies to KV cache pages, not to model weight tensors**. The model weights still require contiguous physical VRAM during loading. Coder (~18 GiB) + Thinker (~14 GiB) = ~32 GiB, which saturates the physical 32 GB GPU before KV cache allocation even begins.
+**Weight size correction:** The T2.3b spec estimated ~16 GiB. Actual model card shows **~20 GiB**. This changes the kvcached Phase B analysis — see Finding 3.
 
-**Conclusion:**
-- kvcached is viable for pure-Transformer/MoE models — zero overhead confirmed on coder.
-- Current thinker (Qwen3.5-27B) is a dead end for kvcached: MambaSpec incompatibility is a model-level constraint, not a kvcached bug.
-- kvcached's virtual memory helps with KV cache elasticity, not weight loading — combined weights still need physical VRAM headroom.
-- T1.5 Phase B should be retried after T2.3 selects the thinker, if the new thinker is non-Mamba and combined weights fit under ~28 GiB.
+---
 
-**Architecture stays TP=1-per-GPU for now.** T1.5 Phase B is deferred, not abandoned.
+**Finding 2: vLLM image must be gemma4 tag; --reasoning-parser gemma4 must NOT be used.**
 
-**Decisions updated:** kvcached marked PROVISIONAL in DECISIONS.md with re-run conditions. T1.5 marked PARTIAL in queue.
+Two bugs in vLLM 0.19.0/0.19.1 affect Gemma4:
+
+1. **Issue #39468 (tool-call JSON corruption):** String values in tool call arguments are wrapped with `<|"|>` chars, producing malformed JSON. Affects `vllm/vllm-openai:latest` and `v0.19.1`. Fixed in the `vllm/vllm-openai:gemma4` docker tag. Deploy with `BENCH_IMAGE=vllm/vllm-openai:gemma4`.
+
+2. **Streaming reasoning+tool-call interception bug:** When `--reasoning-parser gemma4` and `--tool-call-parser gemma4` are both set, the streaming code path waits for `</think>` before activating the tool call parser. If the model skips reasoning and goes directly to tool calls, the parser never activates — raw tool call tokens appear as text content. This is the same root cause as the Qwen3-Next-80B problem (which required `--tool-call-parser hermes` alone, no reasoning-parser). **Fix: use `--tool-call-parser gemma4 --trust-remote-code` ONLY. Do not add `--reasoning-parser gemma4`.**
+
+The correct deploy flags: `--tool-call-parser gemma4 --trust-remote-code` (deploy.sh auto-adds `--enable-auto-tool-choice` when `--tool-call-parser` is present).
+
+---
+
+**Finding 3: kvcached Phase B (single GPU) is NOT viable for Gemma4 + Qwen3.6-35B.**
+
+Combined weight footprint: Gemma4-31B ~20 GiB + Qwen3.6-35B ~22 GiB = **42 GiB** — exceeds the 32 GiB of a single RTX 5090. kvcached virtualizes KV cache pages only, not model weights. Single-GPU Phase B is physically impossible regardless of kvcached version.
+
+The kvcached opportunity with Gemma4 is different: **cross-GPU elastic KV sharing** (coder on GPU0 TP=1, thinker on GPU1 TP=1, shared virtual KV pool across both GPUs). This is a different topology from the original Phase B design and needs separate research before T1.5 Phase B can be redesigned.
+
+Implication for current architecture: TP=1-per-GPU (coder on GPU0, thinker on GPU1) remains the baseline regardless of T2.3b outcome. kvcached cross-GPU KV sharing is a potential optimization, not a blocker.
+
+---
+
+**Finding 4: TP=1 on single 32 GiB GPU is viable.**
+
+20 GiB weights on 32 GiB card: with `--gpu-memory-utilization 0.90` → 28.8 GiB usable, ~8.8 GiB remaining for KV and CUDA graphs. Sufficient for ctx=32768 on a thinker workload (lower concurrency than coder). The `vllm/vllm-openai:gemma4` tag explicitly supports TP=1 single-GPU for the AWQ variant.
+
+---
+
+**Decisions updated this cycle:**
+- `config/models.yaml`: added `gemma4_31b_it_awq` CANDIDATE entry with corrected weight size and known bugs
+- `DECISIONS.md`: added `--reasoning-parser gemma4` prohibition (same pattern as Core/80B)
+- `TESTING_QUEUE.md`: T2.3b procedure updated with correct weight size, image tag, and kvcached Phase B note
+- `benchmarks/queue/T2.3b_gemma4_31b_thinker.sh`: created with all findings embedded
+
+**Tests queued for next cycle:**
+- **T2.3b**: run immediately — script ready, no dependencies.
+
+**Open from research:** none — queue is ready for testing.
+
+---
+
+### R12 — April 20 2026 — Convergence tier deployed and measured; tier naming settled
+
+**Triggered by:** Operator-driven research session. Goal: finalize Convergence tier model selection, engine selection, deployment configuration, and record all findings before any data is lost.
+
+**Context:** This research cycle was conducted conversationally alongside live deployment on the host. Many decisions were validated interactively by running commands on ZRH01-AIRIG.
+
+---
+
+**Finding 1: Tier naming finalized.**
+
+Permanent names agreed:
+- **Arclight** — coder + thinker hot pair (Steins;Gate operation theme — fast, electric)
+- **Core** — 80B behemoth sleeping in vLLM (Undertale Core — slower but powerful)
+- **Convergence** — 397B king-behemoth in RAM (ephemeral, anomalous, omnipotent — deeper than the Core)
+
+All docs, configs, and scripts should use these names going forward.
+
+---
+
+**Finding 2: Convergence model selection — Qwen3.5-397B-A17B UD-IQ2_M.**
+
+Key evidence chain:
+1. Benjamin Marie (independent, H200s) evaluated Unsloth UD-IQ2_M on 397B vs BF16 across MMLU-Pro/GPQA Diamond/LiveCodeBench/Math-500 — found performance difference within margin of error. He reran twice because the result was surprising. This is the most credible external evaluation available.
+2. 512-expert MoE architecture tolerates 2-bit compression on expert weights better than dense models — each expert handles a narrow specialization, so per-expert compression loss doesn't accumulate the way it does in dense forward passes.
+3. RAM budget math: UD-IQ2_M at ~123GB + Arclight sleep weights (~44GB) + OS (~4GB) = ~171GB of 192GB. 21GB headroom with `--no-mmap` (fully pinned). UD-IQ3_XXS at ~140GB leaves only ~8GB — dangerously tight.
+4. 397B@UD-IQ2_M beats 122B@Q4 as Convergence because: quantization is near-lossless on both, so this reduces to 397B BF16 vs 122B BF16. TAU2 gap is +14.7 points (86.7 vs ~72) — genuine behavioral difference in multi-step agentic orchestration, which is exactly what Convergence is invoked for.
+5. MiniMax M2.5 eliminated: community-verified catastrophic quality degradation at IQ2-Q4. Do not use as Convergence despite having similar MoE architecture.
+
+**Model file location:**
+```
+/srv/ai/models/hub/models--unsloth--Qwen3.5-397B-A17B-GGUF/snapshots/
+  da33c16fa4440f831149fcf53b98a22bc07785e5/UD-IQ2_M/
+  Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf  (~30GB)
+  Qwen3.5-397B-A17B-UD-IQ2_M-00002-of-00004.gguf  (~50GB)
+  Qwen3.5-397B-A17B-UD-IQ2_M-00003-of-00004.gguf  (~50GB)
+  Qwen3.5-397B-A17B-UD-IQ2_M-00004-of-00004.gguf  (~24GB)
+Total: ~123GB across 4 split files. Reference 00001-of-00004; loader finds the rest.
+```
+
+---
+
+**Finding 3: Engine selection — ik_llama.cpp pr-1288, not vLLM.**
+
+vLLM `--cpu-offload-gb` is unsuitable for a 123GB model on 64GB VRAM — it involves constant PCIe weight-chunk round-trips per forward pass. ik_llama.cpp's `--cpu-moe` keeps the MoE expert weights in RAM (sequential read during inference) while putting the hot path (attention, norms, embeddings) on GPU — the correct split for sparse MoE.
+
+**The engine problem:** mainline ik_llama.cpp HEAD (version 4427, commit 07516cec) does not support Qwen3.5 GDN architecture. Grep confirms: no `ssm_alpha`, `Qwen3_5`, or `GatedDelta` in `src/llama.cpp`. Mainline llama.cpp (b8851) does support it — has `src/models/qwen35moe.cpp`, `src/models/delta-net-base.cpp`, `LLM_ARCH_QWEN35MOE`. But mainline llama.cpp lacks ik_llama.cpp's `-fmoe` (fused MoE kernel) optimization.
+
+**Solution:** PR #1288 on ik_llama.cpp adds Qwen3.5 MoE support (`LLM_ARCH_QWEN35MOE`, `build_qwen35moe()`, `llama-delta-net.cpp` with `ssm_alpha`, `ssm_beta`). Checking out this branch and rebuilding gives both Qwen3.5 support and the ik_llama.cpp optimizations.
+
+```bash
+cd /srv/ai/projects/ik_llama.cpp
+git fetch origin pull/1288/head:pr-1288
+git checkout pr-1288
+cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release -j$(nproc)
+# Verify: find src/ -name "*.cpp" | xargs grep -l "qwen35\|ssm_alpha" 2>/dev/null
+# Expected output includes: src/llama-delta-net.cpp, src/llama-arch.cpp, src/llama-build-context.cpp
+```
+
+---
+
+**Finding 4: ik_llama.cpp pr-1288 flag changes vs assumed command.**
+
+Running the originally-assumed command (`-fa -fmoe`) produces `error: invalid parameter for argument: -fa`. Inspecting `--help` reveals:
+
+- `-fa` now requires a value: `-fa on|off|auto` — but it's on by default, so omit entirely
+- `-fmoe` is gone — fused MoE is **on by default**, disable with `-no-fmoe`
+- `--cpu-moe` exists as a clean alternative to the `-ot "blk\..*\.ffn_(gate|up|down)_exps\.weight=CPU"` regex
+
+**Correct launch command (confirmed working):**
+```bash
+/srv/ai/projects/ik_llama.cpp/build/bin/llama-server \
+  -m /srv/ai/models/hub/models--unsloth--Qwen3.5-397B-A17B-GGUF/snapshots/da33c16fa4440f831149fcf53b98a22bc07785e5/UD-IQ2_M/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf \
+  -ngl 999 \
+  --cpu-moe \
+  --no-mmap \
+  -b 4096 -ub 2048 \
+  -t $(nproc) \
+  -c 16384 \
+  --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 \
+  --jinja \
+  --host 0.0.0.0 --port 8002
+```
+
+Server starts successfully. Both 5090s recognized (32077 MiB + 32110 MiB GDDR7).
+
+---
+
+**Finding 5: Convergence performance baseline measured.**
+
+Two measurements from first live run (32 threads, ctx=16384, --no-mmap, --cpu-moe):
+
+```
+Run 1 (469 token prompt, 308 token generation):
+  prompt eval:  925.75ms / 22 tokens = 23.76 t/s   [warmup tokens]
+  eval:       22692.08ms / 308 tokens = 13.57 t/s   [generation]
+
+Run 2 (469 token prompt, 4631 token generation — full thinking + answer):
+  prompt eval:  7731.05ms / 469 tokens = 60.66 t/s
+  eval:       352267.07ms / 4631 tokens = 13.15 t/s
+
+Run 3 (2348 token prompt, 3685 token generation):
+  prompt eval: 14772.99ms / 2348 tokens = 158.94 t/s
+  eval:       280332.58ms / 3685 tokens = 13.15 t/s
+```
+
+**Analysis:**
+- Generation (~13.15 t/s) is bottlenecked by DDR5 bandwidth reading MoE expert weights. Per-token RAM read: ~10 experts × 3 matrices × 60 layers × ~1.28MB per matrix at IQ2_M ≈ 2.3GB/token. Actual bandwidth ~83 GB/s → theoretical ceiling ~36 t/s. Measured 13 t/s is ~36% of ceiling, gap explained by NUMA effects, thread coordination, expert routing compute.
+- Prompt processing scales with batch size: 23.76 → 60.66 → 158.94 t/s as batch grows. This is the expected behavior for RAM-bandwidth-bound MoE inference — larger batches amortize the bandwidth cost across more tokens.
+- GPU VRAM barely consumed — only attention/norm/embedding layers on GPU (~8-12GB of 64GB available). This leaves significant headroom for partial expert offload experiments (T_CV3).
+
+**Operator note:** "i think we can do better than the parameters we used" — thread count (32) and GPU layer distribution are not yet optimized. T_CV2 (thread sweep) and T_CV3 (partial GPU offload) queued.
+
+---
+
+**Finding 6: vLLM sleep does not apply to Convergence.**
+
+This was clarified definitively. vLLM sleep moves weights between VRAM and RAM — it's a GPU memory management primitive. Convergence doesn't live in VRAM at all (its weights are in RAM via `--cpu-moe`). The two systems are completely independent:
+
+- vLLM sleep frees VRAM so Convergence's attention layers can use it
+- Convergence is started/stopped independently as an ik_llama.cpp process
+- No sleep/wake coordination needed between vLLM and ik_llama.cpp
+
+The original "cold-start Convergence via vLLM sleep" framing was wrong. The correct framing: sleep Arclight (frees VRAM for Convergence attention layers), start Convergence as a separate process, run it, kill it, wake Arclight.
+
+---
+
+**Finding 7: Arclight thinker alternatives.**
+
+Qwen3.5-27B confirmed viable only for TP=1 (MambaSpec blocks kvcached Phase B per R11). For a thinker that could work with kvcached shared-pool, need a non-Mamba model. Gemma4-31B identified as strong candidate:
+- Dense (no Mamba), ~16GB AWQ
+- kvcached-compatible (pure Transformer = FullAttentionSpec)
+- Could potentially enable both models on one GPU with elastic KV pool
+- Strong benchmarks: GPQA 84.3%, AIME 2026 89.2%, Arena Elo 1452
+
+Both Qwen3.5-27B and Gemma4-31B remain viable paths. T2.3b added to test Gemma4-31B.
+
+---
+
+**Decisions updated this cycle:**
+- `DECISIONS.md`: Convergence tier settled (model, engine, command, performance baseline, tier naming)
+- `DECISIONS.md`: Gemma4-31B added as PROVISIONAL Arclight thinker candidate
+- `ARCHITECTURE.md`: Full rewrite with Convergence tier, tier naming, deployment topology
+- `TESTING_QUEUE.md`: T_CV1, T_CV2, T_CV3 added (Convergence benchmarks); T2.3b added (Gemma4)
+- Benchmark script: `benchmarks/bench_convergence.sh` created
+
+**Tests queued for next cycle:**
+- T_CV1: Convergence cold-start timing (measure NVMe load time)
+- T_CV2: Convergence thread count optimization sweep (8, 16, 24, 32)
+- T_CV3: Convergence partial GPU expert offload (first N layers on GPU)
+- T2.3b: Gemma4-31B as Arclight thinker candidate
+
+**Open from this research:** Convergence startup time not measured — this was done mid-session and timing was not captured. Run T_CV1 as first priority in the next testing cycle.
 
 ---
 
@@ -342,6 +525,23 @@ Phase 0/1 work: chat template verification, vLLM vs SGLang throughput comparison
 - **Step 2a** (quick non-streaming test, host only): `curl` Task 02 with `"stream": false` to confirm the non-streaming path works — if so, the streaming parser is definitively the crash point.
 - **Step 2b** (fix): Patch `glm4_moe_tool_parser.py` in `infra/Containerfile.vllm_glm47` to change `"arguments": args_dict` → `"arguments": full_args_str` at the point where a new tool call entry is first added to `prev_tool_call_arr`. Then rebuild (`--rebuild` flag on the bench script) and rerun T2.1.
 - **Step 3** (safety net): Add `VLLM_ENABLE_V1_MULTIPROCESSING=0` to the container env — keeps V1 in single-process mode so parser exceptions don't kill the entire engine; failures become per-request recoverable instead of fatal.
+
+### From T2.3b, 2026-04-24 — thinker question still open; Gemma4 redirected to coder
+
+**What happened:** T2.3b ran the Phase 2.2 thinker quality suite (8 tasks) against Gemma4-31B-it-AWQ at 70.3 t/s seq=1. Mean 4.0/5 — matches Qwen3.5-27B baseline. Task completion 100% (including non-empty output on th03 where Qwen3.5-27B emits empty). Three tasks scored ≤3 due to "Surface-Level Reasoning" pathologies: th02 (algorithm design), th03 (LLM-specific architecture), th05 (distributed consistency edge cases).
+
+**Why this needs research, not another test:** Gemma4's failure profile is task-type-specific, not uniformly inferior. Its dense architecture, no-MambaSpec, and strong 5/8 task profile make it worth evaluating in the coder role rather than discarding. This is a redirect decision, not a simple FAIL verdict.
+
+**Open questions:**
+1. Should Gemma4 be queued as a coder candidate (T2.3c)? It's dense, kvcached-compatible, strong benchmarks, 100% completion.
+2. Is there a better thinker candidate to test? Qwen3.5-27B remains the provisional baseline.
+3. Does the thinker question block any current work? (kvcached T1.5 Phase B remains deferred until a kvcached-compatible thinker is settled.)
+
+**Suggested direction:** Queue T2.3c (Gemma4 as coder) and proceed with Convergence benchmarks (T_CV1–T_CV3) in parallel. Thinker selection is not blocking any current test. Revisit thinker after coder evaluation.
+
+**Result dirs:** `results/T2.3b_arclight_thinker_gemma4_31b_candidate_20260423T163106Z/`
+
+---
 
 ### From T2.1b, 2026-04-18 — RESOLVED (R9 cycle)
 

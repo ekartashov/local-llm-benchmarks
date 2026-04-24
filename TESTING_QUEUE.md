@@ -476,6 +476,173 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 ---
 
+### T_CV1 — convergence_startup_timing — OPEN
+
+**Question:** How long does Convergence (Qwen3.5-397B UD-IQ2_M, ik_llama.cpp pr-1288, `--no-mmap`) take to become ready from cold start (NVMe → RAM → GPU)?
+
+**Why this matters:** determines whether always-resident is mandatory or whether cold-start on demand is acceptable for a "pull it when needed" use pattern.
+
+**Procedure:**
+1. Ensure Convergence is not running.
+2. Drop page cache to simulate true cold: `sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'` (optional — warm cache is also useful to measure separately).
+3. Record `date +%s%3N`.
+4. Start server with exact production command (see `ARCHITECTURE.md`).
+5. Poll `http://localhost:8002/health` every 500ms.
+6. Record timestamp when first 200 response received.
+7. Compute startup_ms. Repeat 3× and take median.
+8. Also measure: warm-cache cold start (without dropping caches).
+
+**Pass:** baseline number captured, no threshold.
+
+**What the number means:**
+- < 30s: cold-start on demand is acceptable
+- 30s–90s: tolerable for explicit "invoke Convergence" escalation flow, not for transparent routing
+- > 90s: always-resident is strongly preferred
+
+**Deps:** none.
+
+**Hand-back trigger:** server crashes during load (indicates Qwen3.5 GDN support issue in pr-1288 — check for model architecture errors in log).
+
+---
+
+### T_CV2 — convergence_thread_count_sweep — OPEN
+
+**Question:** What thread count maximizes token generation speed for Convergence? Baseline at `$(nproc)` = 32 threads gives 13.15 t/s. Hypothesis: MoE expert matrices (~1.28MB each at IQ2_M) may be too small to benefit from 32 threads — cache thrashing and thread coordination overhead may dominate.
+
+**Procedure:**
+1. Start Convergence with production command, varying only `-t`.
+2. For each thread count in [8, 12, 16, 20, 24, 28, 32], run:
+   ```bash
+   /srv/ai/projects/ik_llama.cpp/build/bin/llama-bench \
+     -m <model_path> \
+     -ngl 999 --cpu-moe --no-mmap \
+     -fa 1 -b 4096 -ub 2048 \
+     -t <N> \
+     -p 512 -n 128 \
+     -r 3
+   ```
+3. Record `tg128` (token generation at 128 tokens) and `pp512` (prompt processing at 512 tokens) for each `-t` value.
+4. Plot or tabulate. Identify optimal for tg and for pp (may differ).
+
+**Pass:** optimal thread count identified. Even if 32 is optimal, that's a valid result.
+
+**What failure means:** all values within 5% of each other → thread count doesn't matter much for this model, keep 32 for simplicity.
+
+**Deps:** T_CV1 (confirm model loads cleanly first).
+
+**Hand-back trigger:** none expected.
+
+---
+
+### T_CV3 — convergence_partial_gpu_expert_offload — OPEN
+
+**Question:** Can we improve Convergence generation speed by offloading some MoE expert layers to GPU, given that GPU VRAM is barely used with `--cpu-moe`?
+
+**Context:** With `-ngl 999 --cpu-moe`, only ~8-12GB of the available 64GB VRAM is used (attention/norms/embeddings). The remaining ~52GB is idle. Offloading the first N layers' expert weights to GPU would allow those layers to run at GPU speed rather than DDR5 bandwidth speed, potentially improving generation throughput.
+
+**Method:** Use `-ot` tensor override regex to selectively place early layers' expert tensors on GPU:
+```bash
+# Keep first 15 layers' experts on GPU, rest on CPU
+-ot "blk\.(0|1|2|3|4|5|6|7|8|9|10|11|12|13|14)\.ffn_(gate|up|down)_exps\.weight=CUDA0"
+```
+Or using `--n-cpu-moe N` which keeps MoE of the last N layers on CPU (keeps first layers on GPU by default with `-ngl 999`).
+
+**Procedure:**
+1. Establish llama-bench baseline: `--cpu-moe`, tg128 = X t/s.
+2. Test `--n-cpu-moe 50` (keep last 50 of 60 layers' experts on CPU, first 10 on GPU): measure tg128.
+3. Test `--n-cpu-moe 45` (first 15 on GPU): measure tg128.
+4. Test `--n-cpu-moe 40` (first 20 on GPU): measure tg128. Watch for OOM (each layer ~1-2GB experts).
+5. Stop at first OOM or diminishing returns.
+
+**VRAM budget per expert layer:** ~(expert_dim × hidden_dim × 3 matrices × IQ2_M bits/8). Rough estimate: ~2-3GB per layer for all 3 expert matrices. 10 layers ≈ 20-30GB of the available 52GB idle VRAM. Verify with `nvidia-smi` during test.
+
+**Pass:** tg128 improves by ≥15% with partial offload without OOM.
+
+**What failure means:**
+- OOM before meaningful speedup → VRAM budget calculation was wrong; recompute.
+- Speed improvement < 5% → DDR5 bandwidth is not the limiting factor for early layers (routing overhead dominates); keep `--cpu-moe` for simplicity.
+
+**Deps:** T_CV2 (establish thread count baseline first).
+
+**Hand-back trigger:** unexpected crash or architecture error — possible that ik_llama.cpp pr-1288 has issues with mixed CPU/GPU expert placement on Qwen3.5 specifically.
+
+---
+
+### T2.3b — arclight_thinker_gemma4_31b_candidate — DONE (REJECTED)
+
+**Question:** Is Gemma4-31B (dense, Apache 2.0, no Mamba) a better Arclight thinker than Qwen3.5-27B, specifically for quality on reasoning and infra-diagnostic tasks?
+
+**Why Gemma4-31B specifically:**
+- Dense model: no SSM/Mamba layers → no MambaSpec → kvcached-compatible (FullAttentionSpec)
+- GPQA Diamond 84.3%, AIME 2026 89.2%, Arena Elo 1452 (beats Qwen3.5-397B at 1449)
+- Apache 2.0 license
+
+**Corrected specs (R13, 2026-04-23):**
+- Weight size: **~20 GiB** (not ~16 GiB as originally estimated)
+- vLLM image: **`vllm/vllm-openai:gemma4`** — NOT `:latest`. vLLM 0.19.x has tool-call JSON corruption bug (#39468). Pass via `BENCH_IMAGE=vllm/vllm-openai:gemma4`.
+- Parser flags: **`--tool-call-parser gemma4 --trust-remote-code`** only. DO NOT add `--reasoning-parser gemma4`: streaming path drops tool calls when model skips reasoning (same root cause as Qwen3-Next-80B). See DECISIONS.md.
+- kvcached Phase B (single GPU): **NOT viable**. 22+20=42 GiB > 32 GiB. See note below.
+
+**Procedure:**
+```bash
+./benchmarks/queue/T2.3b_gemma4_31b_thinker.sh
+```
+Script handles TP=1→TP=2 fallback, TPS measurement, and the 8-task Phase 2.2 quality suite.
+After the run: score `human_review.md` (1–5 per task), update `metrics.json`.
+
+**Result (2026-04-24):** REJECTED as primary Thinker. Mean quality 4.0/5. Excellent task completion (100%, including non-empty th03 where Qwen3.5-27B emits empty), but "Surface-Level Reasoning" on th02/th03/th05 fails the depth-of-reasoning bar. Dense architecture, no-MambaSpec, strong 5/8 task profile → redirected to **coder candidate (T2.3c)** rather than discarded.
+
+**What failure means:**
+- Quality lower → Qwen3.5-27B stays thinker. Record task-type breakdown in DECISIONS.md.
+- Wins on quality AND produces non-empty th03 → significant win (fixes the known defect).
+
+**kvcached Phase B note:**
+Single-GPU cohabitation with Qwen3.6-35B coder is physically impossible at these weight sizes (42 GiB > 32 GiB). The Phase B opportunity for Gemma4 is **cross-GPU KV sharing** (coder GPU0 + thinker GPU1, shared elastic KV pool). This is a different topology from the original T1.5 Phase B design and requires a separate research item before testing.
+
+**Deps:** none (can run immediately — script is ready).
+
+**Hand-back trigger:** unexpected vLLM compatibility failure with Gemma4 on sm_120 Blackwell; or tool calling broken despite correct image and parser flags.
+
+---
+
+---
+
+### T2.3c — arclight_coder_gemma4_31b_candidate — OPEN
+
+**Question:** Is Gemma4-31B (dense, Apache 2.0, no Mamba) a viable Arclight coder to replace or complement Qwen3.6-35B-A3B-AWQ?
+
+**Motivation:** T2.3b thinker evaluation showed 5/8 tasks scored 5 (th01, th04, th06, th07, th08), 100% task completion, 70.3 t/s seq=1. The failure pattern (th02/th03/th05) is reasoning-depth, not code execution or tool reliability. Dense architecture means no A3B sparsity overhead, no MambaSpec → kvcached-compatible. Coder tasks weight tool reliability and code correctness more than multi-step system reasoning — different failure mode profile than thinker suite.
+
+**Key question vs baseline (Qwen3.6-35B-A3B-AWQ):** Baseline is 96.7% tool reliability + 100% quality + 237.1 t/s. Gemma4 is ~20 GiB vs ~22 GiB — marginally lighter. Dense vs MoE may affect tool-call reliability differently.
+
+**Specs:**
+- Model: `QuantTrio/gemma-4-31B-it-AWQ` (~20 GiB)
+- Image: `vllm/vllm-openai:gemma4` (NOT `:latest` — issue #39468)
+- Parser: `--tool-call-parser gemma4 --trust-remote-code` only (no `--reasoning-parser`)
+- Placement: GPU0 TP=1 (coder slot)
+- Suite: Phase 2.5 coder quality + tool reliability suite
+
+**Pass criteria:** tool reliability ≥ 90% AND quality mean ≥ 4.0/5. Beating the 237.1 t/s baseline is not required — quality and tool reliability are the bar.
+
+**Deps:** none (all Gemma4 deploy knowledge settled in R13/T2.3b).
+
+**Hand-back trigger:** tool-call JSON corruption despite gemma4 image tag (indicates a new bug introduced after R13); or CUDA graph OOM at TP=1 on GPU0 (fall back to TP=2 and document).
+
+---
+
+## TESTING_QUEUE — status summary addendum (R12+T2.3b)
+
+| Item | Status | Notes |
+|------|--------|-------|
+| T1.5 Phase B | DEFERRED | Blocked by Qwen3.5-27B MambaSpec. Re-run after a kvcached-compatible thinker is settled |
+| T_CV1 | OPEN | Convergence startup timing — run anytime, no deps |
+| T_CV2 | OPEN | Thread count optimization — run after T_CV1 |
+| T_CV3 | OPEN | Partial GPU expert offload — run after T_CV2 |
+| T2.3b | DONE | Gemma4-31B as thinker — REJECTED; redirected to T2.3c |
+| T2.3c | OPEN | Gemma4-31B as coder candidate — no deps, run when ready |
+
+---
+
 ## Tier 4 — engine / infra comparison
 
 ### T4.1 — sglang_for_a3b_coder

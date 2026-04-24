@@ -11,18 +11,88 @@ Items removed entirely: the previous "Decisions already settled (do not re-evalu
 
 ---
 
+## SETTLED — tier naming (R12, 2026-04-20)
+
+Three-tier architecture has permanent names. Use these in all docs, config, and scripts going forward.
+
+| Old name | New name | Theme | Character |
+|----------|----------|-------|-----------|
+| Coder + Thinker (hot pair) | **Arclight** | Steins;Gate operation — fast, electric, concurrent | Always-on pair, energetic |
+| Behemoth (80B asleep) | **Core** | Undertale core — slower but powerful, underground | Invoked on escalation |
+| King-behemoth (397B in RAM) | **Convergence** | Deeper than the Core — ephemeral, anomalous, omnipotent | Pulled rarely, profound |
+
+---
+
 ## SETTLED — model selection
 
-### Qwen3.6-35B-A3B-AWQ is the new coder role winner
-**SETTLED (2026-04-18, T2.5 PASS).** 96.7% tool reliability + 100% quality completion rate + 237.1 t/s decode. Supersedes Qwen3-Coder-30B. Requires `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. (Note: This is the native Qwen stack, distinct from the hermes-based Behemoth stack.)
+### Qwen3.6-35B-A3B-AWQ is the Arclight coder role winner
+**SETTLED (2026-04-18, T2.5 PASS).** 96.7% tool reliability + 100% quality completion rate + 237.1 t/s decode. Supersedes Qwen3-Coder-30B. Requires `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`.
 
 ### Thinking models require max_tokens ≥ 4096 in quality benchmarks
 **SETTLED (2026-04-18).** At 1024 tokens, thinking models exhaust their budget while still inside `<think>`, producing no answer. Raising to 4096 is the floor for any quality-scored task. Default changed in `bench.py`.
 
 ### vLLM 0.19 reasoning-parser field is `delta.reasoning`
-**SETTLED (2026-04-18).** vLLM v0.19.0+ emits thinking tokens under `delta.reasoning` (OpenAI o1-style), not `delta.reasoning_content`. BenchClient now captures both. Token counts and decode TPS are accurate for thinking models.
+**SETTLED (2026-04-18).** vLLM v0.19.0+ emits thinking tokens under `delta.reasoning` (OpenAI o1-style), not `delta.reasoning_content`. BenchClient now captures both.
 
-## SETTLED — infrastructure / tooling
+### Convergence tier uses ik_llama.cpp + GGUF, not vLLM
+**SETTLED (R12, 2026-04-20).** Qwen3.5-397B-A17B at any quality-preserving quantization (~109–180GB) exceeds single-host VRAM (64GB), requires CPU+GPU hybrid inference, and needs GGUF format. vLLM's `--cpu-offload-gb` path for models this large involves constant PCIe weight transfers per forward pass and is impractical. ik_llama.cpp's `--cpu-moe` flag keeps MoE expert weights in RAM while hosting attention/norm/embedding layers on GPU — the correct architectural split for sparse MoE models. vLLM sleep mode does not apply to Convergence; it is a completely separate process.
+
+### Convergence model: Qwen3.5-397B-A17B UD-IQ2_M (~123GB)
+**SETTLED (R12, 2026-04-20).** Benjamin Marie's independent evaluation (MMLU-Pro, GPQA Diamond, LiveCodeBench v6, Math-500 subsets on H200s) found UD-IQ2_M on this specific model to be within benchmark margin of error of BF16. The 512-expert MoE architecture (10 active per token) tolerates 2-bit compression on expert weights far better than dense models — each expert handles a narrow specialization so per-expert compression loss is minimal. UD-IQ2_M (~123GB) is preferred over UD-IQ3_XXS (~140GB) because it enables `--no-mmap` (fully pinned, no NVMe page faults) with comfortable RAM headroom alongside vLLM level=1 sleep weights (~44GB). UD-IQ3_XXS at 140GB leaves only ~8GB free after sleep weights — dangerously tight for `--no-mmap`.
+
+**Contrast:** MiniMax M2.5 quantizes catastrophically at IQ2-IQ4 (community-verified) — do not use MiniMax M2.5 as Convergence. Qwen3.5-397B is one of the best-quantizing models in the current landscape.
+
+### Convergence performance baseline
+**MEASURED (R12, 2026-04-20).** On ZRH01-AIRIG with vLLM sleeping (level=1):
+- Token generation: **~13.15 t/s** (bottlenecked by DDR5 bandwidth reading MoE expert weights)
+- Prompt eval (469 tokens): **60.66 t/s**
+- Prompt eval (2348 tokens): **158.94 t/s** (larger batches amortize bandwidth over more tokens)
+- GPU VRAM barely consumed — only attention/norm/embedding layers (~8-12GB total across both 5090s)
+- Bottleneck is DDR5 bandwidth (~83 GB/s actual on 4-DIMM downclocked config) vs ~2.3GB RAM read per token for full expert sweep
+
+**Thread count not yet optimized** — baseline at `$(nproc)` = 32. Smaller counts (16, 24) may be better due to MoE expert matrix sizes being too small to exploit 32 threads without cache thrashing. See T_CV2.
+
+### ik_llama.cpp pr-1288 is required for Convergence
+**SETTLED (R12, 2026-04-20).** Mainline ik_llama.cpp (version 4427, commit 07516cec) predates Qwen3.5 GDN (Gated Delta Network) support. PR #1288 adds `LLM_ARCH_QWEN35MOE`, `build_qwen35moe()`, and `llama-delta-net.cpp` with `ssm_alpha`. Must check out the `pr-1288` branch before building. Mainline llama.cpp (b8851) also supports this architecture as fallback but lacks `-fmoe` optimization.
+
+**Reproduction:**
+```bash
+cd /srv/ai/projects/ik_llama.cpp
+git fetch origin pull/1288/head:pr-1288
+git checkout pr-1288
+cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release -j$(nproc)
+```
+
+**Verify architecture support:**
+```bash
+find src/ -name "*.cpp" -o -name "*.h" | xargs grep -l "qwen35\|ssm_alpha\|delta_net" 2>/dev/null
+# Expected: src/llama-delta-net.cpp, src/llama-arch.cpp, src/llama-build-context.cpp etc.
+```
+
+### Convergence launch command (verified working)
+**SETTLED (R12, 2026-04-20).** In pr-1288, flash attention and fused MoE are **on by default**. `-fa` requires a value (`-fa on`) but is unnecessary since on is default. `-fmoe` flag is gone; use `-no-fmoe` to disable. `--cpu-moe` is the clean flag that keeps all `ffn_gate/up/down_exps` tensors in CPU RAM.
+
+```bash
+/srv/ai/projects/ik_llama.cpp/build/bin/llama-server \
+  -m /srv/ai/models/hub/models--unsloth--Qwen3.5-397B-A17B-GGUF/snapshots/da33c16fa4440f831149fcf53b98a22bc07785e5/UD-IQ2_M/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf \
+  -ngl 999 \
+  --cpu-moe \
+  --no-mmap \
+  -b 4096 -ub 2048 \
+  -t $(nproc) \
+  -c 16384 \
+  --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 \
+  --jinja \
+  --host 0.0.0.0 --port 8002
+```
+
+**Model path:** 4 split files must all be in the same directory. Reference only `00001-of-00004.gguf`; loader finds the rest automatically.
+
+**RAM prerequisite:** sleep both Arclight vLLM processes at level=1 before starting Convergence to free VRAM (though not strictly required for RAM since model is CPU-side) and to free up GPU for the attention layers.
+
+### vLLM Sleep Mode level=1 ~4 GiB residual is a design floor, not a tunable
+When a vLLM instance sleeps at level=1, it retains ~4 GiB GPU VRAM. This is the caching allocator instance, captured CUDA graphs, JIT-compiled kernels, and process state — deliberately preserved to enable <1s wake. Cannot be shrunk without breaking the wake-time guarantee. Level=2 offloads more but is unusable (gibberish-on-wake, see separate entry).
 
 ### kvcached: zero overhead for coder; re-evaluate after thinker selection
 **PROVISIONAL (2026-04-19, T1.5 partial — coder PASS, thinker blocked).** Phase A coder PASS: 250.8 t/s on Qwen3.6-35B-AWQ with kvcached, identical to raw vLLM. Zero overhead for Transformer/MoE models.
@@ -31,189 +101,176 @@ Phase B blocked by two issues specific to the current thinker (Qwen3.5-27B-AWQ):
 1. **MambaSpec incompatibility:** Qwen3.5-27B has hybrid Mamba (SSM) layers. kvcached v0.1.5 supports `FullAttentionSpec`, `SlidingWindowSpec`, `MLAAttentionSpec` only — raises `ValueError: got MambaSpec` at KV init. This is a thinker-model constraint, not a kvcached bug.
 2. **Weight footprint:** kvcached virtual memory applies to KV cache pages only, not weights. Combined weights must still fit in physical VRAM.
 
-**Re-run T1.5 Phase B after thinker model selection (T2.3).** If the new thinker is pure Transformer/MoE (no Mamba) and combined weights fit comfortably under ~28 GiB, Phase B is worth retrying. Do not retest with Qwen3.5-27B.
+**Re-run T1.5 Phase B after thinker model selection.** If the new thinker is pure Transformer/MoE (no Mamba) and combined weights fit comfortably under ~28 GiB, Phase B is worth retrying. Gemma4-31B was the candidate but was REJECTED (T2.3b) — next thinker candidate TBD in research.
+
+### Qwen3.5-27B-AWQ is Arclight thinker baseline but has constraints
+**PROVISIONAL (2026-04-18).** Viable quality-wise (4.0/5). MambaSpec (SSM hybrid layers) blocks kvcached Phase B. Cannot run with kvcached shared-pool. For pure TP=1 isolated deployment it works fine. Gemma4-31B was evaluated (T2.3b, 2026-04-24) and REJECTED — same 4.0 mean but fails depth-of-reasoning bar. Next thinker candidate TBD.
+
+---
+
+## SETTLED — infrastructure / tooling
 
 ### No Ollama
-Adds 10–30% overhead vs raw engine containers; known broken tool parser for Qwen3.5 family (Ollama issue #14493). Nothing to measure.
+Adds 10–30% overhead vs raw engine containers; known broken tool parser for Qwen3.5 family (Ollama issue #14493). Qwen3.5 GGUF also doesn't work in Ollama due to separate mmproj vision files. Nothing to measure.
 
 ### No KTransformers
 CPU offload path depends on AMX instructions. i9-14900K (Raptor Lake) does not have AMX. Project is architecturally unsuited to our CPU.
 
-### Engines are containerized
-Rootless podman only. No host installs of vLLM/SGLang/llama.cpp. Not a performance decision — an operational one (reproducibility, isolation, cleanup).
+### Engines are containerized (vLLM) or native binary (ik_llama.cpp)
+vLLM/SGLang: rootless podman only. No host installs. ik_llama.cpp for Convergence: native binary on host, built from source at `/srv/ai/projects/ik_llama.cpp`. This is intentional — ik_llama.cpp doesn't have a maintained container image for the pr-1288 branch, and GGUF inference doesn't benefit from container isolation the way a long-running API server does.
 
 ### Two vLLM processes on shared GPUs collapse to ~2% throughput
-Two parallel vLLM processes sharing the same GPU(s) without NVIDIA MPS experience catastrophic performance degradation. Measured throughput drops to 4.2 t/s (vs 212 t/s isolated). Root cause: GPU-wide CUDA context time-slicing (the GPU time-slices contexts coarsely, and TP=2 amplify this via multiple kernel dispatches per layer), not just direct NCCL serialization. Do not retest without MPS.
+Two parallel vLLM processes sharing the same GPU(s) without NVIDIA MPS experience catastrophic performance degradation. Root cause: GPU-wide CUDA context time-slicing. Do not retest without MPS.
 
-### NVIDIA MPS (Multi-Process Service) is skipped
-While MPS solves the context time-slicing issue above, it requires a privileged root daemon on the host which breaks our rootless podman invariant. sm_120 (consumer Blackwell) support is also unverified outside datacenter environments. A TP=1-per-GPU architecture avoids the problem entirely without root.
+### NVIDIA MPS is skipped
+Requires a privileged root daemon on the host which breaks our rootless podman invariant. sm_120 (consumer Blackwell) support also unverified outside datacenter environments.
 
 ### Multi-model in a single vLLM process is not supported
-vLLM does not support hosting more than one model weight set in one server process. This is an open upstream feature request with no ETA. Community workarounds are separate vLLM instances behind an nginx router, or third-party `llmux` for zero-reload switching. Do not plan around "merge coder + thinker into one vLLM" — it is not a path.
+vLLM does not support hosting more than one model weight set in one server process. Open upstream feature request with no ETA.
 
-### Sleep Mode level=1 ~4 GiB residual is a design floor, not a tunable
-When a vLLM instance sleeps at level=1, it retains ~4 GiB GPU VRAM (measured in T1.1). This is the caching allocator instance, captured CUDA graphs, JIT-compiled kernels, and process state — deliberately preserved to enable <1s wake. It cannot be shrunk without breaking the wake-time guarantee. Level=2 offloads more but is unusable (gibberish-on-wake, see separate entry). `wake_up(tags=[...])` affects wake granularity, not sleep footprint. The way to reclaim GPU memory while "sleeping" is to fully stop the container (T1.1c fallback path), not to tune level=1 lower.
+### Sleep Mode level=1 is our swap primitive
+Level 1 offloads weights to CPU RAM, discards KV cache, preserves CUDA graphs / allocator / JIT kernels. Wake times 0.1–6s depending on model size.
+
+**Both flags are mandatory:**
+- `VLLM_SERVER_DEV_MODE=1` (env): exposes `/sleep`, `/wake_up`, `/is_sleeping` HTTP routes
+- `--enable-sleep-mode` (vllm serve flag): makes the engine initialize with `CuMemAllocator` and reserve the "weights" memory pool
+
+**Level 1 only.** Level=2 produces gibberish output on wake (bug #29341).
 
 ### System RAM is not VRAM for KV cache
-Offloading KV cache to DDR5 costs 50–80% decode speed (memory bandwidth gap: 83 GB/s vs 1790 GB/s). We keep working set in GDDR7. System RAM is fine for **weight storage during sleep** (see vLLM Sleep Mode) but not for active KV.
-
-### vLLM Sleep Mode is our swap primitive (gated on T1.1 rerun)
-Level 1 offloads weights to CPU RAM, discards KV cache, preserves CUDA graphs / allocator / JIT kernels. Wake times reported at 0.1–6s depending on model size — 18–200× faster than cold reload. Official docs confirm this works with TP/PP/EP. SGLang and llama.cpp have no equivalent first-class feature; this alone keeps vLLM as our primary engine for multi-model setups.
-
-**Two flags are required — both are mandatory, not alternatives:**
-- `VLLM_SERVER_DEV_MODE=1` (environment variable): exposes the `/sleep`, `/wake_up`, `/is_sleeping`, `/collective_rpc`, `/pause`, `/resume` HTTP routes. Without this, the routes return 404.
-- `--enable-sleep-mode` (vllm serve flag): makes the engine initialize with `CuMemAllocator` and reserve the "weights" memory pool. Without this, the `/sleep` route is a control-plane no-op — `is_sleeping` toggles but no memory is released, because there is no pool context that the allocator can release from.
-
-The R5 cycle (2026-04-17) diagnosed T1.1's initial FAIL as the `--enable-sleep-mode` flag being missing from the vllm serve command. The rerun has not been executed yet — hence "gated."
-
-**Level 1 only.** Do not use level=2. Bug #29341 (Nov 2025, H100): level=2 wake produces gibberish output. Level=2 also requires manual `collective_rpc reload_weights` + `reset_prefix_cache` after wake (vLLM blog docs) — easy to get wrong. Level=1 keeps weights in CPU RAM, which is fine for us (192 GB DDR5, plenty of headroom for all three tiers' worth of weights).
-
-Caveats, not blockers:
-- Trusted-network only — `VLLM_SERVER_DEV_MODE=1` exposes dev endpoints. Our rootless podman local socket qualifies.
-- KV cache is flushed on sleep (cannot free GPU memory while preserving blocks).
-- CPU prefix cache survival across sleep is **not verified** — flagged as test item T3.4.
-
-**Known risks to watch for in T1.1 rerun:**
-1. **Regression bug #32714** ("Sleep is broken since 0.14.0"): on v0.14+, sleep frees ~30% of expected memory rather than ~90%+. Issue marked Closed but RFC #34303 (Feb 2026) still cites it as "broken since v0.14.0." If our 0.19.0 rerun shows ~30% VRAM freed, this regression applies and we need to pin an earlier version or wait for upstream fix.
-2. **Blackwell crash bug #21336** (RTX PRO 6000 sm_120 + vLLM 0.9.2 + TP=2 + GPTQ-Marlin + `--enable-sleep-mode` → crash at startup). Our hardware is the same architecture class (consumer sm_120), same TP placement, but AWQ-Marlin not GPTQ-Marlin. Status on 0.19.0 unknown. Watch for crash at startup after adding the flag.
-
-last_verified_vllm: "0.19.0" (API routes present and functional; weight-offload mechanism not yet verified end-to-end)
+Offloading KV cache to DDR5 costs 50–80% decode speed. We keep working set in GDDR7. System RAM is fine for **weight storage during sleep** (vLLM level=1) and for **Convergence MoE expert weights** (read sequentially during inference, bandwidth-limited not latency-limited).
 
 ---
 
 ## SETTLED — models
 
-### Qwen3-Coder-30B-A3B-AWQ is a viable coder baseline
-Measured: 251 t/s single-request, ~730 t/s aggregate at concurrency=4, single-GPU. Parser `--tool-call-parser qwen3_coder --reasoning-parser qwen3` works. Default contender against any new coder candidate.
+### Qwen3-Coder-30B-A3B-AWQ is the Arclight coder baseline (superseded by Qwen3.6)
+Measured: 251 t/s single-request, ~730 t/s aggregate at concurrency=4, single-GPU. Parser `--tool-call-parser qwen3_coder --reasoning-parser qwen3` works.
 
-### Qwen3.5-27B-AWQ is viable as a thinker on quality
-Measured 4.0/5 vs DeepSeek-R1-32B 2.6/5 on 8 reasoning tasks. Hybrid SSM needs `--max-num-seqs 1` on vLLM to avoid CUDA graph profiling OOM; 76 t/s with graphs active. See `PHASE2_RESULTS.md`.
+### Qwen3.6-35B-A3B-AWQ is the Arclight coder of record
+SETTLED in T2.5 (2026-04-18). 237.1 t/s single-GPU. 96.7% tool-call reliability. 100% quality completion rate. Supersedes Qwen3-Coder-30B. Apache 2.0.
 
-Outstanding defect: `th03_architecture_tradeoffs` always exceeds 8192-token `<think>` budget → empty output. Fix: raise `--max-tokens` to ≥16384 on the thinker endpoint, or route architecture-heavy tasks around the thinker. Must resolve before "thinker: Qwen3.5-27B" is truly settled.
+### Qwen3.5-27B-AWQ is viable as Arclight thinker on quality
+Measured 4.0/5 vs DeepSeek-R1-32B 2.6/5 on 8 reasoning tasks. 76 t/s with graphs active, TP=1, GPU1. Needs `--max-num-seqs 1`. Mamba SSM hybrid blocks kvcached Phase B.
+
+Outstanding defect: `th03_architecture_tradeoffs` always exceeds thinking budget → empty output. Route architecture-heavy tasks to Core or Convergence.
+
+### Gemma4-31B is NOT the primary Arclight thinker; worth revisiting as coder candidate
+**SETTLED (T2.3b, 2026-04-24).** Dense model (no Mamba), ~20 GiB AWQ, pure Transformer / no MambaSpec blocker for kvcached. Strong benchmarks (GPQA 84.3%, AIME 2026 89.2%, Arena Elo 1452). Quality test T2.3b mean 4.0/5 — matches Qwen3.5-27B baseline but fails depth-of-reasoning bar on th02/th03/th05 (see "rejected as primary thinker" below). The 5/8 task profile (excellent on th01, th04, th06, th07, th08) makes it a plausible *coder* role candidate — dense, fast tool execution, 100% task completion, no SSM layers. Not yet tested in coder role.
+
+### --reasoning-parser gemma4 must NOT be combined with --tool-call-parser gemma4
+**SETTLED (R13, 2026-04-23).** vLLM 0.19.x streaming code path waits for `</think>` close tag before activating the tool call parser. If Gemma4 skips reasoning and emits tool calls directly, the parser never fires — raw tool tokens appear as text content (all `no_call`). This is the same root cause as Qwen3-Next-80B (80B behemoth requiring `--tool-call-parser hermes` alone with no reasoning-parser). Correct Gemma4 deploy flags: `--tool-call-parser gemma4 --trust-remote-code`. For quality-only tasks (no tool calls), the reasoning parser is also unnecessary since the model's answers are scored by content not by reasoning visibility.
+
+### Gemma4-31B is rejected as primary Arclight thinker; coder role open
+**SETTLED (2026-04-24, T2.3b).** Mean quality 4.0/5. Excels at textbook knowledge (Python closures, DCL, Pydantic — all scored 5), but demonstrates "Surface-Level Reasoning" on production systems tasks:
+1. **th02 (Algorithm Logic)**: Prioritized heuristic secondary goals over primary constraints (missed deadline count).
+2. **th03 (Systems Architecture)**: Recommended naive Nginx load-balancing for stateful LLM workloads, ignoring token-blindness and Head-of-Line blocking.
+3. **th05 (Optimization)**: Recommended discarding valid versioned cache results based on a false "pollution" concern.
+
+The 5/8 task win rate and 100% completion rate (including non-empty output on th03 where Qwen3.5-27B emits empty) suggest Gemma4 is a capable model with a different failure mode than Qwen3.5-27B — not a straight inferior. Its dense architecture (no A3B sparsity overhead, no MambaSpec), kvcached-compatibility, and strong coding benchmarks make it worth testing in the **Arclight coder role** (T2.3c). Current coder Qwen3.6-35B-A3B-AWQ remains the baseline.
+
+### vllm/vllm-openai:gemma4 tag required for Gemma4 models
+**SETTLED (R13, 2026-04-23).** vLLM 0.19.0/0.19.1 (`:latest` tag) has issue #39468: tool-call argument strings are wrapped with `<|"|>` chars, producing unparseable JSON. Fixed in the `vllm/vllm-openai:gemma4` Docker tag. Deploy Gemma4 models with `BENCH_IMAGE=vllm/vllm-openai:gemma4`.
 
 ### DeepSeek-R1-32B-AWQ is not our thinker
-Quality 2.6/5 dominated by Qwen3.5-27B 4.0/5 across task categories. Not marginally worse — structurally worse (surface-level fixes, wrong diagnoses, misses the point on consistency scenarios). Do not pursue further.
+Quality 2.6/5 dominated by Qwen3.5-27B 4.0/5 across task categories. Do not pursue further.
 
 ### Devstral is eliminated
-bf16 OOMs at 30.4 GiB, and at any quant its quality is below Qwen3-Coder-30B-AWQ on our tasks. No path to viability.
+bf16 OOMs at 30.4 GiB, quality below Qwen3-Coder-30B-AWQ. No path to viability.
 
-### Qwen3.6-35B-A3B-AWQ is the new coder candidate of record
-SETTLED in T2.5 (2026-04-18). 237.1 t/s single-GPU. 96.7% tool-call reliability. 100% quality completion rate. Supersedes Qwen3-Coder-30B (251 t/s). Thinking-by-default is handled natively by vLLM `reasoning-parser qwen3`. Apache 2.0.
+### Core model: Qwen3-Coder-Next-80B-A3B-AWQ (cyankiwi)
+SETTLED T1.3 (2026-04-18). 189.5 t/s seq=1 decode, 610 t/s aggregate at seq=4, 13007 t/s prefill@32k. Tool calls 100% reliable with `--tool-call-parser hermes` and **no** `--reasoning-parser`. Requires `--gpu-memory-utilization 0.95` and `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`.
 
-### GLM-4.7-Flash (30B-A3B) MLA confirmed; tool crash is a parser bug with a known fix
+**Do NOT add `--reasoning-parser qwen3`** to Core — causes hard failure at all parser combinations (reasoning parser intercepts XML-tagged tool calls before tool-call parser sees them).
 
-- **MLA Status**: **CONFIRMED**. TRITON_MLA attention backend is active in all tested vLLM builds (visible in bench.log: `Using TRITON_MLA attention backend out of potential backends: ['TRITON_MLA']`). Footprint ~129 KB/token (47 layers × kv_lora_rank=512 ≈ 94 KB base + CUDA-graph overhead from the VRAM-subtraction measurement method).
+### Convergence model: Qwen3.5-397B-A17B UD-IQ2_M vs 122B comparison
+**SETTLED (R12, 2026-04-20).** 397B@UD-IQ2_M is preferred over 122B@Q4 despite lower bits-per-weight. Both quantize cleanly on the Qwen3.5 architecture. The TAU2 gap (+14.7 points: 86.7 vs ~72) represents genuine behavioral differences in multi-step agentic orchestration and long-horizon reasoning — the exact capability Convergence is invoked for. Since UD-IQ2_M on 397B is within BF16 margin of error, this is effectively 397B@BF16 vs 122B@Q4, and the 397B wins on every reasoning metric that matters for architectural decisions.
 
-- **Infrastructure**: `cu130-nightly` + git-transformers custom image (`vllm-glm47`) correctly resolves `Glm4MoeLiteForCausalLM`. The config.json patch (adding `qk_nope_head_dim`, `qk_rope_head_dim`) is applied by the bench script. Standard vLLM images may fail architecture name resolution.
-
-- **V1 engine cannot be disabled** for `Glm4MoeLiteForCausalLM`. All six env vars (`VLLM_V1=0`, `VLLM_USE_V1=0`, `VLLM_V1_ENABLED=0`, `VLLM_USE_V1_ENGINE=0`, `VLLM_ENGINE_ITERATOR_SOURCE=LEGACY`) are "Unknown" in vLLM 0.19.x nightly. This is not the root cause of the tool crash.
-
-- **Tool crash root cause: EngineCore subprocess crash — NOT the tool parser.** R9 code inspection reviewed all 504 lines of `glm4_moe_tool_parser.py`. Every function is correct — no dict/string type confusion, no 2-arg-specific bugs, no code path that can crash vLLM's server. The crash is in the EngineCore subprocess (pid=188), not in the APIServer (pid=1) where the tool parser runs. The Task 02 raw error is vLLM V1's exact EngineCore death message: `"EngineCore encountered an issue. See stack trace (above) for the root cause."` A parser exception cannot produce this error.
-
-- **Most likely cause: TRITON_MLA PIECEWISE CUDA graph instability on Blackwell.** The startup log shows TRITON_MLA cannot use full CUDA graphs (`AttentionCGSupport.NEVER`), falling back to PIECEWISE mode. Task 01 (1-arg, shorter decode) passes; Task 02 (2-arg, longer decode) crashes EngineCore after full generation time (~14s). This is consistent with a PIECEWISE boundary instability at certain decode lengths. The actual traceback is in container stderr only (not captured by bench scripts).
-
-- **Confirmed wrong approaches:** (1) PR #37385 sed patch — those variables don't exist in our build; (2) any tool parser patch — the parser is not the crash site; (3) `VLLM_ENABLE_V1_MULTIPROCESSING=0` — only affects how exceptions in the serving layer propagate, not EngineCore crashes; (4) V0 engine env vars — confirmed "Unknown" and ignored.
-
-- **Decision**: GLM-4.7-Flash in cold storage — **wait for upstream.** The crash requires a vLLM fix for TRITON_MLA + Blackwell + PIECEWISE stability. Monitor vLLM releases for `Glm4MoeLite`/TRITON_MLA fixes. Do not attempt further T2.1x patches. T2.1b CANCELLED.
+### GLM-4.7-Flash in cold storage
+MLA confirmed active (TRITON_MLA). EngineCore crashes on Tasks 02/03 (2-arg tools). Root cause: TRITON_MLA PIECEWISE CUDA graph instability on Blackwell at certain decode lengths. Requires upstream vLLM fix. Monitor vLLM releases.
 
 ### GLM-4.6-Air does not exist
-Z.ai released GLM-4.6V (vision, Air-sized) but skipped text-only Air. They went to GLM-4.7 flagship + GLM-4.7-Flash. No research gap — it was simply never released.
+Z.ai released GLM-4.6V (vision) but skipped text-only Air. Went to GLM-4.7 flagship + GLM-4.7-Flash.
 
 ### GLM-4.6 and GLM-4.7 full (357B / 358B) are out of reach
-Need ~8× datacenter-class GPUs at any serving quant that preserves capability. Not feasible on 2×5090.
+Need ~8× datacenter-class GPUs. Not feasible on 2×5090.
 
 ---
 
 ## SETTLED — hardware/infra truth
 
-### Behemoth (80B A3B MoE) on TP=2 is extremely viable
-Verified in T1.3 (2026-04-18). 189.5 t/s seq=1 decode, 610 t/s at seq=4, 13007 t/s prefill at 32k context.
-- **Requirement**: `--gpu-memory-utilization 0.95` on 32GB cards. 0.85 OOM'd during CUDA graph capture.
-- **Requirement**: `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1` env var to allow vLLM to estimate graph memory without pre-allocating it; without this, graph capture itself triggers OOM.
-- **Requirement**: `--tool-call-parser hermes --enable-auto-tool-choice`. Do **NOT** add `--reasoning-parser qwen3` — this causes hard failure regardless of the tool-call parser used. With `hermes`, the reasoning parser intercepts XML-tagged content (including tool calls) into the `reasoning` field before the tool parser sees it, resulting in 100% `no_call`. With `qwen3_xml`, it causes 100% `exception`. This is not a "benchmark-only" restriction — avoid entirely for this model.
+### Convergence DDR5 bandwidth is the generation bottleneck
+**SETTLED (R12, 2026-04-20).** Per-token generation reads ~2.3GB of expert weights from DDR5 (10 active experts × 3 matrices × 60 layers × ~1.28MB per matrix at IQ2_M). Actual DDR5 bandwidth is ~83 GB/s (4-DIMM downclocked from theoretical 120 GB/s). Theoretical ceiling: 83/2.3 ≈ 36 t/s. Measured: ~13 t/s. Gap explained by NUMA effects, thread coordination overhead, and expert routing compute. Prompt processing scales much better with batch size because bandwidth is amortized: 158 t/s at 2348-token batch vs 60 t/s at 469-token batch.
+
+### Behemoth (80B A3B MoE) on TP=2 is extremely viable as Core
+Verified in T1.3 (2026-04-18). 189.5 t/s seq=1 decode, 610 t/s at seq=4, 13007 t/s prefill at 32k context. Requires `--gpu-memory-utilization 0.95` and `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`.
 
 ### Dense 70B via TP=2 on PCIe x8/x8 no-NVLink → slow
-Community-measured: 20–35 t/s. Our first-principles math shows this is NOT a bandwidth issue (decode allreduce = ~390 MB/s at 40 t/s, <2% of x8 PCIe). The cause is NCCL sync-point overhead and kernel launch latency accumulating over many layers at large hidden dims. Does not generalize to MoE with small active-parameter counts — see "MoE with ≤20B active params via TP=2 → fine" below.
+Community-measured: 20–35 t/s. NCCL sync-point overhead accumulates over many layers at large hidden dims.
 
 ### MoE with ≤20B active params via TP=2 → fine
-First-principles: A3B decode allreduce is ~60 MB/s at 150 t/s, ~0.2% of x8 PCIe bandwidth. Prefill at 32k ctx adds ~500ms to TTFT (~8% overhead). Expected to deliver 85–95% of TP=1-equivalent throughput. Measured numbers for our specific stack are a test item, but the architectural viability is settled — we don't need to ask "does TP=2 work for A3B at all."
+A3B decode allreduce is ~60 MB/s at 150 t/s, ~0.2% of x8 PCIe bandwidth.
 
 ### Speculative decoding does not help MoE
-MoE active-param savings already address the memory-bandwidth bottleneck that spec decode targets. Only test spec decode on dense models.
-
-**Re-evaluate if:** a new spec decode variant explicitly designed for MoE (e.g. MTP in GLM-4.7, Qwen3-Next MTP) ships with kernel-level validation on Blackwell sm_120. Currently:
-- GLM-4.7-Flash MTP: reported 10× throughput regression on B200 (Blackwell pro). Hopper OK. Consumer Blackwell sm_120 unknown → **do not enable by default, measure first** if pursuing GLM-4.7-Flash.
-- Qwen3-Next MTP: documented in model card, status on sm_120 untested.
+MoE active-param savings already address the memory-bandwidth bottleneck that spec decode targets.
 
 ---
 
 ## PROVISIONAL — re-check if condition changes
 
 ### NVFP4 as a standalone optimization phase — deprioritized
-Blackwell FP4/FP8 kernels in vLLM/CUTLASS are still maturing. NVFP4-W4A16 only beats AWQ-Marlin in narrow regimes; AWQ-Marlin is already excellent for A3B MoE on 5090.
+Blackwell FP4/FP8 kernels in vLLM/CUTLASS are still maturing. AWQ-Marlin is already excellent for A3B MoE on 5090.
 
-**Re-evaluate if:**
-- We add a dense model where VRAM headroom becomes tight.
-- TensorRT-LLM's FP4 path becomes accessible through our container stack.
-- vLLM's CUTLASS FP4 kernels land a major perf update.
-- vLLM major version bump (currently verified on 0.19.x).
+**Re-evaluate if:** dense model added where VRAM headroom becomes tight; TRT-LLM FP4 path accessible; vLLM major version bump.
 
 ### LiteLLM as a classifier / router — not needed
-OpenCode v1.3+ (Feb 2026) supports native multi-endpoint subagent routing. Agent ID → Model ID → Provider baseURL is deterministic, and autonomous subagent spawning routes across ports natively. LiteLLM is redundant at the routing layer for our setup.
+OpenCode v1.3+ supports native multi-endpoint subagent routing.
 
-**Re-evaluate if:** we later want a frontend other than OpenCode (e.g. direct IDE integrations) that lacks native multi-endpoint routing.
-- vLLM major version bump (currently verified on 0.19.x).
-
-Retained LiteLLM use case: observability / failover / request logging across endpoints. Not routing.
+**Re-evaluate if:** frontend other than OpenCode needed.
 
 ### Alternative AWQ publishers — not pursued
-Inter-publisher AWQ quality variance is within noise for our tasks. QuantTrio and cyankiwi are known-good. Note: `cpatonn/` returned HTTP 401 for Qwen3-Next-80B during T1.3 — do not use `cpatonn/` for that model; `cyankiwi/` is the working publisher.
+Inter-publisher AWQ quality variance is within noise. QuantTrio and cyankiwi are known-good. Note: `cpatonn/` returned HTTP 401 for Qwen3-Next-80B — do not use `cpatonn/` for that model.
 
-**Re-evaluate if:** a specific quality discrepancy is observed on a task where the quantizer is a plausible suspect.
+### Convergence thread count — not yet optimized
+Baseline at 32 threads. MoE expert matrices are relatively small (~1.28MB each); 32 threads may over-parallelize them causing cache thrashing. Values of 16 or 24 may be better. See T_CV2.
 
-### Abliterated variants — not pursued
-Orthogonal axis (refusal behavior), not a coding/infra capability axis. Irrelevant to our goals.
+**Re-evaluate after:** T_CV2 thread sweep.
 
-### Single-GPU-per-model placement — reinstated as default for the hot pair
-Was deprioritized in R4, but T1.2's collapse under multi-process GPU sharing makes TP=1-per-GPU the mandatory topology for concurrent isolated execution (coder on GPU0, thinker on GPU1). TP=2 is now reserved exclusively for the behemoth model (which borrows both GPUs while the hot pair sleeps).
+### Convergence GPU layer distribution — not yet optimized
+GPU VRAM usage reported as "small amount" during first run — attention/norm/embedding layers occupy only ~8-12GB of available 64GB. Partial expert layer offload (e.g. first 10-15 layers' MoE experts on GPU) could improve generation speed. Requires `-ot` regex approach and careful VRAM budgeting. See T_CV3.
 
-**Re-evaluate if:** T1.5 (`kvcached` spike) Phase B or Phase C passes — that would validate a memory-layer sharing primitive that sidesteps the context time-slicing problem without requiring MPS or root, and could revive TP=2-for-both-hot.
+**Re-evaluate after:** T_CV2 establishes thread baseline; T_CV3 tests partial offload.
 
-### kvcached as a third GPU-sharing path — provisional, test in T1.5
-`ovg-project/kvcached` provides virtualized elastic KV cache (decouples GPU virtual from physical addressing), allowing multiple vLLM instances to share a KV pool dynamically on the same GPU. Tested with vLLM 0.19.0 (our version), supports MHA/GQA/MLA, actively maintained (v0.1.5, Red Hat endorsement). Operates at the memory layer, not the CUDA context layer, so it may sidestep the problem that killed naive concurrent TP=2 in T1.2 — without needing MPS or root.
-
-**Status:** promising on paper. Not validated on our stack. Queued as T1.5 spike.
-
-**Re-evaluate if:** T1.5 Phase B/C settles (either confirming it works — possibly reviving TP=2-for-both-hot — or confirming that context-slicing is orthogonal to KV sharing).
+### Gemma4-31B as primary Arclight thinker — rejected; coder role open
+Dense, no Mamba, ~20GB AWQ, kvcached-compatible. Mean 4.0/5 — same as baseline — but fails depth-of-reasoning bar on th02/th03/th05 (naivety on production constraints). Rejected as thinker. Dense architecture and strong completion rate make it a plausible coder candidate — queued as T2.3c.
 
 ---
 
 ## SUPERSEDED — invalidated by later findings
 
 ### OLD: "One-line source patch for glm4_moe_lite"
-**Superseded** — This was a legacy workaround for older vLLM images where `glm4_moe_lite` mapping was missing in `model_arch_config_convertor.py`. The current `cu130-nightly` image based stack with git-transformers resolves this natively. Do not apply source patches to modern images.
+Superseded — legacy workaround for older images. Current cu130-nightly resolves natively.
 
 ### OLD: "No dense 70B with tensor parallelism"
-**Still true** but don't generalize it. The old wording implied "no TP period." TP=2 is fine for A3B MoE; it's dense-at-large-hidden-dim that pays the PCIe-sync penalty.
+Still true for large hidden dims but doesn't generalize. TP=2 is fine for A3B MoE.
 
 ### OLD: bf16 fit test determines viability
-Models were eliminated based on "doesn't fit in 32 GB bf16." This test is nearly meaningless for our deployment: we serve AWQ-INT4 (or similar), not bf16. Any model where the AWQ variant fits TP=2 at our chosen KV settings is a candidate regardless of bf16 size.
+Models were eliminated based on bf16 size. We serve AWQ-INT4 or GGUF. Any model where the quant fits is a candidate.
 
-Affected models to re-evaluate if desired:
-- Qwen3.5-35B-A3B on TP=2 (never retested there)
-- Anything that OOM'd under single-GPU bf16 assumptions
-
-### OLD: "Qwen3-Coder-Next needs GGUF, 160B bf16 doesn't fit single GPU"
-**Superseded** — `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` exists and fits TP=2 on 2×5090 with room for KV cache. T1.3 PASS confirmed. Note: `cpatonn/` repo for this model returned HTTP 401 during T1.3 testing — use `cyankiwi/` exclusively.
+### OLD: "Qwen3-Coder-Next needs GGUF"
+Superseded — `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit` exists and fits TP=2.
 
 ### OLD: "Two concurrent TP=2 processes sharing GPUs"
-**Superseded** — This assumption from R4 completely collapses due to CUDA context time-slicing reducing concurrent throughput to ~2% (see SETTLED). Architecture is pivoting to TP=1-per-GPU (coder GPU0, thinker GPU1) + behemoth TP=2 asleep.
+Superseded — CUDA context time-slicing collapses to ~2% throughput (T1.2).
 
 ### OLD: LiteLLM as router
-**Superseded** — OpenCode native routing replaces it. See PROVISIONAL entry above.
+Superseded — OpenCode native routing.
 
 ### OLD: "Phase 2 winner: Qwen3.5-27B-AWQ" (standalone)
-**Still provisionally valid** as a single-model thinker. But the architectural context changed: we now plan concurrent coder + thinker + behemoth-on-standby via sleep mode. Thinker selection must be re-scored against GLM-4.5-Air as a TP=2 candidate before final commitment.
+Still provisionally valid for TP=1 isolated thinker. Gemma4-31B evaluated as alternative (T2.3b) — rejected as thinker, redirected to coder candidate (T2.3c). Qwen3.5-27B remains Arclight thinker baseline.
+
+### OLD: "ik_llama.cpp version 4427 does not support Qwen3.5"
+Superseded — PR #1288 branch adds full Qwen3.5 MoE support including GDN layers (`ssm_alpha`, `ssm_beta`, `ssm_out`). Mainline ik_llama.cpp HEAD (commit 07516cec) does not have it yet, but pr-1288 does. Mainline llama.cpp b8851 also has it as fallback.
 
 ---
 
