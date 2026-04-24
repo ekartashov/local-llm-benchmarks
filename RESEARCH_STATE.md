@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** T2.3b DONE — Gemma4-31B rejected as thinker; redirected to coder candidate T2.3c. T_CV1–T_CV3 (Convergence benchmarking) open in parallel.
-**Current mode:** TESTING READY — T_CV1 and T2.3c have no deps; run either next.
+**Current cycle:** R14 CLOSED — three thinker candidates researched; Qwen3.6-27B-AWQ queued as T2.4 (strong), Qwopus as T2.4b (lower priority, conditional on T2.4); lordx64 distill killed without testing.
+**Current mode:** TESTING READY — T2.4, T2.3c, T_CV1 all OPEN with no deps. Priority: T2.4 > T2.3c/T_CV1 (parallel).
 
 ---
 
@@ -25,6 +25,8 @@ Living document. What we currently believe, what is still open, and the log of r
 - bf16 deployment — the quant we serve is AWQ-INT4, bf16 "does it fit" tests were misleading and have been discarded.
 - vLLM Sleep Mode **level=2** — do not use. See `DECISIONS.md`; known to produce gibberish outputs on wake (bug #29341) and requires manual `reload_weights` + `reset_prefix_cache` after wake which is easy to get wrong. Use level=1 exclusively. We have 192 GB DDR5, there is no reason to prefer level=2 for us.
 - **Gemma4-31B-it-AWQ** (Arclight Thinker candidate) — REJECTED as primary thinker. Mean quality 4.0/5 matches Qwen3.5-27B but fails depth-of-reasoning bar on th02/th03/th05. Redirected: strong 5/8 task profile (th01, th04, th06, th07, th08 all scored 5), 100% task completion, dense/no-MambaSpec → queued as **coder** candidate T2.3c.
+- **lordx64/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled** — KILLED without testing. 7,800-sample attention-only LoRA on our current coder base. No AWQ, no verified tool calling, Anthropic ToS concern for distillation data.
+- **Qwen3.6-27B** (architecture note) — GDN (Gated DeltaNet) hybrid, 64 layers: 16 × (3 DeltaNet + 1 standard attention). NOT Mamba. kvcached still blocked (DeltaNetSpec not in supported list) but TP=1 isolated deployment is unaffected. AWQ at 21 GiB (QuantTrio). Strong benchmarks: AIME 2026 94.1%, GPQA Diamond 87.8%, SWE-bench Verified 77.2%. Queued as thinker candidate T2.4.
 
 ### Working architectural hypothesis
 
@@ -50,6 +52,86 @@ Critical unknowns remaining:
 ---
 
 ## Cycle log
+
+### R14 — April 24 2026 — Thinker candidate sweep: Qwen3.6-27B, Qwopus, lordx64 distill
+
+**Triggered by:** Operator-proposed evaluation of three models: `lordx64/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled`, `Jackrong/Qwopus3.6-27B-v1-preview`, and `Qwen/Qwen3.6-27B` (newly released).
+
+---
+
+**Finding 1: lordx64 distill — KILLED without testing.**
+
+This model is a 7,800-sample attention-only LoRA SFT (0.01% of params, only `q/k/v/o_proj`) on top of Qwen3.6-35B-A3B — our current coder base. Key killers:
+
+1. **No AWQ available.** Only GGUF (IQ4_XS 18.9GB, Q5_K_M 25GB, Q8_0 35GB). BF16 = ~70GB, exceeds 64GB total VRAM for in-VRAM AWQ calibration. CPU-offloaded AWQ conversion is possible but takes 4-6h for uncertain gain.
+2. **Tool calling unverified.** Model card has no mention of tool calling or `--tool-call-parser`. Fine-tuning preserved only attention matrices — tool call format depends on the template and post-training, which was not validated.
+3. **Thin fine-tune on wrong role.** Qwen3.6-35B-A3B is our coder, not a thinker base. The SFT teaches "Claude reasoning style" (chain-of-thought format), not factual uplift — the limitations section explicitly says reasoning ≠ knowledge transfer.
+4. **Anthropic ToS concern.** Training data was generated via Claude API. Model card acknowledges users "must verify compliance" with Anthropic usage policies. Commercial distillation from the Claude API may violate ToS.
+5. **Benchmarks thin.** Only GSM8K and MMLU-Pro reported; no GPQA Diamond or hard reasoning evals.
+
+Decision: do not download, do not convert. If a Claude-distilled reasoning model becomes interesting, wait for a properly released version with verified tool calling and clean provenance.
+
+---
+
+**Finding 2: Qwopus3.6-27B-v1-preview — QUEUED (T2.4b, lower priority).**
+
+Architecture confirmed from model card: Qwen3.6-27B base (27B dense, Gated DeltaNet hybrid, same 64-layer layout as base). SFT on ~12K curated examples from Claude Distillation + Kimi K2.5 reasoning + Qwen3.5 reasoning data. v1-preview status, 16-prompt evaluation only.
+
+**Why it stays in the queue despite preview status:** The SFT data direction (reasoning distillation) directly targets the failure modes found in Gemma4 (th02/th05 — multi-step constraint reasoning). If Qwen3.6-27B base (T2.4) misses on those same tasks, a reasoning-distilled variant is the logical next step.
+
+**Deployment for T2.4b:** No AWQ available. Two options:
+1. Serve BF16 at TP=2 — 27B × 2 bytes ≈ 54GB fits 64GB with `--gpu-mem-util 0.85` (requires sleeping coder)
+2. Community GGUF if QuantTrio or others release one before T2.4b runs
+
+**Dep:** T2.4 must complete first. If Qwen3.6-27B base clears the quality bar, T2.4b is skipped. Only run if base fails on th02/th05.
+
+---
+
+**Finding 3: Qwen3.6-27B-AWQ — STRONG CANDIDATE → T2.4.**
+
+This is the top thinker candidate since Qwen3.5-27B. Key facts:
+
+**Architecture:** 27B dense, 64 layers: 16 × (3 × Gated DeltaNet + 1 × Gated Attention). GDN (Gated Delta Network) hybrid — NOT Mamba. User's observation "no Mamba anymore" is accurate; GDN is a different linear attention mechanism. kvcached status: DeltaNetSpec is not in kvcached v0.1.5's supported list (FullAttentionSpec, SlidingWindowSpec, MLAAttentionSpec only) → kvcached T1.5 Phase B remains blocked, same as with Qwen3.5-27B. But this does NOT block isolated TP=1 deployment.
+
+**Benchmarks (published by Qwen, April 2026):**
+
+| Benchmark | Qwen3.6-27B | Gemma4-31B | Qwen3.5-27B (est.) |
+|-----------|-------------|------------|---------------------|
+| AIME 2026 | **94.1%** | 89.2% | — |
+| GPQA Diamond | **87.8%** | 84.3% | — |
+| MMLU-Pro | **86.2%** | — | — |
+| SWE-bench Verified | **77.2%** | — | — |
+
+Across every published benchmark, Qwen3.6-27B dominates Gemma4-31B, which was already our quality bar. The 4.9pp AIME gap and 3.5pp GPQA gap are meaningful, not noise.
+
+**Deployment:**
+- AWQ: `QuantTrio/Qwen3.6-27B-AWQ` — 21 GiB (our trusted publisher) ✓
+- Weight fit: 21 GiB + `--gpu-mem-util 0.90` → 28.8 GiB usable → 7.8 GiB for KV + CUDA graphs. Sufficient for thinker workload at ctx=32768.
+- Parser stack: `--tool-call-parser qwen3_coder --reasoning-parser qwen3` — same as our coder (Qwen3.6-35B-A3B-AWQ). This combination is proven at 96.7% tool reliability in T2.5. No new parser risk.
+- Vision encoder: model card includes vision capabilities. Use `--language-model-only` to shed the vision encoder and reclaim 1-3 GiB VRAM for KV cache. Verify this flag is supported in vLLM 0.19.x; if not, model still loads within budget without it.
+- `transformers>=5.5.4` required per QuantTrio card — verify during deployment; may need a newer vllm image if the standard one ships an older transformers.
+- `vllm>=0.19.0` confirmed compatible (QuantTrio card).
+
+**Open vLLM issues (from GitHub search):**
+- #40621 batch inference: affects Qwen3.5/3.6 series with multiple concurrent requests. For thinker role (typically single sequential requests), unlikely to manifest. Monitor but don't pre-block.
+- #40756 MTP speculative decoding crash: only if `--speculative-config` used. We do NOT use MTP. Not applicable.
+- #40725 TP=4 non-English corruption: only at TP=4. We use TP=1. Not applicable.
+
+**kvcached T1.5 Phase B status:** GDN hybrid means this remains blocked (DeltaNetSpec unsupported in kvcached v0.1.5). Same as Qwen3.5-27B. This is already accounted for in TESTING_QUEUE.md (T1.5 Phase B deferred). No regression relative to current thinker.
+
+---
+
+**Decisions updated this cycle:**
+- `DECISIONS.md`: lordx64 distill killed; Qwopus deferred; Qwen3.6-27B queued as T2.4; GDN/kvcached note added
+- `TESTING_QUEUE.md`: T2.4 + T2.4b added; status table updated
+- `config/models.yaml`: qwen36_27b_awq CANDIDATE added; qwopus entry added; lordx64 entry added as ELIMINATED
+- `RESEARCH_STATE.md`: "What we know" updated with Qwen3.6-27B architecture facts
+
+**Tests queued for next cycle:**
+- **T2.4**: Qwen3.6-27B-AWQ as Arclight thinker — run next, no deps
+- **T2.4b**: Qwopus3.6-27B SFT — lower priority, run only if T2.4 misses on th02/th05
+
+---
 
 ### R13 — April 23 2026 — Gemma4-31B thinker candidate research
 

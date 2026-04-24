@@ -170,6 +170,88 @@ models:
       VRAM footprint than Qwen3.5-27B-AWQ means the concurrent-dual assumption
       needs re-validation if GLM-4.5-Air wins T2.3.
 
+  # ── CANDIDATE thinker (Qwen3.6 generation) ─────────────────────────────────
+  qwen36_27b_awq:
+    status: CANDIDATE
+    role: thinker
+    hf_repo: QuantTrio/Qwen3.6-27B-AWQ
+    quant: AWQ-INT4
+    format: awq
+    vram_gb: 21
+    ctx_default: 32768     # native 262144; limited for KV budget on single GPU
+    engines: [vllm]
+    flags:
+      vllm: "--tool-call-parser qwen3_coder --reasoning-parser qwen3 --language-model-only --enable-auto-tool-choice"
+      # --language-model-only: sheds vision encoder (~1-3 GiB) to free KV headroom. Verify flag
+      #   in vLLM 0.19.x at deploy time — omit if unsupported; budget fine either way (21+~2 < 28.8).
+      # --reasoning-parser qwen3: same stack as coder (Qwen3.6-35B-A3B-AWQ), proven in T2.5.
+      # Do NOT add reasoning-parser if tool calls break — but this combination is expected to work
+      # (Qwen3.6 family, unlike Gemma4 and Core which had streaming interception bugs).
+    requires_vllm: ">=0.19.0"
+    requires_transformers: ">=5.5.4"   # check container image at deploy time
+    architecture:
+      type: dense
+      layers: 64
+      layout: "16 × (3 × Gated DeltaNet → FFN + 1 × Gated Attention → FFN)"
+      mamba: false
+      gdn: true    # Gated DeltaNet (GDN) hybrid — NOT Mamba, but also NOT pure Transformer
+      kvcached_spec: "DeltaNetSpec (unsupported by kvcached v0.1.5)"
+      vision: true # includes vision encoder; shed with --language-model-only
+    benchmarks:
+      aime_2026: 0.941
+      gpqa_diamond: 0.878
+      mmlu_pro: 0.862
+      swe_bench_verified: 0.772
+    test_items: [T2.4]
+    known_bugs:
+      - "vLLM #40621 batch inference: affects multi-concurrent-request scenarios. Thinker role is typically seq=1 — low risk."
+      - "vLLM #40756 MTP crash: only with --speculative-config. Do NOT enable MTP."
+      - "vLLM #40725 TP=4 non-English corruption: TP=1 only — not applicable."
+    notes: >
+      27B dense, GDN hybrid. Released April 2026. Benchmark-dominant over all prior
+      thinker candidates (AIME 94.1%, GPQA 87.8%). Same parser stack as coder —
+      no new tool-call risk. 21 GiB AWQ leaves 7.8 GiB for KV + CUDA graphs at
+      gpu-mem-util 0.90 on 32 GiB GPU1. kvcached T1.5 Phase B still blocked
+      (GDN = DeltaNetSpec, not in kvcached's supported list) — same status as Qwen3.5-27B.
+
+  # ── CANDIDATE thinker (Qwopus SFT, lower priority) ──────────────────────
+  qwopus36_27b_preview:
+    status: CANDIDATE
+    role: thinker
+    hf_repo: Jackrong/Qwopus3.6-27B-v1-preview
+    quant: BF16    # no AWQ available; serve BF16 TP=2 or wait for community GGUF
+    format: safetensors
+    vram_gb: 54    # BF16 27B; across TP=2 → ~27 GiB per card
+    ctx_default: 32768
+    engines: [vllm]
+    flags:
+      vllm: "--tool-call-parser qwen3_coder --reasoning-parser qwen3 --language-model-only --enable-auto-tool-choice"
+    tp_constraints:
+      - "BF16 requires TP=2 (54 GiB total). Must sleep coder before deploy. Same pattern as Core escalation."
+      - "If community AWQ or GGUF released before T2.4b runs, prefer that over BF16 TP=2."
+    test_items: [T2.4b]
+    priority: low    # run only if T2.4 misses on th02/th05
+    notes: >
+      SFT on Qwen3.6-27B base (~12K examples: Claude Distillation + Kimi K2.5 + Qwen3.5
+      reasoning). v1-preview, 16-prompt evaluation only. Reasoning-distillation direction
+      directly targets Gemma4 failure modes (th02, th05). Only run T2.4b if base
+      Qwen3.6-27B (T2.4) fails on th02/th05 specifically.
+
+  # ── ELIMINATED — killed without testing (R14) ───────────────────────────────
+  lordx64_qwen36_35b_distill:
+    status: ELIMINATED
+    role: thinker    # was evaluated for thinker; wrong family for coder too
+    hf_repo: lordx64/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled
+    quant: none      # GGUF only (IQ4_XS 18.9GB, Q5_K_M 25GB, Q8_0 35GB)
+    format: gguf
+    engines: []      # no vLLM-compatible quant; BF16 = 70GB > 64GB total VRAM
+    elimination_reason: >
+      Killed R14 without testing. 7,800-sample attention-only LoRA (0.01% of params)
+      on Qwen3.6-35B-A3B (our coder base). No AWQ, no verified tool calling, Anthropic
+      ToS concern (training data from Claude API). Thin fine-tune; benchmarks only
+      GSM8K + MMLU-Pro. Do not revive unless full SFT with verified tool calling
+      and clean data provenance is published.
+
   # ── ELIMINATED thinker (Gemma4 generation) ─────────────────────────────────
   gemma4_31b_it_awq:
     status: ELIMINATED

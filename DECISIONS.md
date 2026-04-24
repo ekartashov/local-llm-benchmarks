@@ -101,10 +101,24 @@ Phase B blocked by two issues specific to the current thinker (Qwen3.5-27B-AWQ):
 1. **MambaSpec incompatibility:** Qwen3.5-27B has hybrid Mamba (SSM) layers. kvcached v0.1.5 supports `FullAttentionSpec`, `SlidingWindowSpec`, `MLAAttentionSpec` only — raises `ValueError: got MambaSpec` at KV init. This is a thinker-model constraint, not a kvcached bug.
 2. **Weight footprint:** kvcached virtual memory applies to KV cache pages only, not weights. Combined weights must still fit in physical VRAM.
 
-**Re-run T1.5 Phase B after thinker model selection.** If the new thinker is pure Transformer/MoE (no Mamba) and combined weights fit comfortably under ~28 GiB, Phase B is worth retrying. Gemma4-31B was the candidate but was REJECTED (T2.3b) — next thinker candidate TBD in research.
+**Re-run T1.5 Phase B after thinker model selection.** If the new thinker is pure Transformer/MoE (no Mamba) and combined weights fit comfortably under ~28 GiB, Phase B is worth retrying. Gemma4-31B REJECTED (T2.3b). Qwen3.6-27B uses GDN (not Mamba) but GDN is also not supported by kvcached — T1.5 Phase B remains blocked until kvcached adds DeltaNetSpec support upstream.
 
 ### Qwen3.5-27B-AWQ is Arclight thinker baseline but has constraints
-**PROVISIONAL (2026-04-18).** Viable quality-wise (4.0/5). MambaSpec (SSM hybrid layers) blocks kvcached Phase B. Cannot run with kvcached shared-pool. For pure TP=1 isolated deployment it works fine. Gemma4-31B was evaluated (T2.3b, 2026-04-24) and REJECTED — same 4.0 mean but fails depth-of-reasoning bar. Next thinker candidate TBD.
+**PROVISIONAL (2026-04-18).** Viable quality-wise (4.0/5). MambaSpec (SSM hybrid layers) blocks kvcached Phase B. Cannot run with kvcached shared-pool. For pure TP=1 isolated deployment it works fine. Gemma4-31B REJECTED (T2.3b). Qwen3.6-27B-AWQ is the next candidate (T2.4).
+
+### Qwen3.6-27B-AWQ is the leading Arclight thinker candidate
+**PROVISIONAL (R14, 2026-04-24).** Dense 27B, Gated DeltaNet hybrid (not Mamba — GDN is a different linear attention mechanism). AWQ at 21 GiB from QuantTrio (trusted publisher). Benchmarks dominant over all prior candidates: AIME 2026 94.1%, GPQA Diamond 87.8%, SWE-bench Verified 77.2%. Tool calling via `--tool-call-parser qwen3_coder --reasoning-parser qwen3` — same parser stack as coder, proven at 96.7% reliability in T2.5. Fits GPU1 at TP=1 with 7.8 GiB headroom for KV + CUDA graphs. Queued as T2.4.
+
+**GDN / kvcached note:** "No Mamba" is accurate but GDN (DeltaNetSpec) is also not in kvcached v0.1.5's supported spec list. kvcached T1.5 Phase B remains blocked regardless of which Qwen3.x thinker is selected. This does not affect isolated TP=1 deployment — kvcached is a separate optimization layer.
+
+**Deployment flags (T2.4):** `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --language-model-only --enable-auto-tool-choice`. The `--language-model-only` flag sheds the vision encoder (~1-3 GiB) to maximise KV cache headroom. Verify flag availability in vLLM 0.19.x during deployment; omit if unsupported (model fits within budget either way). Requires `transformers>=5.5.4` — check container image version.
+
+### lordx64/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled — do not test
+**SETTLED (R14, 2026-04-24).** Killed without testing. Four hard blockers:
+1. No AWQ quantization (GGUF only); BF16 = 70GB exceeds 64GB VRAM pool for in-VRAM AWQ calibration.
+2. Tool calling unverified — attention-only LoRA preserves base weights; tool format depends on template/post-training which was not validated.
+3. 7,800-sample fine-tune of Qwen3.6-35B-A3B (our coder base) — wrong model family for thinker role, and too thin to produce reliable quality uplift.
+4. Anthropic ToS: training data generated via Claude API; model card acknowledges compliance risk. Do not use in production contexts without legal review.
 
 ---
 

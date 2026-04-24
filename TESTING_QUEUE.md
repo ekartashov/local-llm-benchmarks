@@ -568,6 +568,97 @@ Or using `--n-cpu-moe N` which keeps MoE of the last N layers on CPU (keeps firs
 
 ---
 
+### T2.4 — arclight_thinker_qwen36_27b_candidate — OPEN
+
+**Question:** Is Qwen3.6-27B-AWQ a better Arclight thinker than Qwen3.5-27B, specifically for quality on reasoning and infra-diagnostic tasks?
+
+**Why Qwen3.6-27B specifically:**
+- Dominant benchmarks: AIME 2026 94.1% (+4.9pp vs Gemma4), GPQA Diamond 87.8% (+3.5pp vs Gemma4), SWE-bench Verified 77.2%
+- Same parser stack as coder (`--tool-call-parser qwen3_coder --reasoning-parser qwen3`) — proven at 96.7% reliability in T2.5, no new parser risk
+- AWQ at 21 GiB from QuantTrio (trusted) → fits GPU1 TP=1 with comfortable KV headroom
+- Apache 2.0
+
+**Architecture note (R14):**
+- 27B dense, 64 layers: 16 × (3 × Gated DeltaNet + 1 × Gated Attention)
+- GDN (Gated DeltaNet) hybrid — NOT Mamba. kvcached still blocked (DeltaNetSpec unsupported) but TP=1 isolated deployment unaffected.
+- Vision encoder included in weights; use `--language-model-only` to shed it for extra KV headroom. Verify flag in vLLM 0.19.x — omit if unsupported (budget fine either way).
+- `transformers>=5.5.4` required — check vLLM container image version at deployment time.
+
+**Procedure:**
+```bash
+# Download if not present
+pyenv activate hf
+HF_HOME=/srv/ai/models hf download QuantTrio/Qwen3.6-27B-AWQ
+
+# Deploy on GPU1 TP=1 (thinker slot)
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+  ./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
+  --gpu-mem-util 0.90 \
+  --ctx 32768 \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --language-model-only \
+  --enable-auto-tool-choice
+
+# Run Phase 2.2 thinker quality suite (8 tasks, max_tokens=4096)
+# After run: score human_review.md, update metrics.json
+```
+
+**Baseline:** Qwen3.5-27B at 76.5 t/s seq=1, quality mean 4.0/5.
+
+**Pass criteria:**
+- Quality mean ≥ 4.0/5 AND at least ties on th02/th05 (the failure modes from T2.3b)
+- TPS ≥ 60 t/s seq=1 (allows for GDN overhead vs Qwen3.5-27B)
+- Tool call reliability ≥ 90% on thinker suite
+
+**Special attention — th03:** Qwen3.5-27B emits empty output here (thinking budget exhaustion). Check whether Qwen3.6-27B produces a non-empty answer. If yes, this is a meaningful fix.
+
+**Known vLLM issues to watch:**
+- #40621 batch inference: affects concurrent multi-request scenarios; thinker role is typically single sequential requests — low risk.
+- #40756 MTP crash: only with `--speculative-config`; we do NOT use MTP — not applicable.
+- #40725 TP=4 non-English corruption: TP=1 only — not applicable.
+
+**kvcached Phase B note:** GDN hybrid means T1.5 Phase B remains blocked (same as Qwen3.5-27B). No change to kvcached status.
+
+**Deps:** none.
+
+**Hand-back trigger:** tool calling broken (wrong parser? transformers version incompatibility?); or CUDA graph OOM despite --gpu-mem-util 0.90 (try `--max-num-seqs 1` as fallback, same as Qwen3.5-27B fix).
+
+---
+
+### T2.4b — arclight_thinker_qwopus36_27b_candidate — OPEN (lower priority)
+
+**Question:** Does the Qwopus SFT (Claude + Kimi + Qwen3.5 reasoning distillation on Qwen3.6-27B) improve thinker quality over the base Qwen3.6-27B, specifically on multi-step constraint reasoning (th02, th05)?
+
+**Why Qwopus specifically:** The SFT data targets reasoning-chain quality — exactly the failure mode of Gemma4-31B (th02 algorithm logic, th05 distributed consistency reasoning). If the base model misses on these same task types, a reasoning-distilled variant is the logical follow-up.
+
+**Model:** `Jackrong/Qwopus3.6-27B-v1-preview` — SFT on Qwen3.6-27B base with ~12K examples from Claude Distillation + Kimi K2.5 + Qwen3.5 reasoning datasets. v1-preview status, 16-prompt evaluation only.
+
+**Deployment options (no AWQ available):**
+
+Option A — BF16 TP=2 (requires sleeping coder):
+```bash
+# Stop coder (GPU0), stop thinker (GPU1) to free both GPUs
+# Deploy at TP=2 — 27B BF16 ≈ 54GB fits 64GB with --gpu-mem-util 0.85
+./infra/scripts/deploy.sh vllm tp2b Jackrong/Qwopus3.6-27B-v1-preview \
+  --gpu-mem-util 0.85 --ctx 32768 \
+  --tool-call-parser qwen3_coder --reasoning-parser qwen3 \
+  --language-model-only --enable-auto-tool-choice
+```
+
+Option B — community GGUF (if available by the time T2.4b runs): check HF for quants. Prefer QuantTrio if they release one.
+
+**Pass criteria:** quality mean > T2.4 baseline on th02 and th05 specifically. Mean overall is secondary — the point is whether reasoning distillation fixes the specific failure mode identified.
+
+**Deps:** T2.4 must complete first. Only run T2.4b if:
+- T2.4 fails quality bar (mean < 4.0/5), OR
+- T2.4 passes overall but still misses on th02/th05 — reasoning distillation directly targets those.
+- Skip T2.4b entirely if T2.4 passes on th02/th05.
+
+**Hand-back trigger:** BF16 OOM at TP=2 (unexpected — 54GB should fit in 64GB with 0.85 util); or tool calling completely broken (base Qwen3.6-27B parser stack should transfer, but SFT could have affected template).
+
+---
+
 ### T2.3b — arclight_thinker_gemma4_31b_candidate — DONE (REJECTED)
 
 **Question:** Is Gemma4-31B (dense, Apache 2.0, no Mamba) a better Arclight thinker than Qwen3.5-27B, specifically for quality on reasoning and infra-diagnostic tasks?
@@ -630,16 +721,18 @@ Single-GPU cohabitation with Qwen3.6-35B coder is physically impossible at these
 
 ---
 
-## TESTING_QUEUE — status summary addendum (R12+T2.3b)
+## TESTING_QUEUE — status summary addendum (R14, 2026-04-24)
 
-| Item | Status | Notes |
-|------|--------|-------|
-| T1.5 Phase B | DEFERRED | Blocked by Qwen3.5-27B MambaSpec. Re-run after a kvcached-compatible thinker is settled |
-| T_CV1 | OPEN | Convergence startup timing — run anytime, no deps |
-| T_CV2 | OPEN | Thread count optimization — run after T_CV1 |
-| T_CV3 | OPEN | Partial GPU expert offload — run after T_CV2 |
-| T2.3b | DONE | Gemma4-31B as thinker — REJECTED; redirected to T2.3c |
-| T2.3c | OPEN | Gemma4-31B as coder candidate — no deps, run when ready |
+| Item | Status | Priority | Notes |
+|------|--------|----------|-------|
+| T2.4 | OPEN | HIGH | Qwen3.6-27B-AWQ as thinker — no deps, run next |
+| T2.3c | OPEN | MEDIUM | Gemma4-31B as coder — no deps, parallel with T_CV1 |
+| T_CV1 | OPEN | MEDIUM | Convergence startup timing — no deps |
+| T_CV2 | OPEN | LOW | Thread count sweep — after T_CV1 |
+| T_CV3 | OPEN | LOW | Partial GPU expert offload — after T_CV2 |
+| T2.4b | OPEN | LOW | Qwopus SFT as thinker — run only if T2.4 misses on th02/th05 |
+| T2.3b | DONE | — | Gemma4-31B as thinker — REJECTED; redirected to T2.3c |
+| T1.5 Phase B | DEFERRED | — | kvcached blocked (GDN/DeltaNet unsupported). Re-evaluate after kvcached upstream adds DeltaNetSpec |
 
 ---
 
