@@ -106,8 +106,8 @@ Phase B blocked by two issues specific to the current thinker (Qwen3.5-27B-AWQ):
 ### Qwen3.5-27B-AWQ is Arclight thinker baseline but has constraints
 **PROVISIONAL (2026-04-18).** Viable quality-wise (4.0/5). MambaSpec (SSM hybrid layers) blocks kvcached Phase B. Cannot run with kvcached shared-pool. For pure TP=1 isolated deployment it works fine. Gemma4-31B REJECTED (T2.3b). Qwen3.6-27B-AWQ is the next candidate (T2.4).
 
-### Qwen3.6-27B-AWQ is the leading Arclight thinker candidate
-**PROVISIONAL (R14, 2026-04-24).** Dense 27B, Gated DeltaNet hybrid (not Mamba — GDN is a different linear attention mechanism). AWQ at 21 GiB from QuantTrio (trusted publisher). Benchmarks dominant over all prior candidates: AIME 2026 94.1%, GPQA Diamond 87.8%, SWE-bench Verified 77.2%. Tool calling via `--tool-call-parser qwen3_coder --reasoning-parser qwen3` — same parser stack as coder, proven at 96.7% reliability in T2.5. Fits GPU1 at TP=1 with 7.8 GiB headroom for KV + CUDA graphs. Queued as T2.4.
+### Qwen3.6-27B-AWQ TP=1 (AWQ) is blocked due to hallucinated correctness; redirected to TP=2 (NVFP4)
+**PROVISIONAL (R15, 2026-04-24).** Failed accuracy audit (T2.4) at TP=1 with AWQ-INT4 and FP8 KV cache. Despite a 100% completion rate and strong basic logic structure (mean 4.125/5), it exhibited confident incorrectness on complex reasoning paths (e.g. throwing `IndexError` on heap tuple packing in th02, contradictory math concluding 13.3s < 10s in th03). We hypothesize this could be due to KV cache compression (FP8) or weight quantization hitting its limits. It is queued (T2.4c) for a re-test using NVFP4 weights to free memory, enabling a BF16 KV cache at TP=2 (borrowing both GPUs via sleeping the coder). Its distillation variant, Qwopus3.6-27B (T2.4b), is also an option.
 
 **GDN / kvcached note:** "No Mamba" is accurate but GDN (DeltaNetSpec) is also not in kvcached v0.1.5's supported spec list. kvcached T1.5 Phase B remains blocked regardless of which Qwen3.x thinker is selected. This does not affect isolated TP=1 deployment — kvcached is a separate optimization layer.
 

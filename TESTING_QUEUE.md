@@ -568,7 +568,7 @@ Or using `--n-cpu-moe N` which keeps MoE of the last N layers on CPU (keeps firs
 
 ---
 
-### T2.4 — arclight_thinker_qwen36_27b_candidate — OPEN
+### T2.4 — arclight_thinker_qwen36_27b_candidate — DONE (FAIL ✗)
 
 **Question:** Is Qwen3.6-27B-AWQ a better Arclight thinker than Qwen3.5-27B, specifically for quality on reasoning and infra-diagnostic tasks?
 
@@ -623,6 +623,36 @@ VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 **Deps:** none.
 
 **Hand-back trigger:** tool calling broken (wrong parser? transformers version incompatibility?); or CUDA graph OOM despite --gpu-mem-util 0.90 (try `--max-num-seqs 1` as fallback, same as Qwen3.5-27B fix).
+
+---
+
+### T2.4c — arclight_thinker_qwen36_27b_nvfp4_swap — OPEN
+
+**Question:** Did the base Qwen3.6-27B model fail T2.4 due to intense AWQ quantization or FP8 KV cache compression causing reasoning deterioration? Will it perform correctly as a Thinker if given breathing room via NVFP4 (weights) and BF16 (KV cache) at TP=2?
+
+**Why consider this:** The model showed 100% completion but suffered from "confident incorrectness" in tight architectural memory envelopes. Re-allocating the entire 2x5090 cluster to the Thinker via vLLM sleep mode (sleeping the Qwen3.6-35B-A3B coder) permits testing this hypothesis without memory starvation.
+
+**Procedure:**
+```bash
+# 1. Stop or sleep the coder instance on GPU0.
+# 2. Deploy Qwen3.6-27B-NVFP4 across both GPUs.
+./infra/scripts/deploy.sh vllm tp2b QuantTrio/Qwen3.6-27B-NVFP4 \
+  --gpu-mem-util 0.85 \
+  --kv-cache-dtype bf16 \
+  --ctx 49152 \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --language-model-only \
+  --enable-auto-tool-choice
+
+# 3. Rerun the problematic tasks (th02, th03) specifically.
+```
+
+**Pass criteria:** Model completes `th02` providing an algorithm without `IndexError` code, and completes `th03` with mathematically sound, non-contradictory logic.
+
+**Deps:** T2.4 (DONE - confirmed the baseline issue).
+
+**Hand-back trigger:** NVFP4 driver/vLLM incompatibilities on consumer Blackwell (sm_120) causing load crashes.
 
 ---
 
@@ -725,12 +755,13 @@ Single-GPU cohabitation with Qwen3.6-35B coder is physically impossible at these
 
 | Item | Status | Priority | Notes |
 |------|--------|----------|-------|
-| T2.4 | OPEN | HIGH | Qwen3.6-27B-AWQ as thinker — no deps, run next |
+| T2.4 | DONE | — | Qwen3.6-27B-AWQ as thinker — FAILED, exhibited confident incorrectness on th02/th03 |
+| T2.4c | OPEN | HIGH | Qwen3.6-27B NVFP4 on TP=2 — Retesting T2.4 failures under looser memory/KV constrains |
 | T2.3c | OPEN | MEDIUM | Gemma4-31B as coder — no deps, parallel with T_CV1 |
 | T_CV1 | OPEN | MEDIUM | Convergence startup timing — no deps |
 | T_CV2 | OPEN | LOW | Thread count sweep — after T_CV1 |
 | T_CV3 | OPEN | LOW | Partial GPU expert offload — after T_CV2 |
-| T2.4b | OPEN | LOW | Qwopus SFT as thinker — run only if T2.4 misses on th02/th05 |
+| T2.4b | OPEN | HIGH | Qwopus SFT as thinker — T2.4 base failure triggers this as an alternate fix path |
 | T2.3b | DONE | — | Gemma4-31B as thinker — REJECTED; redirected to T2.3c |
 | T1.5 Phase B | DEFERRED | — | kvcached blocked (GDN/DeltaNet unsupported). Re-evaluate after kvcached upstream adds DeltaNetSpec |
 

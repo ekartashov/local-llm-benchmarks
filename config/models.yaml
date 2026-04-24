@@ -208,11 +208,11 @@ models:
       - "vLLM #40756 MTP crash: only with --speculative-config. Do NOT enable MTP."
       - "vLLM #40725 TP=4 non-English corruption: TP=1 only — not applicable."
     notes: >
-      27B dense, GDN hybrid. Released April 2026. Benchmark-dominant over all prior
-      thinker candidates (AIME 94.1%, GPQA 87.8%). Same parser stack as coder —
-      no new tool-call risk. 21 GiB AWQ leaves 7.8 GiB for KV + CUDA graphs at
-      gpu-mem-util 0.90 on 32 GiB GPU1. kvcached T1.5 Phase B still blocked
-      (GDN = DeltaNetSpec, not in kvcached's supported list) — same status as Qwen3.5-27B.
+      27B dense, GDN hybrid. Released April 2026. Benchmark-dominant over all prior thinker candidates.
+      FAILED T2.4 at TP=1 with AWQ-INT4 and FP8 KV cache (exhibited confident incorrectness and hallucinated
+      reasoning in th02/th03). However, it is retained to test if this failure was due to quantization or
+      extreme context compression/thrashing. New testing path (T2.4c): test using NVFP4 weights to free up 
+      memory, use BF16 KV cache, and run at TP=2 (borrowing both GPUs by sleeping the Qwen3.6-35B-A3B coder).
 
   # ── CANDIDATE thinker (Qwopus SFT, lower priority) ──────────────────────
   qwopus36_27b_preview:
@@ -230,12 +230,12 @@ models:
       - "BF16 requires TP=2 (54 GiB total). Must sleep coder before deploy. Same pattern as Core escalation."
       - "If community AWQ or GGUF released before T2.4b runs, prefer that over BF16 TP=2."
     test_items: [T2.4b]
-    priority: low    # run only if T2.4 misses on th02/th05
+    priority: high     # T2.4 base model failed th02/th05, triggering this test
     notes: >
       SFT on Qwen3.6-27B base (~12K examples: Claude Distillation + Kimi K2.5 + Qwen3.5
       reasoning). v1-preview, 16-prompt evaluation only. Reasoning-distillation direction
-      directly targets Gemma4 failure modes (th02, th05). Only run T2.4b if base
-      Qwen3.6-27B (T2.4) fails on th02/th05 specifically.
+      directly targets the base Qwen3.6 failure modes (th02, th05) which were
+      confirmed to be broken in T2.4. Now the active thinker candidate.
 
   # ── ELIMINATED — killed without testing (R14) ───────────────────────────────
   lordx64_qwen36_35b_distill:

@@ -53,6 +53,20 @@ Critical unknowns remaining:
 
 ## Cycle log
 
+### R15 — April 24/25 2026 — Reprieve for Qwen3.6-27B via NVFP4 & TP=2
+
+**Triggered by:** T2.4 thinker quality suite failure (Qwen3.6-27B-AWQ).
+
+**What happened:** T2.4 base testing of Qwen3.6-27B-AWQ at TP=1 completed with a 100% answer rate but revealed "confident incorrectness" in complex reasoning paths. Specifically, it produced broken Python code (IndexError) on heap structures in th02, and mathematically contradictory logic in th03. 
+
+**Decisions updated:**
+- Qwen3.6-27B is **not** totally rejected. We hypothesized that intense AWQ-INT4 weights processing paired with FP8 KV cache constraints on a single 32GB GPU degraded its logic retention.
+- It is retained as a CANDIDATE and redirected to **T2.4c**: a TP=2 fallback test relying on NVFP4 compression for weights, which frees up enough memory for BF16 KV cache.
+- To execute this, the coder will be slept (`vLLM sleep-mode`) so the Thinker can borrow both GPUs during intensive evaluation chunks.
+- `DECISIONS.md`, `TESTING_QUEUE.md`, and `config/models.yaml` were updated to open this new pathway.
+
+**Tests queued:** T2.4c (NVFP4 + TP=2 test).
+
 ### R14 — April 24 2026 — Thinker candidate sweep: Qwen3.6-27B, Qwopus, lordx64 distill
 
 **Triggered by:** Operator-proposed evaluation of three models: `lordx64/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled`, `Jackrong/Qwopus3.6-27B-v1-preview`, and `Qwen/Qwen3.6-27B` (newly released).
@@ -628,6 +642,8 @@ Phase 0/1 work: chat template verification, vLLM vs SGLang throughput comparison
 ### From T2.1b, 2026-04-18 — RESOLVED (R9 cycle)
 
 **What happened:** T2.1b sed patch was a no-op (wrong variable name). After three diagnostic dumps covering all 504 lines of `glm4_moe_tool_parser.py`, the parser was confirmed clean. The crash is in EngineCore (not the parser). T2.1b CANCELLED. See R9 cycle log above.
+
+
 
 <!-- Template for testing mode to fill in:
 
