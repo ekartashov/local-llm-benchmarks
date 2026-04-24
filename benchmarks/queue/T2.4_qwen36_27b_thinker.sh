@@ -31,6 +31,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 source "${REPO_ROOT}/.venv/bin/activate"
 
+# ── Argument Parsing ─────────────────────────────────────────────────────────
+DRY_RUN=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run|-n) DRY_RUN=1; shift ;;
+        *) shift ;;
+    esac
+done
+
 ITEM_ID="T2.4_arclight_thinker_qwen36_27b_candidate"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RESULTS_DIR="${REPO_ROOT}/results/${ITEM_ID}_${TIMESTAMP}"
@@ -39,7 +48,13 @@ MODEL="QuantTrio/Qwen3.6-27B-AWQ"
 mkdir -p "${RESULTS_DIR}/raw"
 LOG="${RESULTS_DIR}/bench.log"
 
-log() { echo "[T2.4] $*" | tee -a "${LOG}"; }
+log() {
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+        echo "[DRY-RUN] $*"
+    else
+        echo "[T2.4] $*" | tee -a "${LOG}"
+    fi
+}
 die() { log "FATAL: $*"; exit 1; }
 
 BASELINE_TPS=76.5
@@ -52,13 +67,20 @@ TRANSFORMERS_VER=$(python3 -c "import transformers; print(transformers.__version
 log "transformers version: ${TRANSFORMERS_VER}  (required: >=5.5.4)"
 if python3 -c "
 import transformers, sys
-parts = transformers.__version__.split('.')
-major, minor = int(parts[0]), int(parts[1])
-sys.exit(0 if (major > 5 or (major == 5 and minor >= 5)) else 1)
+def parse_ver(v):
+    parts = v.split('.')
+    major = int(parts[0])
+    minor = int(parts[1]) if len(parts) > 1 else 0
+    patch = int(parts[2].split('+')[0].split('a')[0].split('b')[0].split('rc')[0]) if len(parts) > 2 else 0
+    return (major, minor, patch)
+
+current = parse_ver(transformers.__version__)
+required = (5, 5, 4)
+sys.exit(0 if current >= required else 1)
 " 2>/dev/null; then
     log "transformers version OK."
 else
-    log "WARNING: transformers < 5.5.4 detected. Qwen3.6 architecture may not load correctly."
+    log "WARNING: transformers < 5.5.4 detected (${TRANSFORMERS_VER}). Qwen3.6 architecture may not load correctly."
     log "         Consider updating: pip install 'transformers>=5.5.4'"
     log "         Proceeding anyway — deploy will fail if incompatible."
 fi
@@ -149,86 +171,101 @@ _deploy_gpu1() {
 }
 
 log "Attempt 1: TP=1 on GPU1 with --language-model-only (sheds vision encoder) ..."
-if _deploy_gpu1 "--language-model-only"; then
-    log "Deployed with --language-model-only."
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+    log "WOULD DEPLOY: _deploy_gpu1 --language-model-only"
+    log "WOULD DEPLOY (fallback): _deploy_gpu1 \"\""
+    log "WOULD DEPLOY (fallback): _deploy_gpu1 --max-num-seqs 1"
+    log "WOULD DEPLOY (fallback): _deploy_tp2"
 else
-    log "Attempt 1 FAILED. Retrying without --language-model-only ..."
-    log "(Either the flag is unsupported in this vLLM build, or OOM with vision encoder.)"
-    if _deploy_gpu1 ""; then
-        log "Deployed without --language-model-only (vision encoder included in VRAM)."
+    if _deploy_gpu1 "--language-model-only"; then
+        log "Deployed with --language-model-only."
     else
-        log "TP=1 on GPU1 FAILED entirely. Possible CUDA graph OOM."
-        log "Fallback A: Try --max-num-seqs 1 (same fix as Qwen3.5-27B baseline)..."
-        if _deploy_gpu1 "--max-num-seqs 1"; then
-            log "Deployed with --max-num-seqs 1."
+        log "Attempt 1 FAILED. Retrying without --language-model-only ..."
+        log "(Either the flag is unsupported in this vLLM build, or OOM with vision encoder.)"
+        if _deploy_gpu1 ""; then
+            log "Deployed without --language-model-only (vision encoder included in VRAM)."
         else
-            log "All GPU1 TP=1 attempts failed. Falling back to TP=2 (borrows both GPUs)..."
-            log "Stopping conflicting containers if any..."
-            for c in bench-vllm-gpu0 bench-vllm-gpu1; do
-                if podman container exists "${c}" 2>/dev/null; then
-                    log "Stopping ${c} ..."
-                    podman stop "${c}" 2>/dev/null || true
-                    podman rm   "${c}" 2>/dev/null || true
-                fi
-            done
-            VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-                "${REPO_ROOT}/infra/scripts/deploy.sh" vllm tp2b "${MODEL}" \
-                --gpu-mem-util 0.85 \
-                --ctx 32768 \
-                --tool-call-parser qwen3_coder \
-                --reasoning-parser qwen3 \
-                --enable-auto-tool-choice \
-                2>&1 | tee -a "${LOG}" || die "All deployment attempts failed. Check bench.log."
-            PLACEMENT="tp=2 (tp2b)"
-            ENDPOINT="http://localhost:${PORT_VLLM_TP2_B}/v1"
-            log "TP=2 fallback deployed."
+            log "TP=1 on GPU1 FAILED entirely. Possible CUDA graph OOM."
+            log "Fallback A: Try --max-num-seqs 1 (same fix as Qwen3.5-27B baseline)..."
+            if _deploy_gpu1 "--max-num-seqs 1"; then
+                log "Deployed with --max-num-seqs 1."
+            else
+                log "All GPU1 TP=1 attempts failed. Falling back to TP=2 (borrows both GPUs)..."
+                log "Stopping conflicting containers if any..."
+                for c in bench-vllm-gpu0 bench-vllm-gpu1; do
+                    if podman container exists "${c}" 2>/dev/null; then
+                        log "Stopping ${c} ..."
+                        podman stop "${c}" 2>/dev/null || true
+                        podman rm   "${c}" 2>/dev/null || true
+                    fi
+                done
+                VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+                    "${REPO_ROOT}/infra/scripts/deploy.sh" vllm tp2b "${MODEL}" \
+                    --gpu-mem-util 0.85 \
+                    --ctx 32768 \
+                    --tool-call-parser qwen3_coder \
+                    --reasoning-parser qwen3 \
+                    --enable-auto-tool-choice \
+                    2>&1 | tee -a "${LOG}" || die "All deployment attempts failed. Check bench.log."
+                PLACEMENT="tp=2 (tp2b)"
+                ENDPOINT="http://localhost:${PORT_VLLM_TP2_B}/v1"
+                log "TP=2 fallback deployed."
+            fi
         fi
     fi
 fi
 
 log "Placement: ${PLACEMENT}  Endpoint: ${ENDPOINT}"
 
-# ── Step 2: Warmup ─────────────────────────────────────────────────────────────
-log "Warmup request (discarded) ..."
-python3 "${MEASURE_PY}" measure "${ENDPOINT}" "${MODEL}" 1 /dev/null 2>/dev/null || true
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+    log "WOULD MEASURE: decode TPS seq=1 and seq=4"
+    log "WOULD RUN: phase2 quality bench"
+    DEC_TPS_1="0.0"
+    DEC_TPS_4="0.0"
+    TASK_COMPLETION_RATE="0.0"
+else
+    # ── Step 2: Warmup ─────────────────────────────────────────────────────────────
+    log "Warmup request (discarded) ..."
+    python3 "${MEASURE_PY}" measure "${ENDPOINT}" "${MODEL}" 1 /dev/null 2>/dev/null || true
 
-# ── Step 3: Decode TPS ─────────────────────────────────────────────────────────
-log "Measuring decode TPS seq=1 ..."
-python3 "${MEASURE_PY}" measure "${ENDPOINT}" "${MODEL}" 1 \
-    "${RESULTS_DIR}/raw/decode_seq1.json" | tee -a "${LOG}"
-DEC_TPS_1=$(python3 -c "import json; print(json.load(open('${RESULTS_DIR}/raw/decode_seq1.json'))['avg_tps_per_seq'])")
+    # ── Step 3: Decode TPS ─────────────────────────────────────────────────────────
+    log "Measuring decode TPS seq=1 ..."
+    python3 "${MEASURE_PY}" measure "${ENDPOINT}" "${MODEL}" 1 \
+        "${RESULTS_DIR}/raw/decode_seq1.json" | tee -a "${LOG}"
+    DEC_TPS_1=$(python3 -c "import json; print(json.load(open('${RESULTS_DIR}/raw/decode_seq1.json'))['avg_tps_per_seq'])")
 
-log "Measuring decode TPS seq=4 ..."
-python3 "${MEASURE_PY}" measure "${ENDPOINT}" "${MODEL}" 4 \
-    "${RESULTS_DIR}/raw/decode_seq4.json" | tee -a "${LOG}"
-DEC_TPS_4=$(python3 -c "import json; print(json.load(open('${RESULTS_DIR}/raw/decode_seq4.json'))['total_tps'])")
+    log "Measuring decode TPS seq=4 ..."
+    python3 "${MEASURE_PY}" measure "${ENDPOINT}" "${MODEL}" 4 \
+        "${RESULTS_DIR}/raw/decode_seq4.json" | tee -a "${LOG}"
+    DEC_TPS_4=$(python3 -c "import json; print(json.load(open('${RESULTS_DIR}/raw/decode_seq4.json'))['total_tps'])")
 
-log "Decode: seq=1 ${DEC_TPS_1} t/s  seq=4 total ${DEC_TPS_4} t/s  (baseline: ${BASELINE_TPS} t/s)"
+    log "Decode: seq=1 ${DEC_TPS_1} t/s  seq=4 total ${DEC_TPS_4} t/s  (baseline: ${BASELINE_TPS} t/s)"
 
-# ── Step 4: Phase 2.2 thinker quality suite (8 tasks) ─────────────────────────
-log "Running Phase 2.2 thinker quality suite (8 tasks) ..."
-log "max_tokens=4096 (thinking models exhaust 1024 budget — settled in DECISIONS.md)."
-log "Special watch: th03_architecture_tradeoffs — Qwen3.5-27B emits empty here."
-python3 -m benchmarks.phase2_model_selection.bench \
-    --endpoint "${ENDPOINT}" \
-    --results-dir "${RESULTS_DIR}/phase2_quality" \
-    --mode quality \
-    --tasks "${REPO_ROOT}/benchmarks/phase2_model_selection/tasks/thinker/" \
-    --model "${MODEL}" \
-    --label "Qwen3.6-27B-AWQ" \
-    --max-tokens 4096 \
-    2>&1 | tee -a "${LOG}" || {
-    log "WARNING: phase2 quality bench exited non-zero — check logs."
-}
+    # ── Step 4: Phase 2.2 thinker quality suite (8 tasks) ─────────────────────────
+    log "Running Phase 2.2 thinker quality suite (8 tasks) ..."
+    log "max_tokens=4096 (thinking models exhaust 1024 budget — settled in DECISIONS.md)."
+    log "Special watch: th03_architecture_tradeoffs — Qwen3.5-27B emits empty here."
+    python3 -m benchmarks.phase2_model_selection.bench \
+        --endpoint "${ENDPOINT}" \
+        --results-dir "${RESULTS_DIR}/phase2_quality" \
+        --mode quality \
+        --tasks "${REPO_ROOT}/benchmarks/phase2_model_selection/tasks/thinker/" \
+        --model "${MODEL}" \
+        --label "Qwen3.6-27B-AWQ" \
+        --max-tokens 4096 \
+        2>&1 | tee -a "${LOG}" || {
+        log "WARNING: phase2 quality bench exited non-zero — check logs."
+    }
 
-TASK_COMPLETION_RATE="0.0"
-if [[ -f "${RESULTS_DIR}/phase2_quality/metrics.json" ]]; then
-    TASK_COMPLETION_RATE=$(python3 -c "
+    TASK_COMPLETION_RATE="0.0"
+    if [[ -f "${RESULTS_DIR}/phase2_quality/metrics.json" ]]; then
+        TASK_COMPLETION_RATE=$(python3 -c "
 import json; d=json.load(open('${RESULTS_DIR}/phase2_quality/metrics.json'))
 print(d['metrics'].get('task_completion_rate', 0.0))
 " 2>/dev/null || echo "0.0")
+    fi
+    log "Task completion rate: ${TASK_COMPLETION_RATE}"
 fi
-log "Task completion rate: ${TASK_COMPLETION_RATE}"
 
 # ── Step 5: Write metrics.json and summary.md ──────────────────────────────────
 python3 - <<PYEOF
