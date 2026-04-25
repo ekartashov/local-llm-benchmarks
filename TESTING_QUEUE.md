@@ -646,32 +646,9 @@ VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ---
 
-### T2.4f — qwen36_27b_rope_chunkedprefill_audit — OPEN (zero-cost, run first)
-
-**Question:** Is vLLM loading the correct `rope_theta` for Qwen3.6-27B, and is chunked prefill enabled by default in a way that could break GDN recurrent state?
-
-**Why this is first:** Zero deploy cost — this is a config inspection task, not a full benchmark run. Just deploy the model and capture startup logs. Takes ~10 minutes. Gates interpretation of all subsequent T2.4x runs.
-
-**Procedure:**
-1. Deploy T2.4 standard config (AWQ TP=1, `--ctx 49152`). Capture full vLLM startup stdout.
-2. Extract and record:
-   - `rope_theta` value vLLM is using (grep `rope_theta` or `RoPE` in startup log)
-   - Whether chunked prefill is enabled (grep `chunked_prefill`, `enable_chunked_prefill`, `max_num_batched_tokens`)
-   - `max_num_batched_tokens` default
-3. Compare `rope_theta` against `QuantTrio/Qwen3.6-27B-AWQ/config.json` on HuggingFace.
-4. If mismatch: add explicit `--rope-theta 1000000` (or whatever value config.json specifies) to all subsequent T2.4x scripts.
-5. If chunked prefill is ON by default: prepare `--disable-chunked-prefill` flag for T2.4d variant.
-
-**Pass:** rope_theta matches config.json AND chunked prefill state is documented.
-**Finding triggers:**
-- rope_theta mismatch → add explicit flag, rerun T2.4d with corrected config first
-- chunked prefill ON → run T2.4d in two variants: with and without `--disable-chunked-prefill`
-
-**Deps:** none.
-
----
-
-### T2.4d — qwen36_27b_awq_reproducibility — OPEN
+### T2.4f — qwen36_27b_rope_chunkedprefill_audit — DONE ✓
+### T2.4d — qwen36_27b_awq_reproducibility — DONE ✓ (th02 correct 3/3; quality scores pending human review)
+### T2.4e — qwen36_27b_awq_bf16kv_tp2 — DONE (th02 INCORRECT — confounded, see R17)
 
 **Question:** Is AWQ run 4's correct th02 implementation stable, or was it a lucky sample near the model's capability ceiling?
 
@@ -692,9 +669,11 @@ VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ---
 
-### T2.4e — qwen36_27b_awq_bf16kv_tp2 — OPEN
+### T2.4e — qwen36_27b_awq_bf16kv_tp2 — DONE (th02 INCORRECT — confounded, see R17)
 
-**Question:** Does removing fp8 KV cache noise (by using bf16 KV + TP=2) improve th02 correctness for the AWQ model specifically? Isolates KV precision from the NVFP4 publisher quality issue.
+**Result (2026-04-25, 114506Z):** th02 INCORRECT — missed jobs silently dropped, not assigned to busiest GPU. 104.8 t/s decode, 109ms TTFT p50. Quality scores pending human review. Run used `--no-enable-chunked-prefill` (DISABLE_CHUNKED_PREFILL=1), changing two variables from T2.4d simultaneously (TP=1→2 AND cp-on→off). Root cause of regression ambiguous. See R17 in RESEARCH_STATE.md.
+
+**Question (original):** Does removing fp8 KV cache noise (by using bf16 KV + TP=2) improve th02 correctness for the AWQ model specifically? Isolates KV precision from the NVFP4 publisher quality issue.
 
 **Why AWQ not NVFP4:** sakamakismile/NVFP4 is an untrusted publisher. T2.4c conflated publisher quality with quantization format. This test uses the same trusted AWQ weights (QuantTrio) but with bf16 KV to isolate the KV dtype variable cleanly.
 
@@ -835,9 +814,9 @@ Single-GPU cohabitation with Qwen3.6-35B coder is physically impossible at these
 
 | Item | Status | Priority | Notes |
 |------|--------|----------|-------|
-| T2.4f | OPEN | HIGH | RoPE theta + chunked-prefill config audit — zero cost, run first |
-| T2.4d | OPEN | HIGH | AWQ run 4 reproducibility ×3 — gates capability ceiling hypothesis |
-| T2.4e | OPEN | HIGH | AWQ + bf16 KV + TP=2 — isolates KV precision variable |
+| T2.4f | DONE ✓ | — | rope_theta=10M confirmed; cp-OFF OOM at TP=1 confirmed |
+| T2.4d | DONE ✓ | — | TP=1 th02 correct 3/3; quality scores pending human review |
+| T2.4e | DONE (INCONCLUSIVE) | — | th02 INCORRECT; confounded by TP=2+cp-OFF; see R17 |
 | T2.3c | OPEN | MEDIUM | Gemma4-31B as coder — GPU0, no deps, parallel with T2.4x on GPU1 |
 | T_CV1 | OPEN | MEDIUM | Convergence startup timing — no deps |
 | T2.4b | OPEN | LOW | Qwopus SFT as thinker — run if T2.4d confirms capability ceiling |

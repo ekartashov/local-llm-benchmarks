@@ -22,7 +22,7 @@ done
 ITEM_ID="T2.4c_arclight_thinker_qwen36_27b_nvfp4_swap"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RESULTS_DIR="${REPO_ROOT}/results/${ITEM_ID}_${TIMESTAMP}"
-MODEL="QuantTrio/Qwen3.6-27B-NVFP4"
+MODEL="sakamakismile/Qwen3.6-27B-NVFP4"
 
 mkdir -p "${RESULTS_DIR}/raw"
 LOG="${RESULTS_DIR}/bench.log"
@@ -125,12 +125,13 @@ else
     VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
         "${REPO_ROOT}/infra/scripts/deploy.sh" vllm tp2b "${MODEL}" \
         --gpu-mem-util 0.85 \
-        --kv-cache-dtype bf16 \
+        --kv-cache-dtype auto \
         --ctx 49152 \
         --tool-call-parser qwen3_coder \
         --reasoning-parser qwen3 \
         --language-model-only \
-        --enable-auto-tool-choice \
+        --trust-remote-code \
+        --tokenizer Qwen/Qwen3.6-27B \
         2>&1 | tee -a "${LOG}" || die "Deployment failed."
 fi
 
@@ -147,21 +148,15 @@ else
         "${RESULTS_DIR}/raw/decode_seq1.json" | tee -a "${LOG}" || true
     DEC_TPS_1=$(python3 -c "import json; print(json.load(open('${RESULTS_DIR}/raw/decode_seq1.json'))['avg_tps_per_seq'])" 2>/dev/null || echo "0.0")
 
-    # subset for th02 and th03
-    SUBSET_DIR="${RESULTS_DIR}/target_tasks"
-    mkdir -p "${SUBSET_DIR}"
-    cp "${REPO_ROOT}/benchmarks/phase2_model_selection/tasks/thinker/th02_algorithm_design.json" "${SUBSET_DIR}/"
-    cp "${REPO_ROOT}/benchmarks/phase2_model_selection/tasks/thinker/th03_architecture_tradeoffs.json" "${SUBSET_DIR}/"
-
-    log "Running Phase 2.2 subset quality suite (th02, th03) ..."
+    log "Running Phase 2.2 full quality suite (8 tasks) at 32k max_tokens ..."
     python3 -m benchmarks.phase2_model_selection.bench \
         --endpoint "${ENDPOINT}" \
         --results-dir "${RESULTS_DIR}/phase2_quality" \
         --mode quality \
-        --tasks "${SUBSET_DIR}" \
+        --tasks "${REPO_ROOT}/benchmarks/phase2_model_selection/tasks/thinker/" \
         --model "${MODEL}" \
         --label "Qwen3.6-27B-NVFP4" \
-        --max-tokens 16384 \
+        --max-tokens 32768 \
         2>&1 | tee -a "${LOG}" || {
         log "WARNING: phase2 quality bench exited non-zero — check logs."
     }
@@ -196,9 +191,7 @@ TPS Target (seq=1): {metrics['metrics']['decode_tps_seq1']} t/s
 
 ## Human review required
 
-Open **{out}/phase2_quality/human_review.md** and score exactly the two problematic tasks:
-- **th02_algorithm_design**: verify if code avoids \`IndexError\`.
-- **th03_architecture_tradeoffs**: verify logic-math consistency.
+Open **{out}/phase2_quality/human_review.md** and score all 8 tasks 1–5.
 
 **Verdict: PENDING HUMAN REVIEW**
 """

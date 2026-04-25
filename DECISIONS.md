@@ -103,11 +103,20 @@ Phase B blocked by two issues specific to the current thinker (Qwen3.5-27B-AWQ):
 
 **Re-run T1.5 Phase B after thinker model selection.** If the new thinker is pure Transformer/MoE (no Mamba) and combined weights fit comfortably under ~28 GiB, Phase B is worth retrying. Gemma4-31B REJECTED (T2.3b). Qwen3.6-27B uses GDN (not Mamba) but GDN is also not supported by kvcached — T1.5 Phase B remains blocked until kvcached adds DeltaNetSpec support upstream.
 
-### Qwen3.5-27B-AWQ is Arclight thinker baseline but has constraints
-**PROVISIONAL (2026-04-18).** Viable quality-wise (4.0/5). MambaSpec (SSM hybrid layers) blocks kvcached Phase B. Cannot run with kvcached shared-pool. For pure TP=1 isolated deployment it works fine. Gemma4-31B REJECTED (T2.3b). Qwen3.6-27B-AWQ is the next candidate (T2.4).
+### Qwen3.6-27B-AWQ at TP=1 reproduces correct th02 (3/3 runs)
+**PROVISIONAL (2026-04-25, T2.4d).** 3/3 reproducibility pass with correct th02 algorithm design confirmed — all missed jobs assigned to the GPU with max queue time (busiest GPU). Verified across both T2.4d result sets (T094048Z and T102313Z, runs 1–3 each). Quality mean score (1–5 over 8 tasks) pending human review — human_review.md files not yet scored. TP=1 + fp8 KV + chunked-prefill-on is the confirmed stable config for algorithmic correctness.
 
-### Qwen3.6-27B — thinker quality INCONCLUSIVE across configs; root cause under investigation
-**PROVISIONAL (R15/R16, 2026-04-24/25).** Multiple runs across two quantization configs. Quality is config-sensitive and not yet stable enough to settle.
+### Qwen3.6-27B RoPE theta is 10,000,000
+**SETTLED (2026-04-25, T2.4f).** Audit confirmed `rope_theta` matches config.json and vLLM reflects it in logs. No mismatch.
+
+### Chunked-Prefill must stay enabled for Qwen3.6 (GDN) at TP=1
+**SETTLED (2026-04-25, T2.4d).** Disabling chunked prefill via `--no-enable-chunked-prefill` on GDN architecture causes immediate Triton OOM during kernel warmup at TP=1. Must remain enabled at TP=1. At TP=2 (T2.4e), disabling did not cause OOM but produced incorrect th02 output — cannot distinguish TP=2 parallelism bug from missing recurrent state propagation. Quality scores pending human review.
+
+### Qwen3.6-27B-AWQ at TP=2 + bf16 KV — INCONCLUSIVE (T2.4e)
+**NOT SETTLED (2026-04-25, T2.4e).** Run completed at 104.8 t/s decode, 109ms TTFT. th02 output is INCORRECT: missed jobs silently dropped from the assignment map instead of assigned to the busiest GPU — same semantic error pattern as T2.4c NVFP4. Quality scores pending human review. Root cause ambiguous: T2.4e changed two variables from T2.4d simultaneously (TP=1 → TP=2 AND chunked-prefill enabled → disabled). Cannot determine whether regression is from TP=2 parallelism or the absence of chunked prefill. Next step: run TP=2 + chunked-prefill ON to isolate.
+
+### Qwen3.6-27B — NVFP4 configuration is REJECTED
+**SETTLED (2026-04-25, T2.4c).** NVFP4 quantization on the GDN architecture introduces reasoning pathologies (confident logic errors) that do not exist in the AWQ weights. Do not use NVFP4 for thinker roles until kernels/quantizers improve.
 
 **Run history:**
 - T2.4 runs 1–3 (AWQ, fp8 KV, max_tokens ≤ 4096): truncation — token budget exhaustion, not model intelligence.
@@ -116,14 +125,15 @@ Phase B blocked by two issues specific to the current thinker (Qwen3.5-27B-AWQ):
 - T2.4c partial run 230351Z (NVFP4, bf16 KV, TP=2, th02+th03 only): both scored 5.0 — operator declared PASS. Premature: only 2/8 tasks tested.
 - T2.4c **full run 232801Z** (NVFP4, bf16 KV, TP=2, all 8 tasks): th02 has semantic error — missed jobs assigned to no GPU (silently wrong; `-1` instead of assigning to busiest GPU). Mean ~3.94/5 — below 4.0 baseline. **NVFP4 + bf16 KV did NOT resolve confident incorrectness.**
 
-**Open root cause hypotheses (priority order):**
-1. **RoPE theta mismatch:** Qwen3.6-27B likely uses `rope_theta=1_000_000`. If vLLM reads wrong value, positional encodings degrade for long sequences (thinking traces at positions 2k–4k+ tokens). Verify at deploy: compare `grep rope_theta` in vLLM startup logs vs model `config.json`. Zero-cost check — do first. (→ T2.4f)
-2. **Chunked prefill × GDN recurrence:** vLLM may enable chunked prefill by default. DeltaNet layers have recurrent state that must propagate correctly across chunk boundaries. If vLLM's GDN chunked-prefill implementation is incomplete, mid-trace reasoning degrades — explaining correct *concept* but broken *edge-case handling*. Test with `--disable-chunked-prefill` or `--max-num-batched-tokens 131072`. (→ T2.4f, T2.4d)
-3. **Model capability ceiling:** Run 4 being correct may have been a lucky sample near the model's reliability ceiling for complex algorithmic implementation. Test: run exact run 4 config 3× and check if th02 is stable. (→ T2.4d)
-4. **NVFP4 publisher quality:** `sakamakismile` is an untrusted publisher. Poor calibration could explain why T2.4c underperforms AWQ run 4 despite superior KV precision. If NVFP4 proves worth pursuing after root cause, pull from `nvidia/` or `bartowski/`. (→ T_NVFP4, deferred)
+**Root cause hypothesis status (updated 2026-04-25 after T2.4f/d/e):**
+1. **H1 — RoPE theta mismatch: DEAD.** T2.4f confirmed `rope_theta=10,000,000` in model config.json; vLLM startup logs reflect the same value. No mismatch.
+2. **H2 — Chunked prefill × GDN recurrence: PARTIALLY RESOLVED.** Disabling chunked prefill at TP=1 causes Triton OOM — cannot disable at TP=1. At TP=2, T2.4e ran with cp-OFF and produced wrong th02. Whether the failure was from absent recurrent state propagation (cp-OFF) or TP=2 parallelism is unknown (two variables changed).
+3. **H3 — Capability ceiling: FALSIFIED at TP=1.** T2.4d: AWQ+TP=1+fp8KV+cp-ON correct 3/3. The model can reliably implement th02 at this config. Still open for TP=2.
+4. **H4 — NVFP4 publisher quality: CONFIRMED CONTRIBUTING.** T2.4c NVFP4 had semantic errors; T2.4d AWQ TP=1 is correct — confirms publisher quality/format mattered. Does not explain the T2.4e TP=2 regression (also AWQ).
 
-**Tests queued:** T2.4f (RoPE/chunked-prefill config audit, zero-cost), T2.4d (AWQ run 4 reproducibility ×3), T2.4e (AWQ + bf16 KV + TP=2, KV precision isolation). See TESTING_QUEUE.md.
-**NVFP4 mass-pull deferred:** run after root cause is confirmed. See T_NVFP4 in TESTING_QUEUE.md.
+**Tests run (2026-04-25):** T2.4f (H1 dead — RoPE theta 10M confirmed correct), T2.4d (H3 partially resolved — TP=1 reproducibly correct on th02 3/3), T2.4e (TP=2 + bf16 KV + no-cp — FAIL on th02, confounded; see entry above).
+**Remaining open question:** Is TP=2 + chunked-prefill ON also correct? This combination has not been tested. T2.4e disabled chunked prefill, conflating two variables.
+**NVFP4 mass-pull deferred:** root cause still ambiguous. See T_NVFP4 in TESTING_QUEUE.md.
 
 **GDN / kvcached note:** DeltaNetSpec not in kvcached v0.1.5 supported list. T1.5 Phase B remains blocked regardless of config. Does not affect TP=1 or TP=2 isolated deployment.
 

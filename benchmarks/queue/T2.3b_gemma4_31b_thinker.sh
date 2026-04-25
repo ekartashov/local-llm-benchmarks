@@ -252,8 +252,8 @@ Open **{out}/phase2_quality/human_review.md** and score all 8 tasks 1–5.
 - 1: Wrong or incoherent
 
 After scoring, update **{out}/metrics.json**:
-- Set `quality_mean_8task` to the mean score
-- Set `verdict` to PASS/FAIL/INCONCLUSIVE
+- Set \`quality_mean_8task\` to the mean score
+- Set \`verdict\` to PASS/FAIL/INCONCLUSIVE
 
 **Decision rule (T2.3b):**
 - PASS: mean ≥ {baseline_quality}/5 AND no thinking-budget pathology on th03 (task 03)

@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R16 OPEN — T2.4c full 8-task run (232801Z) scored; NVFP4 did NOT resolve confident incorrectness on th02 (semantic error, mean ~3.94/5). Root cause under investigation. Three hypotheses: RoPE theta mismatch, chunked-prefill × GDN recurrence, model capability ceiling.
-**Current mode:** TESTING — priority queue: T2.4f (RoPE/chunked-prefill config audit, zero-cost, run first) → T2.4d (AWQ run 4 reproducibility ×3) → T2.4e (AWQ + bf16 KV + TP=2). T2.3c and T_CV1 remain OPEN and can run in parallel on GPU0.
+**Current cycle:** R17 OPEN — T2.4d confirms TP=1 reproducibility (3/3 th02 correct). T2.4e FAIL on th02 (confounded: TP=2 + chunked-prefill-off simultaneously). Root cause of TP=2 regression still open.
+**Current mode:** Research — determining next test (TP=2 + chunked-prefill ON to isolate, or accept TP=1 as production thinker config pending human quality scoring).
 
 ---
 
@@ -26,7 +26,7 @@ Living document. What we currently believe, what is still open, and the log of r
 - vLLM Sleep Mode **level=2** — do not use. See `DECISIONS.md`; known to produce gibberish outputs on wake (bug #29341) and requires manual `reload_weights` + `reset_prefix_cache` after wake which is easy to get wrong. Use level=1 exclusively. We have 192 GB DDR5, there is no reason to prefer level=2 for us.
 - **Gemma4-31B-it-AWQ** (Arclight Thinker candidate) — REJECTED as primary thinker. Mean quality 4.0/5 matches Qwen3.5-27B but fails depth-of-reasoning bar on th02/th03/th05. Redirected: strong 5/8 task profile (th01, th04, th06, th07, th08 all scored 5), 100% task completion, dense/no-MambaSpec → queued as **coder** candidate T2.3c.
 - **lordx64/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled** — KILLED without testing. 7,800-sample attention-only LoRA on our current coder base. No AWQ, no verified tool calling, Anthropic ToS concern for distillation data.
-- **Qwen3.6-27B — INCONCLUSIVE thinker (T2.4/T2.4c, 2026-04-24/25).** Quality is config-sensitive: AWQ run 4 (fp8 KV, max_tokens=16384, ctx=32768) produced correct th02 code (~4.25/5). All other runs — including NVFP4+bf16+TP=2 — have semantic errors on th02 (confident incorrectness pattern). Root cause under investigation (RoPE theta, chunked-prefill × GDN, capability ceiling). Qwen3.5-27B remains thinker baseline. See DECISIONS.md for run history and hypotheses.
+- **Qwen3.6-27B — TP=1 CONFIRMED correct; TP=2 INCONCLUSIVE (T2.4d/e, 2026-04-25).** T2.4d: AWQ+TP=1+fp8KV+cp-ON is reproducibly correct on th02 (3/3 runs, both result sets). T2.4e: AWQ+TP=2+bf16KV+cp-OFF produced incorrect th02 (missed jobs dropped) — confounded by two simultaneous changes, root cause ambiguous. RoPE theta (H1) dead. Quality scores (1–5 over 8 tasks) pending human review of T2.4d human_review.md files. Qwen3.5-27B remains thinker baseline until quality scoring completes.
 
 ### Working architectural hypothesis
 
@@ -72,6 +72,33 @@ Critical unknowns remaining:
 **Decisions updated:** DECISIONS.md Qwen3.6-27B entry expanded with run history and hypotheses.
 **Tests queued:** T2.4f (config audit), T2.4d (reproducibility), T2.4e (AWQ + bf16 KV + TP=2), T_NVFP4 (deferred mass-pull).
 **T2.4b status:** restored to OPEN (Qwopus SFT still potentially relevant if capability ceiling is confirmed).
+
+---
+
+### R17 — April 25 2026 — Repro confirmed; RoPE dead; T2.4e confounds two variables
+
+**Triggered by:** Confident incorrectness in T2.4c (NVFP4). Scripts T2.4f/d/e were run on host by Gemini Flash; outputs verified and corrected by Claude.
+
+**What happened:**
+
+- **T2.4f (config audit):** Confirmed `rope_theta: 10,000,000` is correctly parsed by vLLM — matches model config.json. H1 (RoPE theta mismatch) is dead. Confirmed `--no-enable-chunked-prefill` at TP=1 causes immediate Triton OOM during kernel warmup — chunked prefill must remain enabled at TP=1.
+
+- **T2.4d (reproducibility ×3):** Qwen3.6-27B-AWQ at TP=1 + fp8 KV + chunked-prefill-ON is 3/3 correct on th02 across both result sets (T094048Z and T102313Z). All runs correctly assign missed jobs to the GPU with `max(gpu_times)` (busiest GPU). H3 (capability ceiling) is falsified for this specific config. Quality scores (1–5, 8 tasks) pending human review — human_review.md files not yet scored by the operator.
+
+- **T2.4e (TP=2 + bf16 KV):** Ran with `--no-enable-chunked-prefill` (DISABLE_CHUNKED_PREFILL was set). Result: th02 INCORRECT — missed jobs silently dropped from assignments map, not routed to busiest GPU. 104.8 t/s decode. Quality scores pending. **Critical confound: T2.4e changed two variables from T2.4d simultaneously — TP=1→TP=2 AND chunked-prefill enabled→disabled.** Cannot determine whether regression is from TP=2 parallelism effects on GDN layers or from absent chunked-prefill recurrent state propagation.
+
+- **Gemini fabrication (corrected):** Gemini Flash marked T2.4e as SETTLED PASS with "8/8 tasks score 5.0" — fabricated. All quality scores are `_fill in_`. DECISIONS.md and this file have been corrected accordingly.
+
+**Conclusions so far:**
+- TP=1 + fp8 KV + cp-ON = CORRECT (reproducible)
+- TP=2 + bf16 KV + cp-OFF = INCORRECT on th02
+- Which variable caused the regression is unknown
+
+**Open question:** Does TP=2 + chunked-prefill ON produce correct th02? This is the one combination not yet tested. If correct: TP=2 is viable with chunked prefill on. If still wrong: TP=2 itself is the blocker.
+
+**Possible next tests:**
+1. Queue T2.4g: TP=2 + bf16 KV + chunked-prefill ON (the missing cell). If CORRECT → TP=2 is viable; was chunked-prefill all along.
+2. Accept TP=1 as production thinker config (it's proven correct) and score T2.4d quality tasks manually first.
 
 ---
 
@@ -643,6 +670,21 @@ Phase 0/1 work: chat template verification, vLLM vs SGLang throughput comparison
 - **Step 2a** (quick non-streaming test, host only): `curl` Task 02 with `"stream": false` to confirm the non-streaming path works — if so, the streaming parser is definitively the crash point.
 - **Step 2b** (fix): Patch `glm4_moe_tool_parser.py` in `infra/Containerfile.vllm_glm47` to change `"arguments": args_dict` → `"arguments": full_args_str` at the point where a new tool call entry is first added to `prev_tool_call_arr`. Then rebuild (`--rebuild` flag on the bench script) and rerun T2.1.
 - **Step 3** (safety net): Add `VLLM_ENABLE_V1_MULTIPROCESSING=0` to the container env — keeps V1 in single-process mode so parser exceptions don't kill the entire engine; failures become per-request recoverable instead of fatal.
+
+### From T2.4d/T2.4e, 2026-04-25 — TP=1 correct, TP=2 regression root cause open
+
+**What happened:** T2.4d confirmed TP=1 + fp8 KV + chunked-prefill-ON is 3/3 correct on th02. T2.4e (TP=2 + bf16 KV + chunked-prefill-OFF) failed on th02 — missed jobs dropped. T2.4e changed two variables from T2.4d simultaneously, so we can't blame TP=2 or chunked-prefill alone.
+
+**Relevant result dirs:**
+- `results/T2.4d_qwen36_27b_awq_reproducibility_20260425T094048Z/` (run1–run3, CORRECT)
+- `results/T2.4d_qwen36_27b_awq_reproducibility_20260425T102313Z/` (run1–run3, CORRECT)
+- `results/T2.4e_qwen36_27b_awq_bf16kv_tp2_20260425T114506Z/` (single run, th02 INCORRECT)
+
+**Why this needs research, not another test:** The missing test cell is TP=2 + chunked-prefill ON. But this may not run cleanly — T2.4d established that chunked-prefill-OFF at TP=1 causes Triton OOM; it's unclear whether chunked-prefill ON at TP=2 is stable or introduces a different GDN recurrence issue. Research should also decide whether the additional TP=2 test is worth the complexity vs just accepting TP=1 as the production config (which is proven correct, costs one GPU, and runs at 77 t/s — still 1.37× faster than the 56 t/s Qwen3.5-27B baseline at th02-comparable quality TBD from scoring).
+
+**Suggested direction:** Decide between (a) queue T2.4g (TP=2 + cp-ON) to resolve ambiguity cleanly, or (b) accept TP=1 as the settled thinker config and proceed to score T2.4d quality tasks manually, with TP=2 as a deferred optimization. Also consider whether T2.4d human scoring is the immediate next action.
+
+---
 
 ### From T2.3b, 2026-04-24 — thinker question still open; Gemma4 redirected to coder
 
