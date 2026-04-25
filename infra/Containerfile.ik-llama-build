@@ -1,0 +1,60 @@
+# infra/Containerfile.ik-llama-build
+#
+# Build environment for ik_llama.cpp (pr-1288) targeting CUDA 12.8 / sm_120 (Blackwell).
+#
+# PURPOSE: compilation only. The binary it produces is written to a bind-mounted
+# host directory — NOT baked into this image. Keep the binary on the host so you
+# can bind-mount it into the runtime container at any time without rebuilds.
+#
+# CUDA VERSION CONTRACT: must match infra/Containerfile.ik-llama-runtime.
+# Both images pin 12.8.1. This guarantees the compiled binary sees the same
+# libcudart / libcublas ABI at runtime that it was compiled against.
+#
+# Build this image once:
+#   podman build -f infra/Containerfile.ik-llama-build -t local-ik-llama:build .
+#
+# Then compile (see infra/scripts/build-ik-llama.sh):
+#   ./infra/scripts/build-ik-llama.sh
+
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
+
+# Build tools only — no inference runtime, no Python, no model weights.
+# gcc-12 / g++-12: required by ik_llama.cpp pr-1288 (C++17 features).
+# ninja-build: faster parallel builds than make.
+# git: cmake version detection reads git metadata from the source tree.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    ninja-build \
+    gcc-12 \
+    g++-12 \
+    git \
+    curl \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# Default build command (overridable via `podman run ... <cmd>`).
+# Source expected at /src (bind-mounted r/w by the caller via build-ik-llama.sh).
+# Artifacts land at /src/build/ = host's ik_llama.cpp/build/.
+#
+# GGML_NATIVE=ON: -march=native for CPU paths. Safe here because rootless podman
+#   shares the host kernel/CPU with no virtualisation — cpuinfo is accurate.
+#   Critical for --cpu-moe throughput (AVX2/AVX512 expert GEMM on the i9-14900K).
+#
+# CMAKE_CUDA_ARCHITECTURES=120: Blackwell sm_120 native code. Avoids PTX JIT
+#   on first inference run which would add minutes of one-time startup.
+#
+# GGML_CUDA=ON: keeps the binary capable of GPU offload for T_CV3 experiments
+#   (partial GPU expert offload with Arclight/Core sleeping). Production Convergence
+#   deployment uses -ngl 0 (CPU-only) so GPU is never touched — this just keeps the
+#   option open without a separate build.
+CMD cmake -B /src/build \
+        -DGGML_CUDA=ON \
+        -DGGML_NATIVE=ON \
+        -DCMAKE_CUDA_ARCHITECTURES=120 \
+        -DCMAKE_BUILD_TYPE=Release \
+        -G Ninja \
+        /src \
+    && cmake --build /src/build --config Release -j$(nproc)

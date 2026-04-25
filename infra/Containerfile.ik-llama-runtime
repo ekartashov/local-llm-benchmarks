@@ -1,0 +1,47 @@
+# infra/Containerfile.ik-llama-runtime
+#
+# Minimal runtime environment for ik_llama.cpp binaries on CUDA 12.8 / sm_120.
+#
+# CUDA VERSION CONTRACT: same major.minor as infra/Containerfile.ik-llama-build
+# (both pin 12.8.1). The build container compiles the binary against CUDA 12.8.1
+# devel headers; this runtime container ships the matching shared libraries
+# (libcudart.so.12, libcublas.so.12, libcublasLt.so.12). ABI mismatch is impossible
+# when both images are built from the same version tag.
+#
+# PRODUCTION CONVERGENCE mode (CPU-only):
+#   The binary is launched with -ngl 0 — no CUDA API calls are made at runtime.
+#   No GPU device passthrough (no CDI) is needed. The CUDA runtime libraries are
+#   still required because the binary links against them dynamically; they are loaded
+#   by the dynamic linker at startup but never called.
+#
+# T_CV3 EXPERIMENT mode (partial GPU offload):
+#   Pass CDI device args and use -ngl 999 --n-cpu-moe N when Arclight/Core are sleeping.
+#   Same image, different deploy.sh invocation / direct podman run.
+#
+# Build this image once:
+#   podman build -f infra/Containerfile.ik-llama-runtime -t local-ik-llama:runtime .
+#
+# Deploy via:
+#   ./infra/scripts/deploy.sh ikllamacpp convergence "${CONVERGENCE_MODEL}"
+
+FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
+
+# libgomp1:   OpenMP threading for CPU-side MoE GEMM (critical for --cpu-moe throughput).
+# curl:       health check endpoint polling.
+# libstdc++6: C++ standard library (present in base but explicit avoids surprises).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    curl \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Mount points — populated by bind-mounts at container start, never baked in.
+# /app/build: host's IK_LLAMA_BUILD_DIR (ik_llama.cpp/build/)
+# /models:    host's MODEL_CACHE (/srv/ai/models)
+VOLUME ["/app/build", "/models"]
+
+EXPOSE 8000
+
+# llama-server binary comes from the bind-mounted build dir.
+# Override with --entrypoint /app/build/bin/llama-bench for T_CV2/T_CV3 bench runs.
+ENTRYPOINT ["/app/build/bin/llama-server"]
