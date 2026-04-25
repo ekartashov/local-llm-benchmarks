@@ -124,9 +124,9 @@ models:
   # THINKER ROLE
   # ============================================================
 
-  # ── BASELINE thinker (with caveat) ─────────────────────────────────────
+  # ── SUPERSEDED thinker (fallback only) ─────────────────────────────────────
   qwen35_27b_awq:
-    status: BASELINE
+    status: SUPERSEDED    # replaced by qwen36_27b_awq (SETTLED 2026-04-25, T2.4d)
     role: thinker
     hf_repo: QuantTrio/Qwen3.5-27B-AWQ
     quant: AWQ-INT4
@@ -170,9 +170,9 @@ models:
       VRAM footprint than Qwen3.5-27B-AWQ means the concurrent-dual assumption
       needs re-validation if GLM-4.5-Air wins T2.3.
 
-  # ── CANDIDATE thinker (Qwen3.6 generation) ─────────────────────────────────
+  # ── ACTIVE thinker (SETTLED 2026-04-25) ─────────────────────────────────────
   qwen36_27b_awq:
-    status: CANDIDATE
+    status: ACTIVE    # production thinker — SETTLED T2.4d 2026-04-25
     role: thinker
     hf_repo: QuantTrio/Qwen3.6-27B-AWQ
     quant: AWQ-INT4
@@ -181,12 +181,13 @@ models:
     ctx_default: 32768     # native 262144; limited for KV budget on single GPU
     engines: [vllm]
     flags:
-      vllm: "--tool-call-parser qwen3_coder --reasoning-parser qwen3 --language-model-only --enable-auto-tool-choice"
-      # --language-model-only: sheds vision encoder (~1-3 GiB) to free KV headroom. Verify flag
-      #   in vLLM 0.19.x at deploy time — omit if unsupported; budget fine either way (21+~2 < 28.8).
-      # --reasoning-parser qwen3: same stack as coder (Qwen3.6-35B-A3B-AWQ), proven in T2.5.
-      # Do NOT add reasoning-parser if tool calls break — but this combination is expected to work
-      # (Qwen3.6 family, unlike Gemma4 and Core which had streaming interception bugs).
+      vllm: "--kv-cache-dtype fp8 --enable-chunked-prefill --max-num-seqs 1 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice"
+      # --enable-chunked-prefill: REQUIRED — disabling causes Triton OOM at TP=1 (confirmed T2.4f)
+      # --kv-cache-dtype fp8: verified correct in T2.4d (3/3 th02 correct)
+      # --max-num-seqs 1: required for CUDA graph stability on single GPU
+    placement:
+      tp: 1
+      gpu: 1    # GPU1 (isolated, concurrent with coder on GPU0)
     requires_vllm: ">=0.19.0"
     requires_transformers: ">=5.5.4"   # check container image at deploy time
     architecture:
@@ -196,23 +197,26 @@ models:
       mamba: false
       gdn: true    # Gated DeltaNet (GDN) hybrid — NOT Mamba, but also NOT pure Transformer
       kvcached_spec: "DeltaNetSpec (unsupported by kvcached v0.1.5)"
-      vision: true # includes vision encoder; shed with --language-model-only
+      vision: true # includes vision encoder; --language-model-only may shed it but not tested
+    measured:
+      single_gpu_seq1_tps: 77.4    # T2.4d
+      quality_mean_8task: 4.875    # T2.4d run1, scored R17
+      th02_correct_rate: "3/3"     # reproducible across both T2.4d result sets
     benchmarks:
       aime_2026: 0.941
       gpqa_diamond: 0.878
       mmlu_pro: 0.862
       swe_bench_verified: 0.772
-    test_items: [T2.4]
+    test_items: [T2.4, T2.4d]
     known_bugs:
-      - "vLLM #40621 batch inference: affects multi-concurrent-request scenarios. Thinker role is typically seq=1 — low risk."
+      - "vLLM #40621 batch inference: affects multi-concurrent-request scenarios. Thinker role is seq=1 — low risk."
       - "vLLM #40756 MTP crash: only with --speculative-config. Do NOT enable MTP."
       - "vLLM #40725 TP=4 non-English corruption: TP=1 only — not applicable."
     notes: >
-      27B dense, GDN hybrid. Released April 2026. Benchmark-dominant over all prior thinker candidates.
-      FAILED T2.4 at TP=1 with AWQ-INT4 and FP8 KV cache (exhibited confident incorrectness and hallucinated
-      reasoning in th02/th03). However, it is retained to test if this failure was due to quantization or
-      extreme context compression/thrashing. New testing path (T2.4c): test using NVFP4 weights to free up 
-      memory, use BF16 KV cache, and run at TP=2 (borrowing both GPUs by sleeping the Qwen3.6-35B-A3B coder).
+      27B dense, GDN hybrid. SETTLED as production thinker 2026-04-25.
+      T2.4d: quality 4.875/5, th02 correct 3/3. Supersedes Qwen3.5-27B (4.0/5, no reasoning budget issues).
+      TP=2 viability INCONCLUSIVE (T2.4e confounded — T2.4g queued as LOW priority curiosity).
+      For production: TP=1 on GPU1 is the confirmed correct and architecturally preferred config.
 
   # ── CANDIDATE thinker (Qwopus SFT, lower priority) ──────────────────────
   qwopus36_27b_preview:

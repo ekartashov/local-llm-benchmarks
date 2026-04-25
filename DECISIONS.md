@@ -103,14 +103,22 @@ Phase B blocked by two issues specific to the current thinker (Qwen3.5-27B-AWQ):
 
 **Re-run T1.5 Phase B after thinker model selection.** If the new thinker is pure Transformer/MoE (no Mamba) and combined weights fit comfortably under ~28 GiB, Phase B is worth retrying. Gemma4-31B REJECTED (T2.3b). Qwen3.6-27B uses GDN (not Mamba) but GDN is also not supported by kvcached — T1.5 Phase B remains blocked until kvcached adds DeltaNetSpec support upstream.
 
-### Qwen3.6-27B-AWQ at TP=1 reproduces correct th02 (3/3 runs)
-**PROVISIONAL (2026-04-25, T2.4d).** 3/3 reproducibility pass with correct th02 algorithm design confirmed — all missed jobs assigned to the GPU with max queue time (busiest GPU). Verified across both T2.4d result sets (T094048Z and T102313Z, runs 1–3 each). Quality mean score (1–5 over 8 tasks) pending human review — human_review.md files not yet scored. TP=1 + fp8 KV + chunked-prefill-on is the confirmed stable config for algorithmic correctness.
+### Qwen3.6-27B-AWQ is the Arclight thinker (replaces Qwen3.5-27B)
+**SETTLED (2026-04-25, T2.4d + R17 quality scoring).** 3/3 th02 correct, quality **4.875/5** on 8-task suite (scores: th01–th07 all 5, th08=4 — minor forward-ref bug in eager-init example). Exceeds 4.0 bar decisively and beats Qwen3.5-27B (4.0/5). 77.4 t/s seq=1. No reasoning budget exhaustion defects (th03 was a blocker for Qwen3.5-27B).
+
+**Production config:**
+- Model: `QuantTrio/Qwen3.6-27B-AWQ`
+- Placement: TP=1, GPU1
+- `--kv-cache-dtype fp8 --enable-chunked-prefill --max-num-seqs 1`
+- `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`
+
+**Supersedes:** Qwen3.5-27B-AWQ (retain as fallback only).
 
 ### Qwen3.6-27B RoPE theta is 10,000,000
 **SETTLED (2026-04-25, T2.4f).** Audit confirmed `rope_theta` matches config.json and vLLM reflects it in logs. No mismatch.
 
 ### Chunked-Prefill must stay enabled for Qwen3.6 (GDN) at TP=1
-**SETTLED (2026-04-25, T2.4d).** Disabling chunked prefill via `--no-enable-chunked-prefill` on GDN architecture causes immediate Triton OOM during kernel warmup at TP=1. Must remain enabled at TP=1. At TP=2 (T2.4e), disabling did not cause OOM but produced incorrect th02 output — cannot distinguish TP=2 parallelism bug from missing recurrent state propagation. Quality scores pending human review.
+**SETTLED (2026-04-25, T2.4d).** Disabling chunked prefill via `--no-enable-chunked-prefill` on GDN architecture causes immediate Triton OOM during kernel warmup at TP=1. Must remain enabled at TP=1. At TP=2 (T2.4e), disabling did not cause OOM but produced incorrect th02 output — cannot distinguish TP=2 parallelism bug from missing recurrent state propagation. T2.4g will isolate (TP=2 + cp-ON) as LOW priority curiosity test.
 
 ### Qwen3.6-27B-AWQ at TP=2 + bf16 KV — INCONCLUSIVE (T2.4e)
 **NOT SETTLED (2026-04-25, T2.4e).** Run completed at 104.8 t/s decode, 109ms TTFT. th02 output is INCORRECT: missed jobs silently dropped from the assignment map instead of assigned to the busiest GPU — same semantic error pattern as T2.4c NVFP4. Quality scores pending human review. Root cause ambiguous: T2.4e changed two variables from T2.4d simultaneously (TP=1 → TP=2 AND chunked-prefill enabled → disabled). Cannot determine whether regression is from TP=2 parallelism or the absence of chunked prefill. Next step: run TP=2 + chunked-prefill ON to isolate.
@@ -190,10 +198,8 @@ Measured: 251 t/s single-request, ~730 t/s aggregate at concurrency=4, single-GP
 ### Qwen3.6-35B-A3B-AWQ is the Arclight coder of record
 SETTLED in T2.5 (2026-04-18). 237.1 t/s single-GPU. 96.7% tool-call reliability. 100% quality completion rate. Supersedes Qwen3-Coder-30B. Apache 2.0.
 
-### Qwen3.5-27B-AWQ is viable as Arclight thinker on quality
-Measured 4.0/5 vs DeepSeek-R1-32B 2.6/5 on 8 reasoning tasks. 76 t/s with graphs active, TP=1, GPU1. Needs `--max-num-seqs 1`. Mamba SSM hybrid blocks kvcached Phase B.
-
-Outstanding defect: `th03_architecture_tradeoffs` always exceeds thinking budget → empty output. Route architecture-heavy tasks to Core or Convergence.
+### Qwen3.5-27B-AWQ — SUPERSEDED as Arclight thinker (retain as fallback)
+Was viable at 4.0/5, 76 t/s. Superseded by Qwen3.6-27B (4.875/5, 77.4 t/s, SETTLED 2026-04-25 T2.4d). Defect: `th03_architecture_tradeoffs` always exceeds thinking budget → empty output. Mamba SSM hybrid blocks kvcached Phase B. Do not redeploy as primary thinker unless Qwen3.6-27B regresses.
 
 ### Gemma4-31B is NOT the primary Arclight thinker; worth revisiting as coder candidate
 **SETTLED (T2.3b, 2026-04-24).** Dense model (no Mamba), ~20 GiB AWQ, pure Transformer / no MambaSpec blocker for kvcached. Strong benchmarks (GPQA 84.3%, AIME 2026 89.2%, Arena Elo 1452). Quality test T2.3b mean 4.0/5 — matches Qwen3.5-27B baseline but fails depth-of-reasoning bar on th02/th03/th05 (see "rejected as primary thinker" below). The 5/8 task profile (excellent on th01, th04, th06, th07, th08) makes it a plausible *coder* role candidate — dense, fast tool execution, 100% task completion, no SSM layers. Not yet tested in coder role.
@@ -201,13 +207,13 @@ Outstanding defect: `th03_architecture_tradeoffs` always exceeds thinking budget
 ### --reasoning-parser gemma4 must NOT be combined with --tool-call-parser gemma4
 **SETTLED (R13, 2026-04-23).** vLLM 0.19.x streaming code path waits for `</think>` close tag before activating the tool call parser. If Gemma4 skips reasoning and emits tool calls directly, the parser never fires — raw tool tokens appear as text content (all `no_call`). This is the same root cause as Qwen3-Next-80B (80B behemoth requiring `--tool-call-parser hermes` alone with no reasoning-parser). Correct Gemma4 deploy flags: `--tool-call-parser gemma4 --trust-remote-code`. For quality-only tasks (no tool calls), the reasoning parser is also unnecessary since the model's answers are scored by content not by reasoning visibility.
 
-### Gemma4-31B is rejected as primary Arclight thinker; coder role open
+### Gemma4-31B is fully rejected from Arclight (thinker AND coder)
 **SETTLED (2026-04-24, T2.3b).** Mean quality 4.0/5. Excels at textbook knowledge (Python closures, DCL, Pydantic — all scored 5), but demonstrates "Surface-Level Reasoning" on production systems tasks:
 1. **th02 (Algorithm Logic)**: Prioritized heuristic secondary goals over primary constraints (missed deadline count).
 2. **th03 (Systems Architecture)**: Recommended naive Nginx load-balancing for stateful LLM workloads, ignoring token-blindness and Head-of-Line blocking.
 3. **th05 (Optimization)**: Recommended discarding valid versioned cache results based on a false "pollution" concern.
 
-The 5/8 task win rate and 100% completion rate (including non-empty output on th03 where Qwen3.5-27B emits empty) suggest Gemma4 is a capable model with a different failure mode than Qwen3.5-27B — not a straight inferior. Its dense architecture (no A3B sparsity overhead, no MambaSpec), kvcached-compatibility, and strong coding benchmarks make it worth testing in the **Arclight coder role** (T2.3c). Current coder Qwen3.6-35B-A3B-AWQ remains the baseline.
+Gemma4 is a capable model but Qwen dominates on every benchmark relevant to this workload (agentic, terminal-agent, MCP, repo-level). No remaining path in Arclight. Do not re-evaluate unless a new Gemma generation closes the agentic gap (SWE-bench Verified, Terminal-Bench, MCPMark). Coder decision: benchmark evidence, 2026-04-25 (T2.3c skipped).
 
 ### vllm/vllm-openai:gemma4 tag required for Gemma4 models
 **SETTLED (R13, 2026-04-23).** vLLM 0.19.0/0.19.1 (`:latest` tag) has issue #39468: tool-call argument strings are wrapped with `<|"|>` chars, producing unparseable JSON. Fixed in the `vllm/vllm-openai:gemma4` Docker tag. Deploy Gemma4 models with `BENCH_IMAGE=vllm/vllm-openai:gemma4`.

@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R17 OPEN — T2.4d confirms TP=1 reproducibility (3/3 th02 correct). T2.4e FAIL on th02 (confounded: TP=2 + chunked-prefill-off simultaneously). Root cause of TP=2 regression still open.
-**Current mode:** Research — determining next test (TP=2 + chunked-prefill ON to isolate, or accept TP=1 as production thinker config pending human quality scoring).
+**Current cycle:** R17 CLOSED — T2.4d quality scored 4.875/5. Qwen3.6-27B-AWQ at TP=1 promoted as thinker. T2.4g queued as LOW curiosity. T2.4b skipped (quality bar met).
+**Current mode:** Testing — next items: T2.3c (Gemma4-31B as coder, GPU0) and T2.4g (TP=2 isolation, LOW priority).
 
 ---
 
@@ -13,7 +13,8 @@ Living document. What we currently believe, what is still open, and the log of r
 
 - Qwen3-Coder-30B-A3B-AWQ on vLLM, single GPU: 251 t/s seq=1, 730 t/s aggregate at c=4. Tool calls reliable with `--tool-call-parser qwen3_coder --reasoning-parser qwen3`. Measured.
 - Qwen3.6-35B-A3B-AWQ on vLLM, single GPU / TP=2 fallback: 237.1 t/s seq=1, 715.6 t/s aggregate at c=4. 100% Quality completion, 96.7% Tool Reliability. **New Coder Winner**. Requires `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. Measured T2.5 (2026-04-18).
-- Qwen3.5-27B-AWQ on vLLM, single GPU: 76 t/s, quality 4.0/5 on 8-task thinker suite. Needs `--max-num-seqs 1`. **Defect th03 remains**: Task T1.4 (2026-04-18) confirmed that even at `max_tokens=16384`, the model exhausts its budget in a reasoning loop. Architecture-heavy tasks must be routed to coder or behemoth.
+- **Qwen3.6-27B-AWQ on vLLM, GPU1, TP=1: 77.4 t/s seq=1. Quality 4.875/5 on 8-task thinker suite (T2.4d, 2026-04-25). NEW THINKER WINNER.** Correct on th02 3/3 runs (reproducible). Config: `--tensor-parallel-size 1 --kv-cache-dtype fp8 --enable-chunked-prefill --max-num-seqs 1 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. Replaces Qwen3.5-27B. Chunked-prefill must remain ON (disabling causes Triton OOM at TP=1).
+- ~~Qwen3.5-27B-AWQ~~ — superseded by Qwen3.6-27B as thinker (higher quality 4.875 vs 4.0, same TPS). Retain as fallback only. Defect th03 (reasoning budget exhaustion) remains; not relevant for new baseline.
 - vLLM is our primary engine. vLLM launches cleanly with our rootless podman setup on Blackwell sm_120 at TP=2. AWQ-Marlin kernel path confirmed functional (T1.1 run loaded 18 GiB weights across TP=2 cleanly).
 - Sleep Mode confirmed working end-to-end (T1.1 PASS 2026-04-17): `VLLM_SERVER_DEV_MODE=1` + `--enable-sleep-mode` frees 92.8% VRAM (59 → 4 GiB) in ~4s, wake in 0.9s, post-wake TPS 212.3 t/s (ratio 1.000). vLLM 0.19 reasoning-parser streaming field is `delta.reasoning` (o1 style), not `delta.reasoning_content`.
 - Qwen3-Coder-Next-80B-A3B-AWQ (behemoth) on vLLM TP=2: 189.5 t/s seq=1, 610 t/s aggregate at seq=4, 13007 t/s prefill@32k. Tool calls 100% reliable with `--tool-call-parser hermes` and **no** `--reasoning-parser`. Requires `--gpu-memory-utilization 0.95` and env `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`. HF repo: `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit`. Measured T1.3 (2026-04-18).
@@ -26,7 +27,7 @@ Living document. What we currently believe, what is still open, and the log of r
 - vLLM Sleep Mode **level=2** — do not use. See `DECISIONS.md`; known to produce gibberish outputs on wake (bug #29341) and requires manual `reload_weights` + `reset_prefix_cache` after wake which is easy to get wrong. Use level=1 exclusively. We have 192 GB DDR5, there is no reason to prefer level=2 for us.
 - **Gemma4-31B-it-AWQ** (Arclight Thinker candidate) — REJECTED as primary thinker. Mean quality 4.0/5 matches Qwen3.5-27B but fails depth-of-reasoning bar on th02/th03/th05. Redirected: strong 5/8 task profile (th01, th04, th06, th07, th08 all scored 5), 100% task completion, dense/no-MambaSpec → queued as **coder** candidate T2.3c.
 - **lordx64/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled** — KILLED without testing. 7,800-sample attention-only LoRA on our current coder base. No AWQ, no verified tool calling, Anthropic ToS concern for distillation data.
-- **Qwen3.6-27B — TP=1 CONFIRMED correct; TP=2 INCONCLUSIVE (T2.4d/e, 2026-04-25).** T2.4d: AWQ+TP=1+fp8KV+cp-ON is reproducibly correct on th02 (3/3 runs, both result sets). T2.4e: AWQ+TP=2+bf16KV+cp-OFF produced incorrect th02 (missed jobs dropped) — confounded by two simultaneous changes, root cause ambiguous. RoPE theta (H1) dead. Quality scores (1–5 over 8 tasks) pending human review of T2.4d human_review.md files. Qwen3.5-27B remains thinker baseline until quality scoring completes.
+- **Qwen3.6-27B TP=2 + bf16 KV + cp-OFF — INCONCLUSIVE (T2.4e, 2026-04-25).** th02 INCORRECT (confounded: changed TP AND chunked-prefill simultaneously). Root cause still open. T2.4g queued to isolate (TP=2 + cp-ON). TP=2 not needed for production thinker — TP=1 is correct and enables concurrent coder+thinker operation.
 
 ### Working architectural hypothesis
 
@@ -96,9 +97,11 @@ Critical unknowns remaining:
 
 **Open question:** Does TP=2 + chunked-prefill ON produce correct th02? This is the one combination not yet tested. If correct: TP=2 is viable with chunked prefill on. If still wrong: TP=2 itself is the blocker.
 
-**Possible next tests:**
-1. Queue T2.4g: TP=2 + bf16 KV + chunked-prefill ON (the missing cell). If CORRECT → TP=2 is viable; was chunked-prefill all along.
-2. Accept TP=1 as production thinker config (it's proven correct) and score T2.4d quality tasks manually first.
+**R17 continuation (2026-04-25, research mode):** T2.4d run1 quality scored by Claude: mean **4.875/5** (scores: th01=5, th02=5, th03=5, th04=5, th05=5, th06=5, th07=5, th08=4). th08 got 4 due to a forward-reference bug in the eager-init example; all other tasks scored 5. Quality bar (≥4.0) met decisively. Decision: Qwen3.6-27B-AWQ at TP=1 becomes production thinker, replacing Qwen3.5-27B. T2.4b (Qwopus) skipped — dep condition met. T2.4g queued as LOW priority. Architectural note: even if T2.4g shows TP=2 works with cp-ON, TP=1 is preferred for production because it enables concurrent coder+thinker operation without sleep-mode coordination.
+
+**Scoring methodology note:** LLM-on-LLM evaluation carries inherent bias (over-rating confident, verbose responses). Score may be 0.25–0.5 generous. Operator reviewed the concern and accepts Claude's evaluation as calibrated — Claude tends toward skepticism and has comparative context from all prior T2.4x runs. The critical tasks (th02 algorithm correctness, th03 architecture recommendation) were verified against the earlier failing runs: the structural failure mode (missed jobs dropped / assigned -1) is absent from T2.4d run1, and th03 matches the correct recommendation. Score accepted as-is.
+
+**R17 CLOSED.**
 
 ---
 

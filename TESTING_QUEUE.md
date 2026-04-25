@@ -647,7 +647,7 @@ VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ---
 
 ### T2.4f — qwen36_27b_rope_chunkedprefill_audit — DONE ✓
-### T2.4d — qwen36_27b_awq_reproducibility — DONE ✓ (th02 correct 3/3; quality scores pending human review)
+### T2.4d — qwen36_27b_awq_reproducibility — DONE ✓ (th02 correct 3/3; quality 4.875/5 scored R17)
 ### T2.4e — qwen36_27b_awq_bf16kv_tp2 — DONE (th02 INCORRECT — confounded, see R17)
 
 **Question:** Is AWQ run 4's correct th02 implementation stable, or was it a lucky sample near the model's capability ceiling?
@@ -715,7 +715,38 @@ VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ---
 
-### T2.4b — arclight_thinker_qwopus36_27b_candidate — OPEN (lower priority)
+### T2.4g — qwen36_27b_awq_tp2_chunkedprefill_on — OPEN (LOW priority / curiosity)
+
+**Question:** Does TP=2 + bf16 KV + chunked-prefill ON produce correct th02? This is the missing isolation cell from T2.4e (which ran TP=2 + cp-OFF).
+
+**Why LOW priority:** TP=1 is the production thinker config. Even if TP=2 works with cp-ON, the architectural cost is concurrent coder+thinker operation — TP=2 borrows GPU0, requiring sleep-mode coordination. TP=1 at 77 t/s is correct and avoids this. This test is curiosity/completeness only — it does not change the deployment decision unless quality at TP=2 is dramatically better.
+
+**What it would tell us if CORRECT:** chunked-prefill was the only differentiator; TP=2 itself is fine for GDN. Could inform future config decisions if we ever need higher thinker TPS and are willing to accept sleep-mode overhead.
+
+**What it would tell us if INCORRECT:** TP=2 itself causes th02 regression regardless of chunked-prefill. Fully settles the TP=2 question.
+
+**Config:**
+```bash
+./infra/scripts/deploy.sh vllm tp2b QuantTrio/Qwen3.6-27B-AWQ \
+  --gpu-mem-util 0.85 \
+  --ctx 32768 \
+  --kv-cache-dtype auto \
+  --max-num-seqs 1 \
+  --enable-chunked-prefill \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --enable-auto-tool-choice
+```
+
+**Requires sleeping coder** (TP=2 borrows GPU0).
+
+**Pass criteria:** th02 correct (all jobs assigned, including misses to busiest GPU).
+
+**Deps:** T2.4d DONE ✓, T2.4e DONE. No blocking deps.
+
+---
+
+### T2.4b — arclight_thinker_qwopus36_27b_candidate — SKIPPED (dep condition met)
 
 **Question:** Does the Qwopus SFT (Claude + Kimi + Qwen3.5 reasoning distillation on Qwen3.6-27B) improve thinker quality over the base Qwen3.6-27B, specifically on multi-step constraint reasoning (th02, th05)?
 
@@ -787,44 +818,44 @@ Single-GPU cohabitation with Qwen3.6-35B coder is physically impossible at these
 
 ---
 
-### T2.3c — arclight_coder_gemma4_31b_candidate — OPEN
+### T2.3c — arclight_coder_gemma4_31b_candidate — SKIPPED (benchmark evidence, 2026-04-25)
 
-**Question:** Is Gemma4-31B (dense, Apache 2.0, no Mamba) a viable Arclight coder to replace or complement Qwen3.6-35B-A3B-AWQ?
+**Skipped without running.** Operator-led benchmark research (ChatGPT with full context, Qwen3.6-35B-A3B model card as primary source) shows Qwen3.6-35B-A3B is clearly superior on the benchmarks most relevant to this workload. Running T2.3c would consume a GPU-day to confirm what external evals already show.
 
-**Motivation:** T2.3b thinker evaluation showed 5/8 tasks scored 5 (th01, th04, th06, th07, th08), 100% task completion, 70.3 t/s seq=1. The failure pattern (th02/th03/th05) is reasoning-depth, not code execution or tool reliability. Dense architecture means no A3B sparsity overhead, no MambaSpec → kvcached-compatible. Coder tasks weight tool reliability and code correctness more than multi-step system reasoning — different failure mode profile than thinker suite.
+**Key evidence (Qwen card comparison table, vendor-reported but only shared source with both models):**
 
-**Key question vs baseline (Qwen3.6-35B-A3B-AWQ):** Baseline is 96.7% tool reliability + 100% quality + 237.1 t/s. Gemma4 is ~20 GiB vs ~22 GiB — marginally lighter. Dense vs MoE may affect tool-call reliability differently.
+| Benchmark | Gemma4-31B | Qwen3.6-35B-A3B | Gap |
+|-----------|-----------|----------------|-----|
+| SWE-bench Verified | 52.0 | **73.4** | +21.4 Qwen |
+| Terminal-Bench 2.0 | 42.9 | **51.5** | +8.6 Qwen |
+| MCPMark | 18.1 | **37.0** | +18.9 Qwen |
+| WideSearch | 35.2 | **60.1** | +24.9 Qwen |
+| NL2Repo | 15.5 | **29.4** | +13.9 Qwen |
+| LiveCodeBench v6 | 80.0 | 80.4 | tie |
+| TAU3-Bench | **67.5** | 67.2 | tie |
 
-**Specs:**
-- Model: `QuantTrio/gemma-4-31B-it-AWQ` (~20 GiB)
-- Image: `vllm/vllm-openai:gemma4` (NOT `:latest` — issue #39468)
-- Parser: `--tool-call-parser gemma4 --trust-remote-code` only (no `--reasoning-parser`)
-- Placement: GPU0 TP=1 (coder slot)
-- Suite: Phase 2.5 coder quality + tool reliability suite
+Pattern: **Gemma ties on pure coding (LiveCodeBench) but Qwen dominates on agentic, terminal-agent, MCP, and repo-level tasks** — exactly the operator workload. Gemma is not weak; Qwen is simply better for this profile.
 
-**Pass criteria:** tool reliability ≥ 90% AND quality mean ≥ 4.0/5. Beating the 237.1 t/s baseline is not required — quality and tool reliability are the bar.
-
-**Deps:** none (all Gemma4 deploy knowledge settled in R13/T2.3b).
-
-**Hand-back trigger:** tool-call JSON corruption despite gemma4 image tag (indicates a new bug introduced after R13); or CUDA graph OOM at TP=1 on GPU0 (fall back to TP=2 and document).
+**Decision:** Qwen3.6-35B-A3B-AWQ remains the coder. Gemma4-31B is fully retired from Arclight consideration — no role remains.
 
 ---
 
-## TESTING_QUEUE — status summary (R16, 2026-04-25)
+## TESTING_QUEUE — status summary (R17, 2026-04-25)
 
 | Item | Status | Priority | Notes |
 |------|--------|----------|-------|
 | T2.4f | DONE ✓ | — | rope_theta=10M confirmed; cp-OFF OOM at TP=1 confirmed |
-| T2.4d | DONE ✓ | — | TP=1 th02 correct 3/3; quality scores pending human review |
+| T2.4d | DONE ✓ | — | TP=1 th02 correct 3/3; quality **4.875/5** (R17 scored) |
 | T2.4e | DONE (INCONCLUSIVE) | — | th02 INCORRECT; confounded by TP=2+cp-OFF; see R17 |
-| T2.3c | OPEN | MEDIUM | Gemma4-31B as coder — GPU0, no deps, parallel with T2.4x on GPU1 |
+| T2.3c | SKIPPED | — | Gemma4-31B as coder — benchmark evidence (SWE/Terminal/MCP) shows Qwen clearly better; no test needed |
 | T_CV1 | OPEN | MEDIUM | Convergence startup timing — no deps |
-| T2.4b | OPEN | LOW | Qwopus SFT as thinker — run if T2.4d confirms capability ceiling |
-| T_NVFP4 | DEFERRED | — | NVFP4 mass-pull survey — defer until T2.4e result |
+| T2.4g | OPEN | LOW | TP=2+cp-ON isolation — curiosity only, does not block deployment |
+| T_NVFP4 | DEFERRED | — | NVFP4 mass-pull survey — no new info needed until T2.4g result |
 | T_CV2 | OPEN | LOW | Thread count sweep — after T_CV1 |
 | T_CV3 | OPEN | LOW | Partial GPU expert offload — after T_CV2 |
-| T2.4 | INCONCLUSIVE | — | AWQ TP=1: run 4 correct (~4.25/5), other runs have errors. Root cause TBD. |
-| T2.4c | INCONCLUSIVE | — | NVFP4 TP=2: full run ~3.94/5 (th02 semantic error). PASS was premature (2/8 tasks). |
+| T2.4b | SKIPPED | — | Qwopus SFT — dep condition met (T2.4d quality ≥ 4.0, th02/th05 pass) |
+| T2.4 | DONE (settled by T2.4d) | — | AWQ TP=1: reproducible correct at 4.875/5. |
+| T2.4c | INCONCLUSIVE | — | NVFP4 TP=2: full run ~3.94/5 (th02 semantic error). |
 | T2.3b | DONE | — | Gemma4-31B as thinker — REJECTED; redirected to T2.3c |
 | T1.5 Phase B | DEFERRED | — | kvcached blocked (GDN/DeltaNet unsupported) |
 
