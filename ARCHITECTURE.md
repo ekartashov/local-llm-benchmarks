@@ -1,11 +1,9 @@
-<!-- last_updated: 2026-04-25 R19 — Convergence CPU-only, Singularity tier added, Thinker → Qwen3.6-27B -->
+<!-- last_updated: 2026-04-25 R19 — Core retired; Extended Arclight = escalation; CPU-only Convergence; parallelism & big-context sections added -->
 # ARCHITECTURE.md
 
 Working architectural source of truth.
 
-> **Status (R12, 2026-04-20):** Three-tier architecture confirmed. Tier naming settled.
-> Arclight (hot pair) confirmed T1.1–T1.3. Core (behemoth) confirmed T1.3.
-> Convergence (king-behemoth) deployed and measured — 13.15 t/s gen, 158 t/s PP at 2k batch.
+> **Status (R19, 2026-04-25):** Core tier **RETIRED** — escalation now via Extended Arclight (one Arclight sleeps, survivor goes TP=2). Arclight hot pair confirmed (coder TP=1 GPU0 + thinker TP=1 GPU1). Convergence CPU-only confirmed. Thinker TP=2 gated on T_KV3.
 
 ---
 
@@ -14,9 +12,11 @@ Working architectural source of truth.
 | Tier | Name | Theme |
 |------|------|-------|
 | Coder + Thinker (always hot) | **Arclight** | Steins;Gate operation — fast, electric, concurrent |
-| 80B behemoth (asleep in vLLM) | **Core** | Undertale Core — powerful, invoked on escalation |
+| Arclight ×1 TP=2 (escalation mode) | **Extended Arclight** | One half sleeps; the survivor spans both GPUs |
 | 397B king-behemoth (RAM-resident) | **Convergence** | Deeper than the Core — ephemeral, anomalous, omnipotent |
 | 397B ultra-behemoth (system-exclusive) | **Singularity** | The end of the world — total system commitment |
+
+> **Core tier RETIRED (2026-04-25):** The separate 80B Core model is suspended. Extended Arclight fills the escalation role with zero additional memory overhead. See DECISIONS.md.
 
 ---
 
@@ -37,20 +37,10 @@ Working architectural source of truth.
 │  │  │ port 30000      │    │       │  │ port 30001      │    │       │
 │  │  │ AWAKE           │    │       │  │ AWAKE           │    │       │
 │  │  │ ~23GB VRAM      │    │       │  │ ~21GB VRAM      │    │       │
-│  │  └────────────┬────┘    │       │  └────────────┬────┘    │       │
-│  │               │ sleep   │       │               │ sleep   │       │
-│  │  ┌────────────▼────┐    │       │  ┌────────────▼────┐    │       │
-│  │  │ vLLM: CORE      │    │       │  │ vLLM: CORE      │    │       │
-│  │  │ Qwen3-Next-80B  │    │       │  │ (TP=2 spans     │    │       │
-│  │  │ AWQ TP=2 ════════════╪═══════╪══╡  both GPUs)     │    │       │
-│  │  │ port 30002      │    │       │  │ port 30002      │    │       │
-│  │  │ ASLEEP L1       │    │       │  │ ASLEEP L1       │    │       │
-│  │  │ ~20GB/GPU VRAM  │    │       │  │ ~20GB/GPU VRAM  │    │       │
 │  │  └─────────────────┘    │       │  └─────────────────┘    │       │
 │  │                         │       │                         │       │
-│  │      IDLE VRAM          │       │      IDLE VRAM          │       │
-│  │      (during            │       │      (during            │       │
-│  │   CONVERGENCE ops)      │       │   CONVERGENCE ops)      │       │
+│  │  ~9GB free (KV cache)   │       │  ~11GB free (KV cache)  │       │
+│  │  (hot pair mode)        │       │  (hot pair mode)        │       │
 │  └─────────────────────────┘       └─────────────────────────┘       │
 │                                                                      │
 │  ┌───────────────────────────────────────────────────────────┐       │
@@ -68,94 +58,151 @@ Working architectural source of truth.
 │  │  ik_llama.cpp: CONVERGENCE                                │       │
 │  │  Qwen3.5-397B-A17B UD-IQ2_M                               │       │
 │  │  port 8002                                                │       │
-│  │  CPU-ONLY (ngl=0)                                         │       │
+│  │  CPU-ONLY (ngl=0)  ·  parallel: -np N                     │       │
 │  └───────────────────────────────────────────────────────────┘       │
 │                                                                      │
 │  OpenCode v1.3+ — native multi-endpoint subagent routing             │
 │  Arclight:     port 30000 (coder) + 30001 (thinker)                  │
-│  Core:         port 30002                                            │
 │  Convergence:  port 8002                                             │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Three-tier design rationale
+## Design rationale
 
 ### Arclight — concurrent hot pair, TP=1-per-GPU
 
 Coder (GPU0) and Thinker (GPU1) run as completely isolated vLLM processes. Physical GPU isolation eliminates CUDA context time-slicing — the mechanism that collapsed concurrent throughput to ~2% in T1.2. Each model gets full GPU memory bandwidth.
 
-Coder at TP=1 on single 5090 is actually *faster* (237 t/s) than at TP=2 (212 t/s) — allreduce overhead removed. Thinker drops from ~106 t/s to ~76 t/s but this is acceptable; the thinker is not the latency-critical path.
+**V1 engine disabled by default** (`VLLM_V1_ENABLED=0` in deploy.sh): V1 was degrading coder TP=1 to ~18 t/s (engine bug, not a TP limitation). With V1 disabled, TP=1 is expected to recover ~237 t/s. Current production config is TP=2 at 232 t/s (confirmed via manual T6.1 run). TP=1 with V1 disabled is untested post-fix — T6.1 rerun will confirm which is optimal. TP=2 remains the hot pair config until that rerun.
+
+**Thinker: TP=1 only.** TP=2 confirmed broken for GDN architecture (T2.4g). Do not change until T_KV3 resolves.
+
+**Concurrent throughput:** vLLM `--max-num-seqs N` controls simultaneous requests per instance. At N=4, aggregate TPS is 2–3× single-seq TPS for small active-param MoE models. Current thinker is seq=1 (CUDA graph stability constraint on single GPU). Sweep target: T_PAR1.
 
 OpenCode spawns both simultaneously. Parallel subagent calls to coder and thinker execute concurrently.
 
-### Core — TP=2 asleep, wakes to full 64GB
+### Extended Arclight — TP=2 escalation (replaces Core)
 
-Waking Core requires sleeping both Arclight models (to free GPU VRAM). The sleep + wake cycle takes ~15-25s end-to-end. Invoked when both hot models fail to solve a problem, or when an explicit `@core` escalation is requested.
+When a single model needs more VRAM (large KV cache / long context) or higher per-session quality:
 
-Core runs at TP=2 with `--gpu-memory-utilization 0.95` and `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`. After Core session, sleep Core and wake both Arclight models.
+1. Sleep one Arclight model at level=1 (frees ~21–23GB on that GPU)
+2. Restart the other model with `--tensor-parallel-size 2`
 
-### Convergence — ik_llama.cpp, RAM-resident, separate process
+The surviving model now spans both GPUs. VRAM available for KV: 64GB total minus model weights minus sleeping model's ~4GB residual.
 
-Convergence is architecturally independent from the vLLM tier. It runs as a native ik_llama.cpp process and communicates via an OpenAI-compatible HTTP API on port 8002. It does not interact with vLLM's sleep mechanism in production because it is **CPU-only (-ngl 0)**.
+**Coder Extended mode** (tested, 232 t/s at TP=2 confirmed):
+- Sleep thinker → restart coder TP=2
+- KV budget: ~37GB at fp8 → ~60–75K tokens context
 
-The split: In production, **all layers reside in DDR5 RAM**. This eliminates VRAM contention with Arclight, allowing Convergence to stay resident without requiring Arclight to sleep.
+**Thinker Extended mode** (GATED on T_KV3):
+- Thinker TP=2 is broken for GDN (T2.4g SETTLED). Cannot use until T_KV3 confirms a fix or a replacement thinker that supports TP=2.
 
-**Why CPU-only:** with Arclight filling both GPUs (~23GB GPU0 + ~21GB GPU1), Convergence cannot use GPU without VRAM conflict. CPU-only means it runs truly in parallel, always-on, zero GPU contention.
+**Mode switch time:** ~15–25s cold. With CUDA checkpoint/restore (T_KV2, HIGH PRIORITY), this drops to ~5s — restoring a pre-warmed CUDA process snapshot instead of recompiling graphs. NVIDIA `cuda-checkpoint` confirmed on driver 570+ (our RTX 5090 baseline). TP=2 multi-GPU + rootless Podman untested: see T_KV2.
+
+### Convergence — ik_llama.cpp, RAM-resident, CPU-only
+
+Architecturally independent from the vLLM tier. Runs as a native ik_llama.cpp process on port 8002. CPU-only (ngl=0) — all layers in DDR5 RAM. No VRAM contention with Arclight; runs in parallel, always-on.
+
+**Parallel request handling:** ik_llama.cpp `-np N` enables N concurrent decode sequences. At 13 t/s single-seq (IQ2_M baseline with ngl=999; ngl=0 baseline TBD via T_CV1/T_CV2), `-np 4` yields 2–3× aggregate TPS. Essential for agentic runs where multiple subagents query Convergence simultaneously. See T_PAR1.
+
+**Context ceiling:** `-c` sets max context, bounded by RAM. With ~65GB free above model weights at ngl=0:
+- IQ2_M per-token KV (GDN hybrid, ~25% full-attention layers): estimated ~0.3–0.5 MB/token
+- Theoretical ceiling: ~130–200K tokens
+- Current deployment: `-c 16384` (conservative baseline)
+- T_CV1 context sweep will establish the practical ceiling
 
 **Two deployment modes:**
-1. **Always-resident:** Start at boot, stay running. Warmest possible response. Uses ~123GB RAM constantly but we have 192GB so this is fine when Arclight is not sleeping.
-2. **Cold-start on demand:** Start when requested, kill after session. Free the 123GB RAM for other uses. Cold start: 60-120s from NVMe (measuring needed, T_CV1). With `--no-mmap` the model loads fully before serving.
+1. **Always-resident:** Start at boot. ~123GB RAM constant. Recommended.
+2. **Cold-start on demand:** Start when requested. Cold start time: measuring via T_CV1.
 
-With Arclight active, RAM budget with Convergence resident:
+RAM budget with Convergence + Arclight:
 ```
 Convergence:           123 GB (pinned, --no-mmap)
-Arclight weights:       44 GB (resident in VRAM)
+Arclight weights:       44 GB (resident in VRAM — not RAM)
 OS + CUDA + headroom:  ~4 GB
-Total:                ~171 GB of 192 GB (89%)
+Total in-use:         ~171 GB of 192 GB (89%)
 ```
 
-This is comfortable. Always-resident is the recommended mode.
+**Better quant path:** Core (80B) retirement frees ~44GB RAM that was previously reserved for Core sleep weights. With that freed, Q3_K_M (~140GB) fits cleanly alongside Arclight — meaningful quality improvement over IQ2_M for a 397B model.
 
 ### Singularity — system-exclusive ultra-behemoth
 
-The 4th and final tier. Takes ALL system resources — stops Arclight + Core + Convergence.
-- **Model:** Qwen3.5-397B at Q3_K_M or Q4_K_M (~140-180GB)
+Takes ALL system resources — stops Arclight + Convergence.
+- **Model:** Qwen3.5-397B at Q3_K_M or Q4_K_M (~140–180GB)
 - **Engine:** ik_llama.cpp (same binary, different quant)
-- **Placement:** Full GPU offload for attention/norm/embed; MoE experts in RAM.
-- **Startup:** ik_llama.cpp ~70s warm cache, ~30s with all RAM free.
-- **Recovery:** After session, restart Convergence, then Arclight, then Core (~300-400s total for vLLM).
+- **Placement:** Full GPU offload for attention/norm/embed; MoE experts in RAM
+- **Startup:** ~70s warm cache
+- **Recovery:** Restart Convergence then Arclight (~60–90s; no Core to restart)
 
 ---
 
-## Process startup and swap sequences
+## Big context modes
 
-### Normal operation (Arclight active)
+| Mode | Who sleeps | Active model | VRAM for KV | Approx max context |
+|------|------------|--------------|-------------|-------------------|
+| Hot pair (normal) | nobody | coder TP=1 + thinker TP=1 | ~9GB + ~11GB | ~32K each |
+| Extended coder | thinker | coder TP=2 | ~37GB at fp8 | ~60–75K |
+| Extended thinker | coder | thinker TP=2 | ~37GB at fp8 | ~150K* |
+| Convergence | nobody | 397B CPU-only | RAM KV | ~130–200K** |
+| Singularity | everyone | 397B high-quant | GPU attention | 32K–128K |
+
+\* Extended thinker GATED on T_KV3 — TP=2 broken for GDN until resolved.
+\*\* Convergence context ceiling untested — T_CV1 context sweep pending.
+
+**CPU KV overflow (`--swap-space N`):** KV blocks spill to DRAM when GPU KV is full. Useful for prefill-heavy flows (ingest large doc, generate short answer). Generation TPS penalty proportional to spill fraction.
+
+---
+
+## Parallelism summary
+
+| Tier | Mechanism | Single-seq TPS | Lever | Expected aggregate |
+|------|-----------|---------------|-------|-------------------|
+| Arclight coder | vLLM `--max-num-seqs` | 232 t/s (TP=2) | N=4 | ~500–700 t/s |
+| Arclight thinker | vLLM `--max-num-seqs` | 77 t/s | N=4 | ~150–230 t/s |
+| Convergence | ik_llama.cpp `-np` | ~13 t/s (ngl=999 baseline; ngl=0 TBD) | N=4 | ~25–40 t/s |
+| Singularity | ik_llama.cpp `-np` | TBD | N=2 | TBD |
+
+See T_PAR1 for the measurement procedure.
+
+---
+
+## Process sequences
+
+### Normal operation (Arclight hot pair)
 ```
-vllm serve qwen3.6-35b   --port 30000 --gpu 0      [running]
-vllm serve qwen3.5-27b   --port 30001 --gpu 1      [running]
-vllm serve qwen3-next-80b --port 30002 --tp 2      [sleeping L1]
-ik_llama-server 397b      --port 8002              [running or cold]
+vllm serve qwen3.6-35b   --port 30000 --gpu 0 --tp 1    [running]
+vllm serve qwen3.6-27b   --port 30001 --gpu 1 --tp 1    [running]
+ik_llama-server 397b     --port 8002                    [running or cold]
 ```
 
-### Escalate to Core
+### Extended Arclight — coder big-context mode
 ```bash
-curl -X POST http://localhost:30000/sleep?level=1   # ~4s
-curl -X POST http://localhost:30001/sleep?level=1   # ~4s (parallel ok)
-curl -X POST http://localhost:30002/wake_up          # ~3-6s
-# use Core on port 30002
-curl -X POST http://localhost:30002/sleep?level=1   # ~4s after done
-curl -X POST http://localhost:30000/wake_up          # ~1s (weights in RAM)
-curl -X POST http://localhost:30001/wake_up          # ~1s (weights in RAM)
+# Sleep thinker
+curl -X POST http://localhost:30001/sleep?level=1           # ~4s
+
+# Restart coder at TP=2 (hot-restart with CUDA checkpoint ~5s; cold ~170–300s)
+podman stop arclight-thinker
+VLLM_V1_ENABLED=0 VLLM_USE_V1=0 \
+./infra/scripts/deploy.sh vllm tp2a cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
+    --gpu-mem-util 0.90 --ctx 65536 \
+    --tool-call-parser qwen3_coder --reasoning-parser qwen3
+
+# Use coder on port 30000 with ~60–75K context
+
+# Restore hot pair
+podman stop arclight-coder-tp2
+./infra/scripts/deploy.sh vllm gpu0 cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit [normal flags]
+./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ [normal flags]
+curl -X POST http://localhost:30001/wake_up
 ```
-Total round-trip: ~15-25s.
+Total round-trip: ~15–25s cold; ~5s with CUDA checkpoint (T_KV2).
 
 ### Escalate to Convergence
-Convergence is always-resident on port 8002. No swap required — just route the request there.
+Always-resident on port 8002. No swap required.
 If starting from cold:
 ```bash
-# Using the deployment script
 ./infra/scripts/deploy.sh ikllamacpp convergence
 ```
 
@@ -172,30 +219,31 @@ If starting from cold:
 |------|------|-------|--------|------|------|-----|
 | Arclight coder | arclight-coder | cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit | vLLM TP=1 GPU0 | 30000 | ~23GB | 0 |
 | Arclight thinker | arclight-thinker | QuantTrio/Qwen3.6-27B-AWQ | vLLM TP=1 GPU1 | 30001 | ~21GB | 0 |
-| Core | core | cyankiwi/Qwen3-Next-80B-A3B-AWQ | vLLM TP=2 | 30002 | ~40GB | ~40GB (L1) |
+| Ext. Arclight coder | — (on-demand) | same as coder | vLLM TP=2 GPU0+1 | 30000 | ~23GB split | 0 |
 | Convergence | convergence | unsloth/Qwen3.5-397B UD-IQ2_M | ik_llama.cpp | 8002 | 0 | ~123GB |
 | Singularity | singularity | Qwen3.5-397B Q4_K_M | ik_llama.cpp | 8003 | ~30GB | ~180GB |
+| ~~Core (RETIRED)~~ | — | ~~Qwen3-Next-80B-A3B-AWQ~~ | suspended | — | — | — |
 
 ---
 
 ## Engine binaries and paths
 
-### vLLM (Arclight + Core)
+### vLLM (Arclight)
 - Container image: rootless podman via `infra/compose/`
 - Version: vLLM 0.19.x
 - Deploy: `infra/scripts/deploy.sh`
+- V1 engine: **disabled by default** (`VLLM_V1_ENABLED=0`) — stability fix for Blackwell
 
 ### ik_llama.cpp (Convergence)
 - Repository: `/srv/ai/projects/ik_llama.cpp`
 - Branch: `pr-1288` (Qwen3.5 MoE support)
 - Binary: `/srv/ai/projects/ik_llama.cpp/build/bin/llama-server`
 - Benchmark binary: `/srv/ai/projects/ik_llama.cpp/build/bin/llama-bench`
-- Benchmark script: `/srv/ai/projects/local-llm-benchmarks/benchmarks/bench_convergence.sh`
 
 **To rebuild ik_llama.cpp after pulling new changes to pr-1288:**
 ```bash
 cd /srv/ai/projects/ik_llama.cpp
-git pull origin pull/1288/head   # or git fetch + checkout pr-1288
+git pull origin pull/1288/head
 cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release -j$(nproc)
 ```
@@ -211,15 +259,20 @@ cmake --build build --config Release -j$(nproc)
 ## Known unknowns (feed into `TESTING_QUEUE.md`)
 
 1. ~~**Sleep Mode works under rootless podman.**~~ **SETTLED — T1.1 PASS.**
-2. ~~**Qwen3-Coder-Next-80B-A3B-AWQ TP=2 decode speed.**~~ **SETTLED — T1.3 PASS.**
+2. ~~**Qwen3-Coder-Next-80B-A3B-AWQ TP=2 decode speed.**~~ **SETTLED — T1.3 PASS. (Core tier retired.)**
 3. ~~**GLM-4.7-Flash MLA auto-detection.**~~ **SETTLED — T2.1 INCONCLUSIVE (MLA active / V1 tool-broken).**
 4. **CPU prefix cache survival across sleep/wake.** T3.4.
-5. **Convergence startup time.** Cold-start from NVMe with `--no-mmap`: expected 60-120s but not measured. T_CV1.
-6. **Convergence thread count optimal value.** Baseline at 32 threads; 16 or 24 may be better for small expert matrices. T_CV2.
-7. **Convergence partial GPU expert offload.** GPU barely used (~10GB of 64GB available). Offloading first N layers' expert weights to GPU could improve generation speed. T_CV3.
-8. ~~**Gemma4-31B as Arclight thinker.**~~ **SETTLED (T2.3b, 2026-04-24): REJECTED as thinker.** Redirected to coder candidate T2.3c.
-9. ~~**Gemma4-31B as Arclight coder.**~~ **SKIPPED (2026-04-25): Benchmark evidence shows Qwen3.6-35B-A3B clearly superior.** T2.3c.
-10. **kvcached Phase B with non-Mamba thinker.** T1.5 re-run after kvcached-compatible thinker is settled.
+5. **Convergence startup time + context sweep.** T_CV1 (amended — add context sweep).
+6. **Convergence thread count optimal value.** T_CV2.
+7. **Convergence partial GPU expert offload.** T_CV3.
+8. ~~**Gemma4-31B as Arclight thinker.**~~ **SETTLED (T2.3b, 2026-04-24): REJECTED.**
+9. ~~**Gemma4-31B as Arclight coder.**~~ **SKIPPED (2026-04-25): Qwen3.6-35B-A3B clearly superior.**
+10. ~~**kvcached Phase B with non-Mamba thinker.**~~ **CLOSED: GDN (Qwen3.6-27B) not supported by kvcached (DeltaNetSpec missing, no upstream timeline). Static `--max-model-len` asymmetry is the available lever for per-model context budgets.**
+11. **Coder big-context mode: max usable context with thinker sleeping.** T_KV1.
+12. **CUDA checkpoint/restore for TP=2 hot-restart** (HIGH PRIORITY). T_KV2.
+13. **Thinker TP=2 fix or alternative model — GATE for finalized no-Core architecture.** T_KV3.
+14. **Parallel throughput sweep (--max-num-seqs for vLLM, -np for ik_llama.cpp).** T_PAR1.
+15. **Arclight coder TP=1 with V1 disabled: confirm ~237 t/s recovery.** Needed via T6.1 rerun.
 
 ## How to change this document
 

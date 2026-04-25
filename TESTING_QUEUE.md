@@ -482,30 +482,40 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 ### T_CV1 — convergence_startup_timing — OPEN
 
-**Question:** How long does Convergence (Qwen3.5-397B UD-IQ2_M, ik_llama.cpp pr-1288, `--no-mmap`) take to become ready from cold start (NVMe → RAM → GPU)?
+**Question:** How long does Convergence take to become ready from cold start? Also: what is the practical context ceiling (max `-c` before RAM pressure causes OOM or TPS collapse)?
 
-**Why this matters:** determines whether always-resident is mandatory or whether cold-start on demand is acceptable for a "pull it when needed" use pattern.
+**Why this matters:** startup time determines always-resident vs on-demand policy; context ceiling determines the maximum query length Convergence can serve before Singularity is required.
 
 **Procedure:**
+
+*Part A — Startup timing (3 cold reps + 1 warm):*
 1. Ensure Convergence is not running.
-2. Drop page cache to simulate true cold: `sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'` (optional — warm cache is also useful to measure separately).
-3. Record `date +%s%3N`.
-4. Start server with exact production command (see `ARCHITECTURE.md`).
-5. Poll `http://localhost:8002/health` every 500ms.
-6. Record timestamp when first 200 response received.
-7. Compute startup_ms. Repeat 3× and take median.
-8. Also measure: warm-cache cold start (without dropping caches).
+2. Drop page cache: `sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'`.
+3. Record `date +%s%3N`. Start server with production flags (ngl=0, --no-mmap, -t $(nproc), -c 16384).
+4. Poll `http://localhost:8002/health` every 500ms. Record timestamp on first 200 OK.
+5. Stop server. Repeat steps 2–4 three times. Compute median cold-start time.
+6. Run one warm-cache startup (no cache drop after the last cold rep). Record warm time.
 
-**Pass:** baseline number captured, no threshold.
+*Part B — TPS baseline (ngl=0):*
+7. Run `llama-bench` at ngl=0, -t $(nproc), -p 512, -n 128, -r 3. Record tg128 and pp512. This is the T_CV2 bootstrap baseline.
 
-**What the number means:**
-- < 30s: cold-start on demand is acceptable
-- 30s–90s: tolerable for explicit "invoke Convergence" escalation flow, not for transparent routing
-- > 90s: always-resident is strongly preferred
+*Part C — Context ceiling sweep:*
+8. For each `-c` in [16384, 32768, 65536, 131072]:
+   - Start server with that `-c` value.
+   - Send a prompt at ~80% of that context length. Record TTFT and TPS.
+   - Monitor RAM via `free -h` — stop if free RAM drops below 8GB.
+9. Record the last `-c` that completed without OOM or >50% TPS degradation vs `-c 16384`.
+
+**Pass:** startup time and context ceiling captured; no thresholds — these are measurements.
+
+**What the startup time means:**
+- < 30s: cold-start on demand acceptable
+- 30–90s: tolerable for explicit escalation, not transparent routing
+- > 90s: always-resident strongly preferred
 
 **Deps:** none.
 
-**Hand-back trigger:** server crashes during load (indicates Qwen3.5 GDN support issue in pr-1288 — check for model architecture errors in log).
+**Hand-back trigger:** server crashes during load (GDN support issue in pr-1288 — check architecture errors in log); or context sweep reveals unexpected OOM pattern.
 
 ---
 
@@ -564,6 +574,120 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 **Deps:** T_CV2 (establish thread count baseline first).
 
 **Hand-back trigger:** unexpected crash or architecture error — possible that ik_llama.cpp pr-1288 has issues with mixed CPU/GPU expert placement on Qwen3.5 specifically.
+
+---
+
+### T_KV1 — coder_big_context_mode — OPEN
+
+**Question:** What is the maximum usable context for the coder when running TP=2 (thinker sleeping), and what is the throughput/latency profile at that context?
+
+**Context:** With thinker sleeping (level=1, ~4GB GPU1 residual) and coder restarted as TP=2, combined VRAM is ~60GB. At fp8 KV, estimated KV budget is ~37GB → ~60–75K tokens. Verify the estimate and characterize quality at extended context.
+
+**Procedure:**
+1. Sleep thinker at level=1.
+2. Restart coder with `--tensor-parallel-size 2 --kv-cache-dtype fp8 --gpu-memory-utilization 0.90 --max-model-len 65536`.
+3. Confirm startup and report VRAM split via `nvidia-smi`.
+4. Send prompts of increasing length (8K, 16K, 32K, 65K tokens). Record TTFT and TPS at each.
+5. Test `--swap-space 32` (32GB CPU KV overflow) with `--max-model-len 131072` — measure TTFT degradation at 100K+ token prompts.
+6. Report: max context without swap, max context with swap at acceptable TTFT (<60s).
+
+**Pass:** confirmed max context without swap ≥ 60K tokens; TPS at extended context within 20% of 32K baseline.
+
+**What failure means:** KV budget estimate was wrong (VRAM footprint higher than expected) → recompute with actual `nvidia-smi` numbers and re-record in DECISIONS.md.
+
+**Deps:** T1.1 (sleep mode working — DONE).
+
+**Hand-back trigger:** coder TP=2 startup fails (unexpected — report engine version + CUDA error).
+
+---
+
+### T_KV2 — cuda_checkpoint_tp2_hot_restart — OPEN (HIGH PRIORITY)
+
+**Question:** Does NVIDIA `cuda-checkpoint` + CRIU work for a TP=2 vLLM process in rootless Podman on our hardware? What is the restore time vs cold start?
+
+**Why high priority:** unlocks ~5s mode switches for Extended Arclight (vs 170–300s cold), making the escalation pattern viable for interactive sessions.
+
+**Prerequisites:**
+- CUDA driver 570+ confirmed (RTX 5090 baseline)
+- Install `cuda-checkpoint` CLI: `github.com/NVIDIA/cuda-checkpoint`
+- CRIU installed on host: `apt install criu` (or equivalent)
+
+**Procedure:**
+1. Boot coder TP=2 (pay full cold start, ~170–300s). Verify ready on port 30000.
+2. Record cold start time as baseline.
+3. Take snapshot: `cuda-checkpoint --pid $(pgrep -f "vllm") --action dump --dir /srv/ai/checkpoints/coder-tp2/`
+4. Kill the vLLM process.
+5. Restore: `cuda-checkpoint --action restore --dir /srv/ai/checkpoints/coder-tp2/`
+6. Record restore time. Verify coder responds correctly (run one inference).
+7. Repeat restore 3× — confirm consistency.
+
+**Pass:** restore time < 30s (10× improvement over cold); inference output matches pre-snapshot behavior.
+
+**What failure means:**
+- CRIU fails in rootless Podman → investigate `--unprivileged` CRIU flags or run outside container for this test.
+- Multi-GPU (two CUDA contexts) checkpoint fails → report error; fall back to torch.compile disk cache only (~80s warm start).
+- Restore succeeds but outputs are wrong → do not use; report to vLLM issue tracker.
+
+**Deps:** T_KV1 (have a warm TP=2 process to snapshot).
+
+**Hand-back trigger:** CRIU or CUDA checkpoint errors not in known docs — research before retrying.
+
+---
+
+### T_KV3 — thinker_tp2_fix_or_replacement — OPEN (GATE for no-Core final decision)
+
+**Question:** Can the thinker run at TP=2 correctly? If not, is there an alternative thinker model that supports TP=2 without GDN state-split errors?
+
+**Why this is a gate:** The "no Core" architecture is provisional. Extended Arclight (thinker TP=2) is the only path to long-context thinker escalation. If TP=2 remains broken for GDN indefinitely, we need a replacement thinker that doesn't have this constraint — or accept that only coder gets Extended mode.
+
+**Two sub-questions to resolve in order:**
+
+**Sub-Q1 — vLLM version fix:** Does current vLLM 0.19+ (with V1 disabled) still reproduce the T2.4g TP=2 quality failure for Qwen3.6-27B?
+- T2.4g was run with V1 engine state unknown. V1 disabling may have changed behavior.
+- Re-run T2.4g exact procedure (th02 × 3 reps, TP=2 + cp-ON) with current deploy.sh (V1 disabled).
+- If now CORRECT: TP=2 thinker works, Extended thinker mode is unblocked. Update DECISIONS.md.
+- If still INCORRECT: proceed to Sub-Q2.
+
+**Sub-Q2 — alternative thinker:** Research and test a thinker model that:
+- Is not GDN-hybrid (pure Transformer or MLA) — TP=2 shard is mathematically safe
+- Has quality ≥ Qwen3.6-27B (4.875/5) on the 8-task thinker suite
+- Fits within ~21GB AWQ at TP=1 for normal hot-pair mode
+- Candidates to evaluate: strong reasoning models released 2025–2026 with pure Transformer or MLA architecture; community distills of top-tier proprietary models (o1, Claude-3.5-Sonnet style SFT on open base); small-company / individual researcher fine-tunes with documented tool-calling benchmarks
+
+**Deps:** T_KV2 (have checkpoint infrastructure before committing to thinker TP=2 operational use).
+
+**Hand-back trigger:** Any Sub-Q2 candidate research — return to research mode to identify and vet models before running tests.
+
+---
+
+### T_PAR1 — parallel_throughput_sweep — OPEN
+
+**Question:** What is the optimal `--max-num-seqs` for each Arclight model and `-np` for Convergence to maximize aggregate TPS for agentic multi-subagent workloads?
+
+**Context:** OpenCode v1.3+ routes multiple subagents concurrently. Coder and thinker may receive parallel requests. Convergence may receive batch queries during autonomous research runs. Current config (`--max-num-seqs 1` for thinker) is conservative. A3B MoE models have low active-param count, so concurrent requests should batch efficiently.
+
+**Procedure:**
+
+*Part A — vLLM Arclight (run for both coder and thinker separately):*
+1. For each `--max-num-seqs` in [1, 2, 4, 8]:
+   - Send N concurrent requests simultaneously (matching max-num-seqs value)
+   - Record: per-request TTFT, per-request TPS, aggregate TPS, per-request latency
+2. Find the knee: point where aggregate TPS gain per additional seq drops below 20%.
+3. Note: thinker at seq > 1 may require `--enforce-eager` or larger `--gpu-memory-utilization` to maintain CUDA graphs — verify.
+
+*Part B — ik_llama.cpp Convergence:*
+1. For each `-np` in [1, 2, 4]:
+   - Send N concurrent requests
+   - Record: per-request TPS, aggregate TPS, RAM bandwidth (via `perf stat` or `turbostat`)
+2. Note: `-np` increases memory pressure. Watch for OOM at `-np 4` with context > 16K.
+
+**Pass:** optimal N identified for each tier. Even if N=1 is optimal everywhere, that's a valid result.
+
+**What failure means:** aggregate TPS does not improve with N → memory bandwidth is the bottleneck even for batched requests; keep N=1 for predictable per-request latency.
+
+**Deps:** T_CV2 (Convergence thread baseline before adding concurrency).
+
+**Hand-back trigger:** none expected — this is a parameter sweep.
 
 ---
 
@@ -932,11 +1056,15 @@ Pattern: **Gemma ties on pure coding (LiveCodeBench) but Qwen dominates on agent
 
 The current task suites are coding-heavy. Infra workload coverage is thin. These items author new tasks and re-score models on the expanded suite.
 
-### T6.1 — infra_shell_and_container_tasks
+### T6.1 — infra_shell_and_container_tasks — RERUN NEEDED
 
-Author ~5–10 tasks covering: Containerfile debugging, systemd unit troubleshooting, compose-file authoring, shell script idempotency, network tuning (sysctl/ethtool/tc).
+Tasks authored (in01–in05): Containerfile debugging, systemd unit troubleshooting, compose authoring, shell idempotency, network tuning. Script at `benchmarks/queue/T6.1_infra_task_suite.sh`.
 
-**Deliverable:** `benchmarks/infra_tasks/tasks/*.json` + grading rubric.
+**Manual run (2026-04-25):** 232 t/s TPS, 100% task completion, confirmed via operator-run session. Results recorded in `config/models.yaml`.
+
+**Rerun required:** The manual run was with uncertain V1 engine state. Now that V1 is disabled by default in `deploy.sh`, rerun the full T6.1 script to get a clean automated baseline. Also needed: confirm whether coder TP=1 (with V1 disabled) recovers ~237 t/s — run T6.1 with TP=1 alongside TP=2 to settle the production config.
+
+**Deliverable:** `results/T6.1_infra_task_suite_*/metrics.json` with V1-disabled config recorded explicitly.
 
 ### T6.2 — cross_arch_tasks
 

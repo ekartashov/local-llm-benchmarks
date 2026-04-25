@@ -18,7 +18,7 @@ Three-tier architecture has permanent names. Use these in all docs, config, and 
 | Old name | New name | Theme | Character |
 |----------|----------|-------|-----------|
 | Coder + Thinker (hot pair) | **Arclight** | Steins;Gate operation — fast, electric, concurrent | Always-on pair, energetic |
-| Behemoth (80B asleep) | **Core** | Undertale core — slower but powerful, underground | Invoked on escalation |
+| ~~Behemoth (80B asleep)~~ | ~~**Core**~~ | ~~Undertale core~~ | **RETIRED** — role filled by Extended Arclight |
 | King-behemoth (397B in RAM) | **Convergence** | Deeper than the Core — ephemeral, anomalous, omnipotent | Pulled rarely, profound |
 | Ultra-behemoth (system-exclusive) | **Singularity** | The end of the world — total system commitment | Absolute last resort |
 
@@ -92,6 +92,36 @@ find src/ -name "*.cpp" -o -name "*.h" | xargs grep -l "qwen35\|ssm_alpha\|delta
 **Model path:** 4 split files must all be in the same directory. Reference only `00001-of-00004.gguf`; loader finds the rest automatically.
 
 **RAM prerequisite:** sleep both Arclight vLLM processes at level=1 before starting Convergence to free VRAM (though not strictly required for RAM since model is CPU-side) and to free up GPU for the attention layers.
+
+### Core tier RETIRED — Extended Arclight is the escalation path
+**SETTLED (2026-04-25, R19).** The separate 80B Core model (Qwen3-Next-80B-A3B) is suspended. The escalation role is filled by sleeping one Arclight model and restarting the other at TP=2. This gives ~60–75K context (coder TP=2, thinker sleeping) with zero additional DRAM overhead vs keeping a sleeping Core at level=1 (~44GB). The 80B model entry in `models.yaml` is moved to SUSPENDED; re-evaluate only if Extended Arclight proves insufficient after T_KV1/T_KV3.
+
+**Consequence:** ~44GB DRAM previously reserved for Core level=1 sleep is now available. Opens a better Convergence quantization path: Q3_K_M (~140GB) fits alongside Arclight without evicting anything.
+
+**Gate:** The "no Core" architecture is provisional until T_KV3 confirms that Extended Arclight can fill the thinker TP=2 escalation path (currently blocked by GDN TP=2 bug). Do not formally close Core until T_KV3 resolves.
+
+### KV cache flexibility — settled, no further testing needed
+**SETTLED (2026-04-25, R19).**
+
+**Static asymmetry (different context per model):** already possible — each vLLM instance is a separate process with independent `--max-model-len` and `--gpu-memory-utilization`. Set them differently to give thinker more or less context than coder. No new tooling needed.
+
+**Dynamic elastic rebalancing (kvcached):** not possible for Qwen3.5/3.6 GDN models. GDN layers use a fixed-size recurrent state matrix (~32KB/head/layer), not paged KV blocks. kvcached virtualizes paged KV blocks only — it cannot virtualize recurrent state. The kvcached roadmap lists "linear attention" support but has no milestone date. GPT-OSS hybrid support (March 2026) was the latest addition; GDN state management requires fundamentally new primitives and is likely 2026 Q3+ at earliest.
+
+**Do not reopen** this question for GDN thinker models until kvcached explicitly adds DeltaNetSpec.
+
+### PCIe fight root cause — settled
+**SETTLED (2026-04-25, R19).** Two simultaneous TP=2 vLLM instances on our hardware saturate the shared PCIe 5.0 x8/x8 bifurcation bus. Each TP=2 decode step requires an allreduce across GPUs — with both instances doing this simultaneously, effective per-instance bandwidth halves. Result: 250+70 t/s → 4+4 t/s observed. TP=1-per-GPU eliminates allreduce entirely and is the only viable concurrent design on this hardware without NVLink. Do not retry two-simultaneous-TP=2 without NVLink.
+
+### CUDA checkpoint/restore — viable mechanism, one test needed (HIGH PRIORITY)
+**PROVISIONAL (2026-04-25, R19).** NVIDIA `cuda-checkpoint` (github.com/NVIDIA/cuda-checkpoint, driver 570+) + CRIU enables full CUDA process snapshots including compiled graphs, loaded weights, and CUDA context. Modal demonstrated 45s → 5s startup for a vLLM instance. Our RTX 5090s require driver 570+ (confirmed for sm_120 Blackwell).
+
+**What this unlocks:** Extended Arclight mode switch from ~170–300s cold to ~5s. Also enables session-start-once for any TP=2 configuration.
+
+**Unknown:** TP=2 multi-GPU with CRIU (two CUDA contexts, more complex), and rootless Podman compatibility with CRIU.
+
+**Action:** T_KV2 — one test to confirm. Promote to SETTLED after T_KV2 PASS. Until then: use "session-start-once" pattern (pay cold start at session begin, keep warm for session duration) and rely on torch.compile disk cache (~70% startup reduction on second+ invocations, `~/.cache/vllm/torch_compile_cache`).
+
+**Re-evaluate after:** T_KV2.
 
 ### vLLM Sleep Mode level=1 ~4 GiB residual is a design floor, not a tunable
 When a vLLM instance sleeps at level=1, it retains ~4 GiB GPU VRAM. This is the caching allocator instance, captured CUDA graphs, JIT-compiled kernels, and process state — deliberately preserved to enable <1s wake. Cannot be shrunk without breaking the wake-time guarantee. Level=2 offloads more but is unusable (gibberish-on-wake, see separate entry).
@@ -238,10 +268,10 @@ Quality 2.6/5 dominated by Qwen3.5-27B 4.0/5 across task categories. Do not purs
 ### Devstral is eliminated
 bf16 OOMs at 30.4 GiB, quality below Qwen3-Coder-30B-AWQ. No path to viability.
 
-### Core model: Qwen3-Coder-Next-80B-A3B-AWQ (cyankiwi)
-SETTLED T1.3 (2026-04-18). 189.5 t/s seq=1 decode, 610 t/s aggregate at seq=4, 13007 t/s prefill@32k. Tool calls 100% reliable with `--tool-call-parser hermes` and **no** `--reasoning-parser`. Requires `--gpu-memory-utilization 0.95` and `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`.
+### Core model: Qwen3-Coder-Next-80B-A3B-AWQ (cyankiwi) — SUSPENDED
+~~SETTLED T1.3 (2026-04-18).~~ **SUSPENDED (2026-04-25, R19)** — Core tier retired; Extended Arclight fills the escalation role. Performance baseline preserved for reference: 189.5 t/s seq=1 decode, 610 t/s aggregate at seq=4, 13007 t/s prefill@32k. Tool calls 100% reliable with `--tool-call-parser hermes` and **no** `--reasoning-parser`.
 
-**Do NOT add `--reasoning-parser qwen3`** to Core — causes hard failure at all parser combinations (reasoning parser intercepts XML-tagged tool calls before tool-call parser sees them).
+**Do not redeploy** unless Extended Arclight proves insufficient after T_KV1/T_KV3.
 
 ### Convergence model: Qwen3.5-397B-A17B UD-IQ2_M vs 122B comparison
 **SETTLED (R12, 2026-04-20).** 397B@UD-IQ2_M is preferred over 122B@Q4 despite lower bits-per-weight. Both quantize cleanly on the Qwen3.5 architecture. The TAU2 gap (+14.7 points: 86.7 vs ~72) represents genuine behavioral differences in multi-step agentic orchestration and long-horizon reasoning — the exact capability Convergence is invoked for. Since UD-IQ2_M on 397B is within BF16 margin of error, this is effectively 397B@BF16 vs 122B@Q4, and the 397B wins on every reasoning metric that matters for architectural decisions.
@@ -262,8 +292,8 @@ Need ~8× datacenter-class GPUs. Not feasible on 2×5090.
 ### Convergence DDR5 bandwidth is the generation bottleneck
 **SETTLED (R12, 2026-04-20).** Per-token generation reads ~2.3GB of expert weights from DDR5 (10 active experts × 3 matrices × 60 layers × ~1.28MB per matrix at IQ2_M). Actual DDR5 bandwidth is ~83 GB/s (4-DIMM downclocked from theoretical 120 GB/s). Theoretical ceiling: 83/2.3 ≈ 36 t/s. Measured: ~13 t/s. Gap explained by NUMA effects, thread coordination overhead, and expert routing compute. Prompt processing scales much better with batch size because bandwidth is amortized: 158 t/s at 2348-token batch vs 60 t/s at 469-token batch.
 
-### Behemoth (80B A3B MoE) on TP=2 is extremely viable as Core
-Verified in T1.3 (2026-04-18). 189.5 t/s seq=1 decode, 610 t/s at seq=4, 13007 t/s prefill at 32k context. Requires `--gpu-memory-utilization 0.95` and `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`.
+### Behemoth (80B A3B MoE) on TP=2 is extremely viable — but Core tier is now retired
+Verified in T1.3 (2026-04-18). 189.5 t/s seq=1 decode, 610 t/s at seq=4, 13007 t/s prefill at 32k context. Model suspended in favour of Extended Arclight. Performance numbers retained as reference for future re-evaluation.
 
 ### Dense 70B via TP=2 on PCIe x8/x8 no-NVLink → slow
 Community-measured: 20–35 t/s. NCCL sync-point overhead accumulates over many layers at large hidden dims.

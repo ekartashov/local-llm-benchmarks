@@ -31,7 +31,7 @@ TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RESULTS_DIR="${REPO_ROOT}/results/T3.4_prefix_cache_survival_${TIMESTAMP}"
 
 # Using Arclight Coder for the test
-MODEL="QuantTrio/Qwen3.6-27B-AWQ"
+MODEL="cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit"
 PORT=30000
 
 [[ "${DRY_RUN}" -eq 0 ]] && mkdir -p "${RESULTS_DIR}"

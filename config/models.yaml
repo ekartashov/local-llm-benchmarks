@@ -73,21 +73,27 @@ models:
     hf_repo: cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit
     quant: AWQ-INT4
     format: awq
-    vram_gb: 23       # across TP=2 → ~11.5 GiB per card for weights
+    vram_gb: 23
     ctx_default: 32768
     engines: [vllm]
     flags:
-      vllm: "--tensor-parallel-size 2 --gpu-memory-utilization 0.85 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice"
+      # Hot-pair mode (TP=1, concurrent with thinker on GPU1):
+      vllm_tp1: "--tensor-parallel-size 1 --gpu-memory-utilization 0.90 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice"
+      # Extended Arclight mode (TP=2, thinker sleeping, big-context):
+      vllm_tp2: "--tensor-parallel-size 2 --gpu-memory-utilization 0.90 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice"
     placement:
-      tp: 2
-      gpu: "0,1"
+      hot_pair: "tp=1 GPU0"
+      extended: "tp=2 GPU0+1 (thinker sleeping)"
     measured:
-      aggregate_tps: 232.0    # T6.1
-      quality_completion: 1.0 # T6.1
+      tp2_tps: 232.0          # manual T6.1 run 2026-04-25 with V1 disabled
+      tp1_tps: null           # TP=1 with V1 disabled untested — expected ~237 t/s; T6.1 rerun needed
+      quality_completion: 1.0 # manual T6.1 run 2026-04-25
     notes: >
       35B-A3B MoE-hybrid. SETTLED as production coder 2026-04-25.
-      TP=2 is MANDATORY for vLLM 0.19+ V1 engine stability and performance.
-      TP=1 is possible but regresses to <25 tps due to VRAM starvation in V1.
+      V1 engine disabled by default (deploy.sh) — was the cause of TP=1 degradation to ~18 t/s,
+      not a fundamental TP=1 limitation. With V1 disabled, TP=1 is expected to recover ~237 t/s
+      (untested — T6.1 rerun pending). Hot-pair mode uses TP=1 (concurrent with thinker);
+      Extended Arclight uses TP=2 (thinker sleeping, big context). See ARCHITECTURE.md.
 
   # ── SUPERSEDED: old Qwen3.5-35B-A3B (kept as historical record only) ────
   qwen35_35b_a3b_awq:
@@ -307,9 +313,9 @@ models:
   # BEHEMOTH ROLE
   # ============================================================
 
-  # ── CANDIDATE behemoth ─────────────────────────────────────────────────
+  # ── SUSPENDED behemoth — Core tier retired 2026-04-25 ──────────────────
   qwen3_coder_next_awq:
-    status: CANDIDATE
+    status: SUSPENDED    # Core tier retired; Extended Arclight fills escalation role
     role: behemoth
     hf_repo: cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit
     quant: AWQ-INT4
