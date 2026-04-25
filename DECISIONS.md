@@ -20,6 +20,7 @@ Three-tier architecture has permanent names. Use these in all docs, config, and 
 | Coder + Thinker (hot pair) | **Arclight** | Steins;Gate operation — fast, electric, concurrent | Always-on pair, energetic |
 | Behemoth (80B asleep) | **Core** | Undertale core — slower but powerful, underground | Invoked on escalation |
 | King-behemoth (397B in RAM) | **Convergence** | Deeper than the Core — ephemeral, anomalous, omnipotent | Pulled rarely, profound |
+| Ultra-behemoth (system-exclusive) | **Singularity** | The end of the world — total system commitment | Absolute last resort |
 
 ---
 
@@ -43,12 +44,13 @@ Three-tier architecture has permanent names. Use these in all docs, config, and 
 **Contrast:** MiniMax M2.5 quantizes catastrophically at IQ2-IQ4 (community-verified) — do not use MiniMax M2.5 as Convergence. Qwen3.5-397B is one of the best-quantizing models in the current landscape.
 
 ### Convergence performance baseline
-**MEASURED (R12, 2026-04-20).** On ZRH01-AIRIG with vLLM sleeping (level=1):
+**MEASURED (R12, 2026-04-20).** On ZRH01-AIRIG with vLLM sleeping (level=1) and **-ngl 999**:
 - Token generation: **~13.15 t/s** (bottlenecked by DDR5 bandwidth reading MoE expert weights)
 - Prompt eval (469 tokens): **60.66 t/s**
-- Prompt eval (2348 tokens): **158.94 t/s** (larger batches amortize bandwidth over more tokens)
-- GPU VRAM barely consumed — only attention/norm/embedding layers (~8-12GB total across both 5090s)
-- Bottleneck is DDR5 bandwidth (~83 GB/s actual on 4-DIMM downclocked config) vs ~2.3GB RAM read per token for full expert sweep
+- Prompt eval (2348 tokens): **158.94 t/s**
+- GPU VRAM consumed: ~8-12GB total across both 5090s.
+
+**REVISED (2026-04-25):** Production Convergence is now **CPU-only (-ngl 0)** to avoid VRAM conflicts with Arclight. The 13.15 t/s baseline was for -ngl 999. The new -ngl 0 baseline is being established via T_CV1 and T_CV2. Expected speed is slightly lower than 13.15 t/s but allows for parallel always-on deployment.
 
 **Thread count not yet optimized** — baseline at `$(nproc)` = 32. Smaller counts (16, 24) may be better due to MoE expert matrix sizes being too small to exploit 32 threads without cache thrashing. See T_CV2.
 

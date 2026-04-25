@@ -1,0 +1,6 @@
+{
+  "id": "in04_shell_idempotency",
+  "description": "Refactor a shell script to be idempotent and handle errors robustly",
+  "system_prompt": "You are an expert Shell programmer. Refactor the provided script to ensure it is idempotent, robust, and follows best practices (e.g., ShellCheck-clean).",
+  "user_message": "The following script is used to set up a development environment, but it fails if run more than once or if any step fails.\n\n```bash\n#!/bin/bash\nmkdir /opt/myapp\ncd /opt/myapp\ngit clone https://github.com/example/repo.git .\n./install.sh\nln -s /opt/myapp/bin/myapp /usr/local/bin/myapp\n```\n\nRefactor this script to:\n1. Use `set -e` and other safety flags.\n2. Be idempotent: it should be safe to run multiple times without error (e.g., handle existing directories, clones, and symlinks).\n3. Check if `/usr/local/bin` is in the PATH.\n4. Use a temporary directory if the initial setup fails, to avoid leaving a partially configured `/opt/myapp`."
+}

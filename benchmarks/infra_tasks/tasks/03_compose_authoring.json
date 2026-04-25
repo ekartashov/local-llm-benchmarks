@@ -1,0 +1,6 @@
+{
+  "id": "in03_compose_authoring",
+  "description": "Author a docker-compose.yaml for a tiered application with networking and persistence",
+  "system_prompt": "You are a DevOps engineer. Design a robust docker-compose configuration based on the requirements.",
+  "user_message": "Design a `docker-compose.yaml` for the following stack:\n\n1. **Frontend**: Nginx serving static files. Should depend on the backend.\n2. **Backend**: A Node.js API. Needs access to a Redis cache and a PostgreSQL database.\n3. **Database**: PostgreSQL 16. Needs a persistent volume for data.\n4. **Cache**: Redis. \n\nRequirements:\n- The database and cache should NOT be accessible from the host machine directly.\n- The frontend should be accessible on port 8080 on the host.\n- All services should restart automatically unless stopped.\n- Use a custom network for the internal communication.\n- The backend needs to know the database connection string via an environment variable `DB_URL`."
+}

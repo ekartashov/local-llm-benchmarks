@@ -2,8 +2,14 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R18 CLOSED — H-TP2 confirmed by T2.4g. 2×2 factorial complete. TP=2 definitively broken for Qwen3.6-27B GDN.
-**Current mode:** Research — queue cleanup + convergence items (T_CV1–T_CV3) next session.
+**Current cycle:** R19 OPEN — Convergence transitioned to CPU-only (-ngl 0). T_CV2/T_CV3 scripts created.
+- **Singularity tier (4th tier)** introduced to `ARCHITECTURE.md` and `DECISIONS.md`.
+- **T_CV1, T_CV2, T_CV3** benchmark scripts created in `benchmarks/queue/`.
+- **T3.4** (Prefix cache survival) script created.
+- **T6.1** (Infra tasks) authored in `benchmarks/infra_tasks/tasks/` (Tasks in01-in05).
+- `ARCHITECTURE.md` updated to reflect Qwen3.6-27B as the new Arclight Thinker winner.
+
+**Current mode:** Execution — running Convergence benchmarks (T_CV1-3) and analyzing Singularity-tier viability.
 
 ---
 
@@ -12,12 +18,13 @@ Living document. What we currently believe, what is still open, and the log of r
 ### Known good, ready to deploy
 
 - Qwen3-Coder-30B-A3B-AWQ on vLLM, single GPU: 251 t/s seq=1, 730 t/s aggregate at c=4. Tool calls reliable with `--tool-call-parser qwen3_coder --reasoning-parser qwen3`. Measured.
-- Qwen3.6-35B-A3B-AWQ on vLLM, single GPU / TP=2 fallback: 237.1 t/s seq=1, 715.6 t/s aggregate at c=4. 100% Quality completion, 96.7% Tool Reliability. **New Coder Winner**. Requires `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. Measured T2.5 (2026-04-18).
+- **Qwen3.6-35B-A3B-AWQ on vLLM, TP=2 (GPU0+1): 232.0 t/s. Quality 100% completion on 5-task infra suite (T6.1, 2026-04-25). NEW CODER WINNER.** Confirmed stable on vLLM 0.19.0 V1 engine at `gpu-memory-utilization 0.85`. TP=2 is mandatory; TP=1 regresses to ~20 tps due to VRAM starvation and V1 profiling overhead. Requires `--tensor-parallel-size 2 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`.
 - **Qwen3.6-27B-AWQ on vLLM, GPU1, TP=1: 77.4 t/s seq=1. Quality 4.875/5 on 8-task thinker suite (T2.4d, 2026-04-25). NEW THINKER WINNER.** Correct on th02 3/3 runs (reproducible). Config: `--tensor-parallel-size 1 --kv-cache-dtype fp8 --enable-chunked-prefill --max-num-seqs 1 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. Replaces Qwen3.5-27B. Chunked-prefill must remain ON (disabling causes Triton OOM at TP=1).
 - ~~Qwen3.5-27B-AWQ~~ — superseded by Qwen3.6-27B as thinker (higher quality 4.875 vs 4.0, same TPS). Retain as fallback only. Defect th03 (reasoning budget exhaustion) remains; not relevant for new baseline.
 - vLLM is our primary engine. vLLM launches cleanly with our rootless podman setup on Blackwell sm_120 at TP=2. AWQ-Marlin kernel path confirmed functional (T1.1 run loaded 18 GiB weights across TP=2 cleanly).
 - Sleep Mode confirmed working end-to-end (T1.1 PASS 2026-04-17): `VLLM_SERVER_DEV_MODE=1` + `--enable-sleep-mode` frees 92.8% VRAM (59 → 4 GiB) in ~4s, wake in 0.9s, post-wake TPS 212.3 t/s (ratio 1.000). vLLM 0.19 reasoning-parser streaming field is `delta.reasoning` (o1 style), not `delta.reasoning_content`.
 - Qwen3-Coder-Next-80B-A3B-AWQ (behemoth) on vLLM TP=2: 189.5 t/s seq=1, 610 t/s aggregate at seq=4, 13007 t/s prefill@32k. Tool calls 100% reliable with `--tool-call-parser hermes` and **no** `--reasoning-parser`. Requires `--gpu-memory-utilization 0.95` and env `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`. HF repo: `cyankiwi/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit`. Measured T1.3 (2026-04-18).
+- **Singularity (ultra-behemoth):** Qwen3.5-397B at higher quantization (Q3_K_M/Q4_K_M). System-exclusive mode (stops all other tiers). Startup ~70s warm / ~30s RAM-free. ik_llama.cpp with GPU-offload for attention.
 
 ### Known bad / excluded
 
@@ -31,7 +38,7 @@ Living document. What we currently believe, what is still open, and the log of r
 
 ### Working architectural hypothesis
 
-Two-GPU-two-role (coder TP=1 on GPU0, thinker TP=1 on GPU1, concurrent isolation) + behemoth TP=2 asleep. See `ARCHITECTURE.md`.
+Two-GPU-two-role (coder TP=1 on GPU0, thinker TP=1 on GPU1, concurrent isolation) + behemoth TP=2 asleep. Convergence runs CPU-only (-ngl 0) to avoid VRAM contention. Singularity stops all to borrow both GPUs for attention layers. See `ARCHITECTURE.md`.
 
 Critical unknowns remaining:
 1. ~~Does Sleep Mode work?~~ **SETTLED — yes (T1.1 PASS)**
@@ -53,6 +60,22 @@ Critical unknowns remaining:
 ---
 
 ## Cycle log
+
+### R19 — April 25 2026 — Convergence transition & Singularity intro
+
+**Triggered by:** Confirmation that Arclight thinker is settled (T2.4g complete). Transitioning focus to the high-parameter tiers (Convergence and Singularity).
+
+**Changes:**
+- **Convergence tier** transitioned to CPU-only (-ngl 0) to avoid VRAM conflict with the now-settled Arclight hot pair. RAM budget updated to 123GB (UD-IQ2_M) + 44GB (Arclight sleep weights) = 167GB/192GB.
+- **Singularity tier (4th tier)** introduced. System-exclusive, Qwen3.5-397B at Q3/Q4, stops all other services to borrow both GPUs for attention layers.
+- **T_CV1, T_CV2, T_CV3** benchmark scripts created in `benchmarks/queue/` for startup timing, thread sweep, and partial offload experiments.
+- **T3.4** (Prefix cache survival) script created to verify if level=1 sleep preserves the CPU-offloaded cache.
+- **T6.1** (Infra tasks) authored in `benchmarks/infra_tasks/tasks/` to expand the benchmark suite to more relevant engineering tasks (Containerfile, systemd, shell idempotency).
+- `ARCHITECTURE.md` and `DECISIONS.md` fully synchronized with the Qwen3.6-27B thinker winner and the new tier topology.
+
+**Current focus:** Ready for measurement phase of Convergence and Singularity tiers.
+
+---
 
 ### R18 — April 25 2026 — Confound diagnosis; T2.4g elevated to required test
 

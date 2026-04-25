@@ -107,7 +107,7 @@ T3.3_qwen3_next_mtp_on_behemoth:
     pass: 1.15
     inconclusive: 1.00
 
-T3.4_prefix_cache_survival_across_sleep:
+T3.4_prefix_cache_survival:
   post_wake_prefill_ratio_vs_warm:
     # 1.0 = full cold prefill, 0.0 = as fast as cached
     pass: 0.25                  # post-wake prefill ≤25% of cold = cache survived
@@ -124,6 +124,18 @@ T5.1_opencode_endpoint_binding_with_subagents:
   failure_surface_clean:
     # did endpoint kill produce a clear error to the user, no hangs
     pass: true
+
+# ============================================================
+# Tier 6 — task suite extension
+# ============================================================
+
+T6.1_infra_shell_and_container_tasks:
+  quality_mean_1_to_5:
+    pass: 4.0                   # mean quality on infra suite ≥ 4.0
+    inconclusive: 3.5
+  task_completion_rate:
+    pass: 1.0
+    inconclusive: 0.90
 
 # ============================================================
 # Generic fallbacks for ad-hoc runs not tied to a queue item

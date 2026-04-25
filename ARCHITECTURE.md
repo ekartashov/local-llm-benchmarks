@@ -1,4 +1,4 @@
-<!-- last_updated: 2026-04-20 R12 — Convergence tier added, tier naming settled -->
+<!-- last_updated: 2026-04-25 R19 — Convergence CPU-only, Singularity tier added, Thinker → Qwen3.6-27B -->
 # ARCHITECTURE.md
 
 Working architectural source of truth.
@@ -16,6 +16,7 @@ Working architectural source of truth.
 | Coder + Thinker (always hot) | **Arclight** | Steins;Gate operation — fast, electric, concurrent |
 | 80B behemoth (asleep in vLLM) | **Core** | Undertale Core — powerful, invoked on escalation |
 | 397B king-behemoth (RAM-resident) | **Convergence** | Deeper than the Core — ephemeral, anomalous, omnipotent |
+| 397B ultra-behemoth (system-exclusive) | **Singularity** | The end of the world — total system commitment |
 
 ---
 
@@ -31,7 +32,7 @@ Working architectural source of truth.
 │  │  ┌─────────────────┐    │       │  ┌─────────────────┐    │       │
 │  │  │ vLLM: ARCLIGHT  │    │       │  │ vLLM: ARCLIGHT  │    │       │
 │  │  │ CODER           │    │       │  │ THINKER         │    │       │
-│  │  │ Qwen3.6-35B-A3B │    │       │  │ Qwen3.5-27B     │    │       │
+│  │  │ Qwen3.6-35B-A3B │    │       │  │ Qwen3.6-27B     │    │       │
 │  │  │ AWQ TP=1        │    │       │  │ AWQ TP=1        │    │       │
 │  │  │ port 30000      │    │       │  │ port 30001      │    │       │
 │  │  │ AWAKE           │    │       │  │ AWAKE           │    │       │
@@ -47,9 +48,9 @@ Working architectural source of truth.
 │  │  │ ~20GB/GPU VRAM  │    │       │  │ ~20GB/GPU VRAM  │    │       │
 │  │  └─────────────────┘    │       │  └─────────────────┘    │       │
 │  │                         │       │                         │       │
-│  │  attention/norm/embed   │       │  attention/norm/embed   │       │
-│  │  (CONVERGENCE layers)   │       │  (CONVERGENCE layers)   │       │
-│  │  ~5-6GB when active     │       │  ~5-6GB when active     │       │
+│  │      IDLE VRAM          │       │      IDLE VRAM          │       │
+│  │      (during            │       │      (during            │       │
+│  │   CONVERGENCE ops)      │       │   CONVERGENCE ops)      │       │
 │  └─────────────────────────┘       └─────────────────────────┘       │
 │                                                                      │
 │  ┌───────────────────────────────────────────────────────────┐       │
@@ -67,7 +68,7 @@ Working architectural source of truth.
 │  │  ik_llama.cpp: CONVERGENCE                                │       │
 │  │  Qwen3.5-397B-A17B UD-IQ2_M                               │       │
 │  │  port 8002                                                │       │
-│  │  COLD-START on demand OR always resident                  │       │
+│  │  CPU-ONLY (ngl=0)                                         │       │
 │  └───────────────────────────────────────────────────────────┘       │
 │                                                                      │
 │  OpenCode v1.3+ — native multi-endpoint subagent routing             │
@@ -97,25 +98,34 @@ Core runs at TP=2 with `--gpu-memory-utilization 0.95` and `VLLM_MEMORY_PROFILER
 
 ### Convergence — ik_llama.cpp, RAM-resident, separate process
 
-Convergence is architecturally independent from the vLLM tier. It runs as a native ik_llama.cpp process and communicates via an OpenAI-compatible HTTP API on port 8002. It does not interact with vLLM's sleep mechanism.
+Convergence is architecturally independent from the vLLM tier. It runs as a native ik_llama.cpp process and communicates via an OpenAI-compatible HTTP API on port 8002. It does not interact with vLLM's sleep mechanism in production because it is **CPU-only (-ngl 0)**.
 
-The split: MoE expert weights (~115GB of the 123GB model) stay in DDR5 RAM via `--cpu-moe`. Attention, norm, embedding, shared-expert layers (~8-12GB) are loaded onto both GPUs via `-ngl 999`.
+The split: In production, **all layers reside in DDR5 RAM**. This eliminates VRAM contention with Arclight, allowing Convergence to stay resident without requiring Arclight to sleep.
 
-**Why ik_llama.cpp and not vLLM:** vLLM's `--cpu-offload-gb` for a model this large means constant PCIe round-trips for weight chunks per forward pass. ik_llama.cpp's MoE-aware split keeps the hot path (attention) on GPU while the cold path (sparse expert lookup) reads from RAM sequentially — the right primitive for sparse MoE.
+**Why CPU-only:** with Arclight filling both GPUs (~23GB GPU0 + ~21GB GPU1), Convergence cannot use GPU without VRAM conflict. CPU-only means it runs truly in parallel, always-on, zero GPU contention.
 
 **Two deployment modes:**
 1. **Always-resident:** Start at boot, stay running. Warmest possible response. Uses ~123GB RAM constantly but we have 192GB so this is fine when Arclight is not sleeping.
 2. **Cold-start on demand:** Start when requested, kill after session. Free the 123GB RAM for other uses. Cold start: 60-120s from NVMe (measuring needed, T_CV1). With `--no-mmap` the model loads fully before serving.
 
-With Arclight sleeping (level=1, ~44GB in RAM), RAM budget with Convergence resident:
+With Arclight active, RAM budget with Convergence resident:
 ```
 Convergence:           123 GB (pinned, --no-mmap)
-Arclight sleep:         44 GB (level=1 weights)
+Arclight weights:       44 GB (resident in VRAM)
 OS + CUDA + headroom:  ~4 GB
 Total:                ~171 GB of 192 GB (89%)
 ```
 
 This is comfortable. Always-resident is the recommended mode.
+
+### Singularity — system-exclusive ultra-behemoth
+
+The 4th and final tier. Takes ALL system resources — stops Arclight + Core + Convergence.
+- **Model:** Qwen3.5-397B at Q3_K_M or Q4_K_M (~140-180GB)
+- **Engine:** ik_llama.cpp (same binary, different quant)
+- **Placement:** Full GPU offload for attention/norm/embed; MoE experts in RAM.
+- **Startup:** ik_llama.cpp ~70s warm cache, ~30s with all RAM free.
+- **Recovery:** After session, restart Convergence, then Arclight, then Core (~300-400s total for vLLM).
 
 ---
 
@@ -143,18 +153,16 @@ Total round-trip: ~15-25s.
 
 ### Escalate to Convergence
 Convergence is always-resident on port 8002. No swap required — just route the request there.
-If cold-starting:
+If starting from cold:
 ```bash
-/srv/ai/projects/ik_llama.cpp/build/bin/llama-server \
-  -m /srv/ai/models/hub/models--unsloth--Qwen3.5-397B-A17B-GGUF/snapshots/\
-da33c16fa4440f831149fcf53b98a22bc07785e5/UD-IQ2_M/\
-Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf \
-  -ngl 999 --cpu-moe --no-mmap \
-  -b 4096 -ub 2048 -t $(nproc) -c 16384 \
-  --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 \
-  --jinja --host 0.0.0.0 --port 8002
-# Wait ~60-120s for ready (measuring needed)
+# Using the deployment script
+./infra/scripts/deploy.sh ikllamacpp convergence
 ```
+
+### Escalate to Singularity
+1. Stop all other tiers.
+2. Load the high-quant GGUF (Q3_K_M or Q4_K_M).
+3. Maximize GPU offload.
 
 ---
 
@@ -162,10 +170,11 @@ Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf \
 
 | Tier | Name | Model | Engine | Port | VRAM | RAM |
 |------|------|-------|--------|------|------|-----|
-| Arclight coder | arclight-coder | cyankiwi/Qwen3.6-35B-A3B-AWQ | vLLM TP=1 GPU0 | 30000 | ~23GB | 0 |
-| Arclight thinker | arclight-thinker | QuantTrio/Qwen3.5-27B-AWQ | vLLM TP=1 GPU1 | 30001 | ~21GB | 0 |
+| Arclight coder | arclight-coder | cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit | vLLM TP=1 GPU0 | 30000 | ~23GB | 0 |
+| Arclight thinker | arclight-thinker | QuantTrio/Qwen3.6-27B-AWQ | vLLM TP=1 GPU1 | 30001 | ~21GB | 0 |
 | Core | core | cyankiwi/Qwen3-Next-80B-A3B-AWQ | vLLM TP=2 | 30002 | ~40GB | ~40GB (L1) |
-| Convergence | convergence | unsloth/Qwen3.5-397B UD-IQ2_M | ik_llama.cpp | 8002 | ~10GB | ~123GB |
+| Convergence | convergence | unsloth/Qwen3.5-397B UD-IQ2_M | ik_llama.cpp | 8002 | 0 | ~123GB |
+| Singularity | singularity | Qwen3.5-397B Q4_K_M | ik_llama.cpp | 8003 | ~30GB | ~180GB |
 
 ---
 
@@ -209,7 +218,7 @@ cmake --build build --config Release -j$(nproc)
 6. **Convergence thread count optimal value.** Baseline at 32 threads; 16 or 24 may be better for small expert matrices. T_CV2.
 7. **Convergence partial GPU expert offload.** GPU barely used (~10GB of 64GB available). Offloading first N layers' expert weights to GPU could improve generation speed. T_CV3.
 8. ~~**Gemma4-31B as Arclight thinker.**~~ **SETTLED (T2.3b, 2026-04-24): REJECTED as thinker.** Redirected to coder candidate T2.3c.
-9. **Gemma4-31B as Arclight coder.** Dense, no Mamba, kvcached-compatible. T2.3c.
+9. ~~**Gemma4-31B as Arclight coder.**~~ **SKIPPED (2026-04-25): Benchmark evidence shows Qwen3.6-35B-A3B clearly superior.** T2.3c.
 10. **kvcached Phase B with non-Mamba thinker.** T1.5 re-run after kvcached-compatible thinker is settled.
 
 ## How to change this document

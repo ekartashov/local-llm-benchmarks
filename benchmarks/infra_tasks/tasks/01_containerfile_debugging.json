@@ -1,0 +1,6 @@
+{
+  "id": "in01_containerfile_debugging",
+  "description": "Debug a multi-stage Containerfile build failure related to permissions and layer caching",
+  "system_prompt": "You are a DevOps and Containerization expert. Analyze the provided Containerfile and build logs to identify the root cause and provide a corrected Containerfile.",
+  "user_message": "A multi-stage Containerfile build is failing. The goal is to build a Go application and run it as a non-root user. \n\nContainerfile:\n```dockerfile\nFROM golang:1.22-alpine AS builder\nWORKDIR /app\nCOPY . .\nRUN go build -o myapp .\n\nFROM alpine:latest\nRUN adduser -D appuser\nUSER appuser\nWORKDIR /home/appuser\nCOPY --from=builder /app/myapp .\nENTRYPOINT [\"./myapp\"]\n```\n\nThe build succeeds, but when running the container, it fails with: `sh: ./myapp: Permission denied`.\n\nFurthermore, the team noticed that when they change a file in the repository, the `RUN go build` step always takes a long time and doesn't seem to use the cache effectively, even if the `go.mod` hasn't changed.\n\n1. Explain why the permission denied error occurs.\n2. Explain why the cache is inefficient.\n3. Provide a corrected Containerfile that fixes both issues."
+}

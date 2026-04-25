@@ -517,13 +517,13 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 1. Start Convergence with production command, varying only `-t`.
 2. For each thread count in [8, 12, 16, 20, 24, 28, 32], run:
    ```bash
-   /srv/ai/projects/ik_llama.cpp/build/bin/llama-bench \
-     -m <model_path> \
-     -ngl 999 --cpu-moe --no-mmap \
-     -fa 1 -b 4096 -ub 2048 \
-     -t <N> \
-     -p 512 -n 128 \
-     -r 3
+    /srv/ai/projects/ik_llama.cpp/build/bin/llama-bench \
+      -m <model_path> \
+      -ngl 0 --no-mmap \
+      -fa 1 -b 4096 -ub 2048 \
+      -t <N> \
+      -p 512 -n 128 \
+      -r 3
    ```
 3. Record `tg128` (token generation at 128 tokens) and `pp512` (prompt processing at 512 tokens) for each `-t` value.
 4. Plot or tabulate. Identify optimal for tg and for pp (may differ).
@@ -540,22 +540,17 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 ### T_CV3 — convergence_partial_gpu_expert_offload — OPEN
 
-**Question:** Can we improve Convergence generation speed by offloading some MoE expert layers to GPU, given that GPU VRAM is barely used with `--cpu-moe`?
+**Question:** Can we improve Convergence generation speed by offloading some MoE expert layers to GPU? This experiment is intended for scenarios where Arclight/Core are sleeping, freeing up VRAM.
 
-**Context:** With `-ngl 999 --cpu-moe`, only ~8-12GB of the available 64GB VRAM is used (attention/norms/embeddings). The remaining ~52GB is idle. Offloading the first N layers' expert weights to GPU would allow those layers to run at GPU speed rather than DDR5 bandwidth speed, potentially improving generation throughput.
+**Context:** Production Convergence is CPU-only (-ngl 0) to avoid conflict. However, when Arclight and Core are inactive, we have ~64GB VRAM available. Offloading early expert layers could improve throughput for long-horizon reasoning tasks.
 
-**Method:** Use `-ot` tensor override regex to selectively place early layers' expert tensors on GPU:
-```bash
-# Keep first 15 layers' experts on GPU, rest on CPU
--ot "blk\.(0|1|2|3|4|5|6|7|8|9|10|11|12|13|14)\.ffn_(gate|up|down)_exps\.weight=CUDA0"
-```
-Or using `--n-cpu-moe N` which keeps MoE of the last N layers on CPU (keeps first layers on GPU by default with `-ngl 999`).
+**Method:** Use `-ngl 999 --n-cpu-moe N` which keeps MoE of the last N layers on CPU (keeping first layers on GPU).
 
 **Procedure:**
-1. Establish llama-bench baseline: `--cpu-moe`, tg128 = X t/s.
-2. Test `--n-cpu-moe 50` (keep last 50 of 60 layers' experts on CPU, first 10 on GPU): measure tg128.
-3. Test `--n-cpu-moe 45` (first 15 on GPU): measure tg128.
-4. Test `--n-cpu-moe 40` (first 20 on GPU): measure tg128. Watch for OOM (each layer ~1-2GB experts).
+1. Establish llama-bench baseline: `-ngl 0`, tg128 = X t/s.
+2. Test `-ngl 999 --n-cpu-moe 50` (keep last 50 of 60 layers' experts on CPU, first 10 on GPU): measure tg128.
+3. Test `-ngl 999 --n-cpu-moe 45` (first 15 on GPU): measure tg128.
+4. Test `-ngl 999 --n-cpu-moe 40` (first 20 on GPU): measure tg128. Watch for OOM (each layer ~1-2GB experts).
 5. Stop at first OOM or diminishing returns.
 
 **VRAM budget per expert layer:** ~(expert_dim × hidden_dim × 3 matrices × IQ2_M bits/8). Rough estimate: ~2-3GB per layer for all 3 expert matrices. 10 layers ≈ 20-30GB of the available 52GB idle VRAM. Verify with `nvidia-smi` during test.

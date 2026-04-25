@@ -66,32 +66,28 @@ models:
       Their published comparison is against Qwen3-30B-A3B general, NOT our
       Qwen3-Coder-30B-A3B baseline — real gap vs our coder is unknown until T2.2.
 
-  # ── CANDIDATE coder (Qwen3.6 generation — supersedes old Qwen3.5-35B-A3B) ─
+  # ── ACTIVE coder (SETTLED T6.1 2026-04-25) ──────────────────────────────────
   qwen36_35b_a3b_awq:
-    status: CANDIDATE
+    status: ACTIVE
     role: coder
     hf_repo: cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit
     quant: AWQ-INT4
     format: awq
-    vram_gb: 22
-    ctx_default: 32768        # 262144 native per model card; YaRN extensible to 1M
+    vram_gb: 23       # across TP=2 → ~11.5 GiB per card for weights
+    ctx_default: 32768
     engines: [vllm]
     flags:
-      vllm: "--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice"
-      # Thinking-by-default is handled natively by vLLM reasoning-parser.
-      # Verified in T2.5 (2026-04-18) to provide 100% quality completion and 97% tool reliability.
-      # Note: This differs from the 80B variant (which requires hermes and no reasoning-parser).
-    requires_vllm: ">=0.15.0"   # conservative — Qwen3.6 landed after this
-    test_items: [T2.5]
+      vllm: "--tensor-parallel-size 2 --gpu-memory-utilization 0.85 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice"
+    placement:
+      tp: 2
+      gpu: "0,1"
+    measured:
+      aggregate_tps: 232.0    # T6.1
+      quality_completion: 1.0 # T6.1
     notes: >
-      35B total / 3B active MoE. Apache 2.0, released 2026-04-14. Same active-param
-      class as our Qwen3-Coder-30B baseline, so decode TPS should be comparable;
-      improvements should come from training quality and larger context budget.
-      22 GiB weights at TP=1 on 32 GB card leaves ~7–8 GiB headroom — tight for
-      CUDA graphs + KV. If graph capture fails, fall back to TP=2 on the card-pair
-      (borrows both GPUs, hot pair sleeps) — test protocol in T2.5 covers both.
-      Concurrent-dual viability at TP=1 is gated on T1.5 (kvcached spike) if the
-      weight pressure makes co-residency with the thinker infeasible.
+      35B-A3B MoE-hybrid. SETTLED as production coder 2026-04-25.
+      TP=2 is MANDATORY for vLLM 0.19+ V1 engine stability and performance.
+      TP=1 is possible but regresses to <25 tps due to VRAM starvation in V1.
 
   # ── SUPERSEDED: old Qwen3.5-35B-A3B (kept as historical record only) ────
   qwen35_35b_a3b_awq:

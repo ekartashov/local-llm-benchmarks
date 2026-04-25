@@ -1,0 +1,6 @@
+{
+  "id": "in05_network_tuning",
+  "description": "Provide network tuning recommendations for a high-concurrency LLM inference server",
+  "system_prompt": "You are a Linux Systems Performance Engineer. Provide specific, actionable tuning recommendations based on the workload description.",
+  "user_message": "A cluster of LLM inference servers (Linux, 6.8 kernel) is experiencing high tail latency (p99) under heavy concurrent load (1000+ RPS). The servers communicate over 100GbE. \n\nSymptoms:\n- `netstat -s` shows many 'times the listen queue of a socket overflowed'.\n- Many connections are stuck in `TIME_WAIT`.\n- Interrupt load is heavily concentrated on CPU0 despite having a multi-queue NIC.\n\nProvide specific `sysctl` settings and `ethtool` commands to:\n1. Increase the socket listen queue depth.\n2. Optimize `TIME_WAIT` handling for high churn.\n3. Distribute interrupt load across all CPU cores.\n4. Explain the reasoning behind each recommendation."
+}
