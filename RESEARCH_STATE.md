@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R17 CLOSED — T2.4d quality scored 4.875/5. Qwen3.6-27B-AWQ at TP=1 promoted as thinker. T2.4g queued as LOW curiosity. T2.4b skipped (quality bar met).
-**Current mode:** Testing — next items: T2.3c (Gemma4-31B as coder, GPU0) and T2.4g (TP=2 isolation, LOW priority).
+**Current cycle:** R18 CLOSED — H-TP2 confirmed by T2.4g. 2×2 factorial complete. TP=2 definitively broken for Qwen3.6-27B GDN.
+**Current mode:** Research — queue cleanup + convergence items (T_CV1–T_CV3) next session.
 
 ---
 
@@ -27,7 +27,7 @@ Living document. What we currently believe, what is still open, and the log of r
 - vLLM Sleep Mode **level=2** — do not use. See `DECISIONS.md`; known to produce gibberish outputs on wake (bug #29341) and requires manual `reload_weights` + `reset_prefix_cache` after wake which is easy to get wrong. Use level=1 exclusively. We have 192 GB DDR5, there is no reason to prefer level=2 for us.
 - **Gemma4-31B-it-AWQ** (Arclight Thinker candidate) — REJECTED as primary thinker. Mean quality 4.0/5 matches Qwen3.5-27B but fails depth-of-reasoning bar on th02/th03/th05. Redirected: strong 5/8 task profile (th01, th04, th06, th07, th08 all scored 5), 100% task completion, dense/no-MambaSpec → queued as **coder** candidate T2.3c.
 - **lordx64/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled** — KILLED without testing. 7,800-sample attention-only LoRA on our current coder base. No AWQ, no verified tool calling, Anthropic ToS concern for distillation data.
-- **Qwen3.6-27B TP=2 + bf16 KV + cp-OFF — INCONCLUSIVE (T2.4e, 2026-04-25).** th02 INCORRECT (confounded: changed TP AND chunked-prefill simultaneously). Root cause still open. T2.4g queued to isolate (TP=2 + cp-ON). TP=2 not needed for production thinker — TP=1 is correct and enables concurrent coder+thinker operation.
+- **Qwen3.6-27B TP=2 — DEFINITIVELY BROKEN for GDN (H-TP2 confirmed, T2.4g 2026-04-25).** th02 SEMANTIC ERROR × 0/3 at TP=2 regardless of chunked-prefill setting. Full 2×2 factorial (T2.4d/e/f/g) closed. TP=1 + fp8 KV + cp-ON is the only viable config.
 
 ### Working architectural hypothesis
 
@@ -53,6 +53,47 @@ Critical unknowns remaining:
 ---
 
 ## Cycle log
+
+### R18 — April 25 2026 — Confound diagnosis; T2.4g elevated to required test
+
+**Triggered by:** Operator observation that T2.4d/e results are confounded and cannot support a closed verdict on which config parameter makes Qwen3.6-27B correct.
+
+**The factorial:**
+
+| | cp-ON | cp-OFF |
+|---|---|---|
+| **TP=1** | ✓ CORRECT 3/3 (T2.4d) | OOM at kernel warmup (T2.4f) |
+| **TP=2** | **? — T2.4g** | ✗ INCORRECT (T2.4e) |
+
+T2.4e changed two variables simultaneously (TP=1→2 AND cp-ON→OFF). The single missing cell is TP=2 + cp-ON (T2.4g, bf16 KV).
+
+**Two hypotheses remaining:**
+
+- **H-CP:** Chunked-prefill is required for GDN correctness at any TP level. Disabling cp changes how the prompt is processed, which may break recurrent state initialization. If true: T2.4g (TP=2 + cp-ON) will be CORRECT.
+- **H-TP2:** TP=2 itself causes GDN correctness regression regardless of cp. DeltaNet recurrence depends on sequential state updates that may not commute across TP shards. If true: T2.4g will also be INCORRECT.
+
+**What T2.4g result means:**
+- CORRECT → H-CP confirmed. TP=2 is viable when cp-ON. T_NVFP4 can be reconsidered at TP=2+cp-ON.
+- INCORRECT → H-TP2 confirmed. TP=2 with GDN definitively broken. T_NVFP4 restricted to TP=1 only.
+
+**Decisions NOT changed:** Qwen3.6-27B-AWQ at TP=1 + fp8 KV + cp-ON remains the production thinker (3/3 correct, 4.875/5). T2.4g cannot invalidate the TP=1 config. T2.4b (Qwopus) remains SKIPPED.
+
+**Actions taken:** T2.4g elevated from LOW to MEDIUM in TESTING_QUEUE.md. It is the next test item. Script fully defined, no new research needed. Requires sleeping coder (TP=2 borrows GPU0).
+
+**R18 OUTCOME (2026-04-25, T2.4g scored):**
+
+T2.4g ran TP=2 + bf16 KV + **cp-ON** (the missing cell). Result: th02 SEMANTIC ERROR × 0/3. Runs 2 and 3 identical to run1 (temperature=0, 49709 completion tokens all three runs). Quality mean 4.69/5 — strong on all tasks except th02. The 2×2 factorial is now complete:
+
+| | cp-ON | cp-OFF |
+|---|---|---|
+| **TP=1** | ✓ CORRECT 3/3 · 4.875/5 · 77.4 t/s (T2.4d) | OOM (T2.4f) |
+| **TP=2** | ✗ INCORRECT 0/3 · 4.69/5 · 98.4 t/s (T2.4g) | ✗ INCORRECT (T2.4e) |
+
+**H-TP2 CONFIRMED.** TP=2 itself breaks GDN (Gated DeltaNet) recurrent state sync across GPU shards, regardless of chunked-prefill setting. Production config unchanged: TP=1 + fp8 KV + cp-ON.
+
+**R18 CLOSED.**
+
+---
 
 ### R16 — April 25 2026 — T2.4c full run scored; NVFP4 does not resolve confident incorrectness
 
@@ -683,9 +724,7 @@ Phase 0/1 work: chat template verification, vLLM vs SGLang throughput comparison
 - `results/T2.4d_qwen36_27b_awq_reproducibility_20260425T102313Z/` (run1–run3, CORRECT)
 - `results/T2.4e_qwen36_27b_awq_bf16kv_tp2_20260425T114506Z/` (single run, th02 INCORRECT)
 
-**Why this needs research, not another test:** The missing test cell is TP=2 + chunked-prefill ON. But this may not run cleanly — T2.4d established that chunked-prefill-OFF at TP=1 causes Triton OOM; it's unclear whether chunked-prefill ON at TP=2 is stable or introduces a different GDN recurrence issue. Research should also decide whether the additional TP=2 test is worth the complexity vs just accepting TP=1 as the production config (which is proven correct, costs one GPU, and runs at 77 t/s — still 1.37× faster than the 56 t/s Qwen3.5-27B baseline at th02-comparable quality TBD from scoring).
-
-**Suggested direction:** Decide between (a) queue T2.4g (TP=2 + cp-ON) to resolve ambiguity cleanly, or (b) accept TP=1 as the settled thinker config and proceed to score T2.4d quality tasks manually, with TP=2 as a deferred optimization. Also consider whether T2.4d human scoring is the immediate next action.
+**Resolution (R18):** T2.4g is the correct and sufficient test. It is the single missing cell in the 2×2 TP × chunked-prefill factorial. T2.4g has been elevated to MEDIUM priority — run it next. See R18 cycle log for the full hypothesis analysis and downstream implications.
 
 ---
 

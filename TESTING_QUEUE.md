@@ -715,11 +715,16 @@ VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ---
 
-### T2.4g — qwen36_27b_awq_tp2_chunkedprefill_on — OPEN (LOW priority / curiosity)
+### T2.4g — qwen36_27b_awq_tp2_chunkedprefill_on — DONE (H-TP2 CONFIRMED 2026-04-25)
 
-**Question:** Does TP=2 + bf16 KV + chunked-prefill ON produce correct th02? This is the missing isolation cell from T2.4e (which ran TP=2 + cp-OFF).
+**Question:** Does TP=2 + bf16 KV + chunked-prefill ON produce correct th02? This is the single missing cell in the 2×2 factorial (TP × chunked-prefill) that isolates whether the T2.4e regression was caused by TP=2 or by cp-OFF.
 
-**Why LOW priority:** TP=1 is the production thinker config. Even if TP=2 works with cp-ON, the architectural cost is concurrent coder+thinker operation — TP=2 borrows GPU0, requiring sleep-mode coordination. TP=1 at 77 t/s is correct and avoids this. This test is curiosity/completeness only — it does not change the deployment decision unless quality at TP=2 is dramatically better.
+**Why MEDIUM, not LOW:** Without this test we cannot attribute the T2.4e failure to a specific cause. The current state is a confound — two variables changed simultaneously (TP=1→2 AND cp-ON→OFF) and the result was incorrect. This ambiguity has downstream consequences:
+- If T2.4g is CORRECT: cp-OFF alone caused the failure; TP=2 is safe with GDN. Opens NVFP4 re-evaluation (T_NVFP4) with correct cp setting.
+- If T2.4g is INCORRECT: TP=2 itself breaks GDN state across shards, regardless of cp. Fully closes the TP=2 question. T_NVFP4 remains deferred (NVFP4 + TP=2 would also fail).
+The deployment decision (TP=1 stays) is not changed by either outcome. But the scientific question of *why* TP=1 works is open until this runs.
+
+**Why not production-blocking:** TP=1 is proven correct and deployed. This test cannot make TP=1 wrong. It can only determine whether TP=2 is also viable (with cp-ON) or definitively broken.
 
 **What it would tell us if CORRECT:** chunked-prefill was the only differentiator; TP=2 itself is fine for GDN. Could inform future config decisions if we ever need higher thinker TPS and are willing to accept sleep-mode overhead.
 
@@ -849,8 +854,8 @@ Pattern: **Gemma ties on pure coding (LiveCodeBench) but Qwen dominates on agent
 | T2.4e | DONE (INCONCLUSIVE) | — | th02 INCORRECT; confounded by TP=2+cp-OFF; see R17 |
 | T2.3c | SKIPPED | — | Gemma4-31B as coder — benchmark evidence (SWE/Terminal/MCP) shows Qwen clearly better; no test needed |
 | T_CV1 | OPEN | MEDIUM | Convergence startup timing — no deps |
-| T2.4g | OPEN | LOW | TP=2+cp-ON isolation — curiosity only, does not block deployment |
-| T_NVFP4 | DEFERRED | — | NVFP4 mass-pull survey — no new info needed until T2.4g result |
+| T2.4g | DONE (H-TP2 CONFIRMED) | — | th02 SEMANTIC ERROR 0/3; TP=2 definitively broken for GDN regardless of cp |
+| T_NVFP4 | DEFERRED | — | NVFP4 mass-pull — restricted to TP=1 only; no urgency; defer indefinitely |
 | T_CV2 | OPEN | LOW | Thread count sweep — after T_CV1 |
 | T_CV3 | OPEN | LOW | Partial GPU expert offload — after T_CV2 |
 | T2.4b | SKIPPED | — | Qwopus SFT — dep condition met (T2.4d quality ≥ 4.0, th02/th05 pass) |

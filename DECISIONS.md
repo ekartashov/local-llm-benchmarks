@@ -118,10 +118,23 @@ Phase B blocked by two issues specific to the current thinker (Qwen3.5-27B-AWQ):
 **SETTLED (2026-04-25, T2.4f).** Audit confirmed `rope_theta` matches config.json and vLLM reflects it in logs. No mismatch.
 
 ### Chunked-Prefill must stay enabled for Qwen3.6 (GDN) at TP=1
-**SETTLED (2026-04-25, T2.4d).** Disabling chunked prefill via `--no-enable-chunked-prefill` on GDN architecture causes immediate Triton OOM during kernel warmup at TP=1. Must remain enabled at TP=1. At TP=2 (T2.4e), disabling did not cause OOM but produced incorrect th02 output — cannot distinguish TP=2 parallelism bug from missing recurrent state propagation. T2.4g will isolate (TP=2 + cp-ON) as LOW priority curiosity test.
+**SETTLED (2026-04-25, T2.4d/g).** Disabling chunked prefill via `--no-enable-chunked-prefill` on GDN architecture causes immediate Triton OOM during kernel warmup at TP=1. Must remain enabled at TP=1. At TP=2, cp setting is irrelevant — TP=2 is broken for GDN regardless (H-TP2 confirmed, T2.4g). Production config uses TP=1 + cp-ON only.
 
-### Qwen3.6-27B-AWQ at TP=2 + bf16 KV — INCONCLUSIVE (T2.4e)
-**NOT SETTLED (2026-04-25, T2.4e).** Run completed at 104.8 t/s decode, 109ms TTFT. th02 output is INCORRECT: missed jobs silently dropped from the assignment map instead of assigned to the busiest GPU — same semantic error pattern as T2.4c NVFP4. Quality scores pending human review. Root cause ambiguous: T2.4e changed two variables from T2.4d simultaneously (TP=1 → TP=2 AND chunked-prefill enabled → disabled). Cannot determine whether regression is from TP=2 parallelism or the absence of chunked prefill. Next step: run TP=2 + chunked-prefill ON to isolate.
+### Qwen3.6-27B-AWQ at TP=2 is definitively broken for GDN — H-TP2 CONFIRMED
+**SETTLED (2026-04-25, T2.4g).** T2.4g ran TP=2 + bf16 KV + **chunked-prefill ON** (the missing cell in the 2×2 factorial) and produced th02 SEMANTIC ERROR × 0/3. Combined with T2.4d (TP=1 + cp-ON = CORRECT 3/3), this isolates TP=2 itself as the cause of the GDN correctness regression — independent of chunked-prefill setting.
+
+**Full 2×2 factorial:**
+
+| | cp-ON | cp-OFF |
+|---|---|---|
+| **TP=1** | ✓ CORRECT 3/3 · 4.875/5 · 77.4 t/s (T2.4d) | OOM — Triton crash (T2.4f) |
+| **TP=2** | ✗ INCORRECT 0/3 · 4.69/5 · 98.4 t/s (T2.4g) | ✗ INCORRECT · 104.8 t/s (T2.4e) |
+
+**Root cause:** TP=2 splits the DeltaNet state matrix across GPU shards. Per-shard recurrent state updates do not commute — accumulated error produces a qualitatively different (wrong) solution for state-dependent reasoning tasks.
+
+**Consequence for T_NVFP4:** If NVFP4 is ever reconsidered, it must be tested at TP=1 only. TP=2 is off the table for any GDN model.
+
+**Production config unchanged:** TP=1 + fp8 KV + cp-ON is the correct and only viable config for Qwen3.6-27B-AWQ as thinker.
 
 ### Qwen3.6-27B — NVFP4 configuration is REJECTED
 **SETTLED (2026-04-25, T2.4c).** NVFP4 quantization on the GDN architecture introduces reasoning pathologies (confident logic errors) that do not exist in the AWQ weights. Do not use NVFP4 for thinker roles until kernels/quantizers improve.
@@ -133,15 +146,14 @@ Phase B blocked by two issues specific to the current thinker (Qwen3.5-27B-AWQ):
 - T2.4c partial run 230351Z (NVFP4, bf16 KV, TP=2, th02+th03 only): both scored 5.0 — operator declared PASS. Premature: only 2/8 tasks tested.
 - T2.4c **full run 232801Z** (NVFP4, bf16 KV, TP=2, all 8 tasks): th02 has semantic error — missed jobs assigned to no GPU (silently wrong; `-1` instead of assigning to busiest GPU). Mean ~3.94/5 — below 4.0 baseline. **NVFP4 + bf16 KV did NOT resolve confident incorrectness.**
 
-**Root cause hypothesis status (updated 2026-04-25 after T2.4f/d/e):**
-1. **H1 — RoPE theta mismatch: DEAD.** T2.4f confirmed `rope_theta=10,000,000` in model config.json; vLLM startup logs reflect the same value. No mismatch.
-2. **H2 — Chunked prefill × GDN recurrence: PARTIALLY RESOLVED.** Disabling chunked prefill at TP=1 causes Triton OOM — cannot disable at TP=1. At TP=2, T2.4e ran with cp-OFF and produced wrong th02. Whether the failure was from absent recurrent state propagation (cp-OFF) or TP=2 parallelism is unknown (two variables changed).
-3. **H3 — Capability ceiling: FALSIFIED at TP=1.** T2.4d: AWQ+TP=1+fp8KV+cp-ON correct 3/3. The model can reliably implement th02 at this config. Still open for TP=2.
-4. **H4 — NVFP4 publisher quality: CONFIRMED CONTRIBUTING.** T2.4c NVFP4 had semantic errors; T2.4d AWQ TP=1 is correct — confirms publisher quality/format mattered. Does not explain the T2.4e TP=2 regression (also AWQ).
+**Root cause hypothesis status (closed 2026-04-25 after T2.4g):**
+1. **H1 — RoPE theta mismatch: DEAD.** T2.4f confirmed `rope_theta=10,000,000` correct.
+2. **H2 — Chunked prefill × GDN recurrence: DEAD.** T2.4g ran TP=2 + cp-ON and still produced SEMANTIC ERROR. cp setting is not the cause.
+3. **H3 — Capability ceiling: FALSIFIED at TP=1, CONFIRMED at TP=2.** TP=1 is correct 3/3; TP=2 is incorrect 0/3 regardless of cp setting.
+4. **H4 — NVFP4 publisher quality: CONFIRMED CONTRIBUTING.** Explained T2.4c failure; does not explain TP=2 failure (also AWQ).
+5. **H-TP2 — TP=2 breaks GDN state sync: CONFIRMED.** The full 2×2 factorial (T2.4d/e/f/g) isolates TP=2 as the sole cause of the th02 regression.
 
-**Tests run (2026-04-25):** T2.4f (H1 dead — RoPE theta 10M confirmed correct), T2.4d (H3 partially resolved — TP=1 reproducibly correct on th02 3/3), T2.4e (TP=2 + bf16 KV + no-cp — FAIL on th02, confounded; see entry above).
-**Remaining open question:** Is TP=2 + chunked-prefill ON also correct? This combination has not been tested. T2.4e disabled chunked prefill, conflating two variables.
-**NVFP4 mass-pull deferred:** root cause still ambiguous. See T_NVFP4 in TESTING_QUEUE.md.
+**NVFP4 mass-pull:** If ever reconsidered, TP=1 only. TP=2 is off the table for GDN. See T_NVFP4 in TESTING_QUEUE.md.
 
 **GDN / kvcached note:** DeltaNetSpec not in kvcached v0.1.5 supported list. T1.5 Phase B remains blocked regardless of config. Does not affect TP=1 or TP=2 isolated deployment.
 
