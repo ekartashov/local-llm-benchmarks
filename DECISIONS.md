@@ -106,12 +106,28 @@ Phase B blocked by two issues specific to the current thinker (Qwen3.5-27B-AWQ):
 ### Qwen3.5-27B-AWQ is Arclight thinker baseline but has constraints
 **PROVISIONAL (2026-04-18).** Viable quality-wise (4.0/5). MambaSpec (SSM hybrid layers) blocks kvcached Phase B. Cannot run with kvcached shared-pool. For pure TP=1 isolated deployment it works fine. Gemma4-31B REJECTED (T2.3b). Qwen3.6-27B-AWQ is the next candidate (T2.4).
 
-### Qwen3.6-27B-AWQ TP=1 (AWQ) is blocked due to hallucinated correctness; redirected to TP=2 (NVFP4)
-**PROVISIONAL (R15, 2026-04-24).** Failed accuracy audit (T2.4) at TP=1 with AWQ-INT4 and FP8 KV cache. Despite a 100% completion rate and strong basic logic structure (mean 4.125/5), it exhibited confident incorrectness on complex reasoning paths (e.g. throwing `IndexError` on heap tuple packing in th02, contradictory math concluding 13.3s < 10s in th03). We hypothesize this could be due to KV cache compression (FP8) or weight quantization hitting its limits. It is queued (T2.4c) for a re-test using NVFP4 weights to free memory, enabling a BF16 KV cache at TP=2 (borrowing both GPUs via sleeping the coder). Its distillation variant, Qwopus3.6-27B (T2.4b), is also an option.
+### Qwen3.6-27B — thinker quality INCONCLUSIVE across configs; root cause under investigation
+**PROVISIONAL (R15/R16, 2026-04-24/25).** Multiple runs across two quantization configs. Quality is config-sensitive and not yet stable enough to settle.
 
-**GDN / kvcached note:** "No Mamba" is accurate but GDN (DeltaNetSpec) is also not in kvcached v0.1.5's supported spec list. kvcached T1.5 Phase B remains blocked regardless of which Qwen3.x thinker is selected. This does not affect isolated TP=1 deployment — kvcached is a separate optimization layer.
+**Run history:**
+- T2.4 runs 1–3 (AWQ, fp8 KV, max_tokens ≤ 4096): truncation — token budget exhaustion, not model intelligence.
+- T2.4 **run 4** (AWQ, fp8 KV, ctx=32768, max_tokens=16384): **CORRECT** th02 (EDF + priority + best-fit, all jobs assigned including misses). Mean ~4.25/5. This is the only clean passing run.
+- T2.4 run 5 (AWQ, fp8 KV, ctx=49152, higher max_tokens): three implementation bugs in th02 (inverted heap semantics, sign error, IndexError). Run 4 correctness did not survive config change.
+- T2.4c partial run 230351Z (NVFP4, bf16 KV, TP=2, th02+th03 only): both scored 5.0 — operator declared PASS. Premature: only 2/8 tasks tested.
+- T2.4c **full run 232801Z** (NVFP4, bf16 KV, TP=2, all 8 tasks): th02 has semantic error — missed jobs assigned to no GPU (silently wrong; `-1` instead of assigning to busiest GPU). Mean ~3.94/5 — below 4.0 baseline. **NVFP4 + bf16 KV did NOT resolve confident incorrectness.**
 
-**Deployment flags (T2.4):** `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --language-model-only --enable-auto-tool-choice`. The `--language-model-only` flag sheds the vision encoder (~1-3 GiB) to maximise KV cache headroom. Verify flag availability in vLLM 0.19.x during deployment; omit if unsupported (model fits within budget either way). Requires `transformers>=5.5.4` — check container image version.
+**Open root cause hypotheses (priority order):**
+1. **RoPE theta mismatch:** Qwen3.6-27B likely uses `rope_theta=1_000_000`. If vLLM reads wrong value, positional encodings degrade for long sequences (thinking traces at positions 2k–4k+ tokens). Verify at deploy: compare `grep rope_theta` in vLLM startup logs vs model `config.json`. Zero-cost check — do first. (→ T2.4f)
+2. **Chunked prefill × GDN recurrence:** vLLM may enable chunked prefill by default. DeltaNet layers have recurrent state that must propagate correctly across chunk boundaries. If vLLM's GDN chunked-prefill implementation is incomplete, mid-trace reasoning degrades — explaining correct *concept* but broken *edge-case handling*. Test with `--disable-chunked-prefill` or `--max-num-batched-tokens 131072`. (→ T2.4f, T2.4d)
+3. **Model capability ceiling:** Run 4 being correct may have been a lucky sample near the model's reliability ceiling for complex algorithmic implementation. Test: run exact run 4 config 3× and check if th02 is stable. (→ T2.4d)
+4. **NVFP4 publisher quality:** `sakamakismile` is an untrusted publisher. Poor calibration could explain why T2.4c underperforms AWQ run 4 despite superior KV precision. If NVFP4 proves worth pursuing after root cause, pull from `nvidia/` or `bartowski/`. (→ T_NVFP4, deferred)
+
+**Tests queued:** T2.4f (RoPE/chunked-prefill config audit, zero-cost), T2.4d (AWQ run 4 reproducibility ×3), T2.4e (AWQ + bf16 KV + TP=2, KV precision isolation). See TESTING_QUEUE.md.
+**NVFP4 mass-pull deferred:** run after root cause is confirmed. See T_NVFP4 in TESTING_QUEUE.md.
+
+**GDN / kvcached note:** DeltaNetSpec not in kvcached v0.1.5 supported list. T1.5 Phase B remains blocked regardless of config. Does not affect TP=1 or TP=2 isolated deployment.
+
+**Deployment flags (confirmed working):** `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --kv-cache-dtype fp8 --max-num-seqs 1`. Requires `transformers>=5.5.4`.
 
 ### lordx64/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled — do not test
 **SETTLED (R14, 2026-04-24).** Killed without testing. Four hard blockers:

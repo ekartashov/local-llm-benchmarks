@@ -2,8 +2,8 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R14 CLOSED — three thinker candidates researched; Qwen3.6-27B-AWQ queued as T2.4 (strong), Qwopus as T2.4b (lower priority, conditional on T2.4); lordx64 distill killed without testing.
-**Current mode:** TESTING READY — T2.4, T2.3c, T_CV1 all OPEN with no deps. Priority: T2.4 > T2.3c/T_CV1 (parallel).
+**Current cycle:** R16 OPEN — T2.4c full 8-task run (232801Z) scored; NVFP4 did NOT resolve confident incorrectness on th02 (semantic error, mean ~3.94/5). Root cause under investigation. Three hypotheses: RoPE theta mismatch, chunked-prefill × GDN recurrence, model capability ceiling.
+**Current mode:** TESTING — priority queue: T2.4f (RoPE/chunked-prefill config audit, zero-cost, run first) → T2.4d (AWQ run 4 reproducibility ×3) → T2.4e (AWQ + bf16 KV + TP=2). T2.3c and T_CV1 remain OPEN and can run in parallel on GPU0.
 
 ---
 
@@ -26,7 +26,7 @@ Living document. What we currently believe, what is still open, and the log of r
 - vLLM Sleep Mode **level=2** — do not use. See `DECISIONS.md`; known to produce gibberish outputs on wake (bug #29341) and requires manual `reload_weights` + `reset_prefix_cache` after wake which is easy to get wrong. Use level=1 exclusively. We have 192 GB DDR5, there is no reason to prefer level=2 for us.
 - **Gemma4-31B-it-AWQ** (Arclight Thinker candidate) — REJECTED as primary thinker. Mean quality 4.0/5 matches Qwen3.5-27B but fails depth-of-reasoning bar on th02/th03/th05. Redirected: strong 5/8 task profile (th01, th04, th06, th07, th08 all scored 5), 100% task completion, dense/no-MambaSpec → queued as **coder** candidate T2.3c.
 - **lordx64/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled** — KILLED without testing. 7,800-sample attention-only LoRA on our current coder base. No AWQ, no verified tool calling, Anthropic ToS concern for distillation data.
-- **Qwen3.6-27B** (architecture note) — GDN (Gated DeltaNet) hybrid, 64 layers: 16 × (3 DeltaNet + 1 standard attention). NOT Mamba. kvcached still blocked (DeltaNetSpec not in supported list) but TP=1 isolated deployment is unaffected. AWQ at 21 GiB (QuantTrio). Strong benchmarks: AIME 2026 94.1%, GPQA Diamond 87.8%, SWE-bench Verified 77.2%. Queued as thinker candidate T2.4.
+- **Qwen3.6-27B — INCONCLUSIVE thinker (T2.4/T2.4c, 2026-04-24/25).** Quality is config-sensitive: AWQ run 4 (fp8 KV, max_tokens=16384, ctx=32768) produced correct th02 code (~4.25/5). All other runs — including NVFP4+bf16+TP=2 — have semantic errors on th02 (confident incorrectness pattern). Root cause under investigation (RoPE theta, chunked-prefill × GDN, capability ceiling). Qwen3.5-27B remains thinker baseline. See DECISIONS.md for run history and hypotheses.
 
 ### Working architectural hypothesis
 
@@ -52,6 +52,28 @@ Critical unknowns remaining:
 ---
 
 ## Cycle log
+
+### R16 — April 25 2026 — T2.4c full run scored; NVFP4 does not resolve confident incorrectness
+
+**Triggered by:** Strict re-scoring of T2.4c full 8-task run (232801Z) vs the two AWQ runs (run 4 at 152735Z, run 5 at 163624Z) that T2.4c was supposed to supersede.
+
+**What happened:**
+- T2.4c was declared PASS (DONE) in the queue based on a 2/8 task partial run (230351Z, th02+th03 only, both 5.0). The full 8-task run (232801Z) was never scored.
+- Full run scored strictly (1–5, skeptical): th02 has a **semantic error** — missed jobs are assigned `-1` (not processed) instead of being assigned to the busiest GPU. The model explicitly argues this is correct ("if it misses on the best GPU, it misses on all"). This is the same confident incorrectness pattern as the AWQ runs, just a different specific error.
+- Mean estimate: ~3.94/5 — below the 4.0 baseline. T2.4c is INCONCLUSIVE, not PASS.
+- Critically: AWQ **run 4** (the only run with correct th02) scored ~4.25/5, which is better than the NVFP4 full run. The hypothesis that NVFP4 + bf16 KV + TP=2 fixes the problem is not supported by the full run data.
+
+**Root cause hypotheses identified (see DECISIONS.md for detail):**
+1. RoPE theta mismatch — verify `rope_theta` in vLLM logs vs model config.json (zero cost, do first)
+2. Chunked prefill × GDN recurrent state — DeltaNet recurrence may break across chunk boundaries
+3. Model capability ceiling — run 4 correct may have been lucky; needs reproducibility test
+4. NVFP4 publisher quality (sakamakismile untrusted) — secondary, deferred
+
+**Decisions updated:** DECISIONS.md Qwen3.6-27B entry expanded with run history and hypotheses.
+**Tests queued:** T2.4f (config audit), T2.4d (reproducibility), T2.4e (AWQ + bf16 KV + TP=2), T_NVFP4 (deferred mass-pull).
+**T2.4b status:** restored to OPEN (Qwopus SFT still potentially relevant if capability ceiling is confirmed).
+
+---
 
 ### R15 — April 24/25 2026 — Reprieve for Qwen3.6-27B via NVFP4 & TP=2
 

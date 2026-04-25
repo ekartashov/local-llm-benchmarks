@@ -352,7 +352,11 @@ Run after T1 is settled (or mid-T1 if cycles allow).
 
 **Question:** Which behemoth archetype(s) deserve a slot beyond the currently-settled Qwen3-Coder-Next-80B-A3B? Candidate axes: knowledge-rich (current) vs context-rich (e.g. 50–70B AWQ with 256k+ usable context) vs precision-rich (a mid-size model run at higher precision).
 
-**Why this item exists:** the behemoth tier is on-demand (woken via sleep mode). Because only one behemoth is active at a time, the slot can host archetype diversity — different models for different escalation types — without costing concurrent VRAM. Operator flagged this as a direction to "leave space for."
+**Why this item    notes: >
+      Former thinker baseline. Superseded by Qwen3.6-27B family.
+      Hybrid SSM/transformer (Qwen3_5ForConditionalGeneration, GDN/FLA layers).
+      --max-num-seqs 1 required to keep CUDA graphs active on single GPU.
+as a direction to "leave space for."
 
 **This is a design / scouting item, not a runnable benchmark.** It produces:
 1. A candidate archetype taxonomy (2–3 archetypes, short rationale each).
@@ -626,33 +630,109 @@ VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ---
 
-### T2.4c — arclight_thinker_qwen36_27b_nvfp4_swap — OPEN
+### T2.4c — arclight_thinker_qwen36_27b_nvfp4_swap — INCONCLUSIVE
 
-**Question:** Did the base Qwen3.6-27B model fail T2.4 due to intense AWQ quantization or FP8 KV cache compression causing reasoning deterioration? Will it perform correctly as a Thinker if given breathing room via NVFP4 (weights) and BF16 (KV cache) at TP=2?
+**Question:** Does NVFP4 quantization + bf16 KV cache + TP=2 resolve the confident incorrectness seen in AWQ TP=1 runs?
 
-**Why consider this:** The model showed 100% completion but suffered from "confident incorrectness" in tight architectural memory envelopes. Re-allocating the entire 2x5090 cluster to the Thinker via vLLM sleep mode (sleeping the Qwen3.6-35B-A3B coder) permits testing this hypothesis without memory starvation.
+**Runs completed:**
+- 230351Z (partial, th02+th03 only): both 5.0 — operator declared PASS. **Premature — only 2/8 tasks.**
+- 232801Z (full 8-task run): th02 semantic error (missed jobs not assigned to any GPU; `-1` assignment = silent wrong output). Mean ~3.94/5 — below 4.0 baseline.
+
+**Result:** NVFP4 + bf16 KV did NOT resolve confident incorrectness. AWQ run 4 (the only run with correct th02) scored ~4.25/5, better than the NVFP4 full run. T2.4c INCONCLUSIVE — do not deploy NVFP4 as thinker until root cause is understood.
+
+**Publisher note:** `sakamakismile/Qwen3.6-27B-NVFP4` is an untrusted publisher. If NVFP4 warrants re-testing after root cause investigation, use `nvidia/` or `bartowski/` quants instead. Deferred to T_NVFP4.
+
+**What this means:** Root cause investigation takes priority (T2.4f → T2.4d → T2.4e). Qwen3.5-27B remains the active thinker baseline.
+
+---
+
+### T2.4f — qwen36_27b_rope_chunkedprefill_audit — OPEN (zero-cost, run first)
+
+**Question:** Is vLLM loading the correct `rope_theta` for Qwen3.6-27B, and is chunked prefill enabled by default in a way that could break GDN recurrent state?
+
+**Why this is first:** Zero deploy cost — this is a config inspection task, not a full benchmark run. Just deploy the model and capture startup logs. Takes ~10 minutes. Gates interpretation of all subsequent T2.4x runs.
 
 **Procedure:**
-```bash
-# 1. Stop or sleep the coder instance on GPU0.
-# 2. Deploy Qwen3.6-27B-NVFP4 across both GPUs.
-./infra/scripts/deploy.sh vllm tp2b QuantTrio/Qwen3.6-27B-NVFP4 \
-  --gpu-mem-util 0.85 \
-  --kv-cache-dtype bf16 \
-  --ctx 49152 \
-  --tool-call-parser qwen3_coder \
-  --reasoning-parser qwen3 \
-  --language-model-only \
-  --enable-auto-tool-choice
+1. Deploy T2.4 standard config (AWQ TP=1, `--ctx 49152`). Capture full vLLM startup stdout.
+2. Extract and record:
+   - `rope_theta` value vLLM is using (grep `rope_theta` or `RoPE` in startup log)
+   - Whether chunked prefill is enabled (grep `chunked_prefill`, `enable_chunked_prefill`, `max_num_batched_tokens`)
+   - `max_num_batched_tokens` default
+3. Compare `rope_theta` against `QuantTrio/Qwen3.6-27B-AWQ/config.json` on HuggingFace.
+4. If mismatch: add explicit `--rope-theta 1000000` (or whatever value config.json specifies) to all subsequent T2.4x scripts.
+5. If chunked prefill is ON by default: prepare `--disable-chunked-prefill` flag for T2.4d variant.
 
-# 3. Rerun the problematic tasks (th02, th03) specifically.
+**Pass:** rope_theta matches config.json AND chunked prefill state is documented.
+**Finding triggers:**
+- rope_theta mismatch → add explicit flag, rerun T2.4d with corrected config first
+- chunked prefill ON → run T2.4d in two variants: with and without `--disable-chunked-prefill`
+
+**Deps:** none.
+
+---
+
+### T2.4d — qwen36_27b_awq_reproducibility — OPEN
+
+**Question:** Is AWQ run 4's correct th02 implementation stable, or was it a lucky sample near the model's capability ceiling?
+
+**Why this matters:** Run 4 (AWQ, fp8 KV, ctx=32768, max_tokens=16384) is the only run that produced correct th02 code. All other runs had errors. If run 4 is not reproducible, the confident incorrectness is a model capability issue that no serving config change will fix reliably.
+
+**Procedure:**
+1. Run exact run 4 config **three times** with identical parameters:
+   - Model: `QuantTrio/Qwen3.6-27B-AWQ`
+   - TP=1 (GPU1), fp8 KV, ctx=32768, max_tokens=16384, max-num-seqs 1
+   - Apply any corrections from T2.4f (rope_theta, chunked prefill flags)
+2. Score th02 in each run: correct (all jobs assigned including misses) / semantic-error / crash
+3. Score all 8 tasks in at least one of the 3 runs; track which run if you don't score all three fully.
+
+**Pass:** th02 correct in ≥ 2/3 runs → run 4 is reproducible, move to T2.4e.
+**Fail:** th02 correct in ≤ 1/3 runs → capability ceiling confirmed. Model cannot reliably implement this task class at 27B. Pivot to T2.4b (Qwopus SFT) or accept Qwen3.5-27B as the thinker permanently until a better 27B model exists.
+
+**Deps:** T2.4f should run first (config corrections may affect outcome). Can run immediately if T2.4f shows no corrections needed.
+
+---
+
+### T2.4e — qwen36_27b_awq_bf16kv_tp2 — OPEN
+
+**Question:** Does removing fp8 KV cache noise (by using bf16 KV + TP=2) improve th02 correctness for the AWQ model specifically? Isolates KV precision from the NVFP4 publisher quality issue.
+
+**Why AWQ not NVFP4:** sakamakismile/NVFP4 is an untrusted publisher. T2.4c conflated publisher quality with quantization format. This test uses the same trusted AWQ weights (QuantTrio) but with bf16 KV to isolate the KV dtype variable cleanly.
+
+**Config:**
+```bash
+./infra/scripts/deploy.sh vllm tp2b QuantTrio/Qwen3.6-27B-AWQ \
+  --gpu-mem-util 0.85 \
+  --ctx 32768 \
+  --kv-cache-dtype auto \      # bf16 KV — no quantization noise
+  --max-num-seqs 1 \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3
+  # + any rope_theta/chunked-prefill corrections from T2.4f
 ```
 
-**Pass criteria:** Model completes `th02` providing an algorithm without `IndexError` code, and completes `th03` with mathematically sound, non-contradictory logic.
+**Requires sleeping coder** (TP=2 borrows GPU0). Sleep Qwen3.6-35B coder first.
 
-**Deps:** T2.4 (DONE - confirmed the baseline issue).
+**Run once.** Score th02 and th05. If th02 correct: fp8 KV was degrading quality → bf16+TP=2 is the production config (with sleep-mode coordination). If th02 still errors: KV precision is not the issue → capability ceiling or RoPE/chunked-prefill is the root cause.
 
-**Hand-back trigger:** NVFP4 driver/vLLM incompatibilities on consumer Blackwell (sm_120) causing load crashes.
+**Pass criteria:** th02 correct (all jobs assigned, including misses to busiest GPU) AND mean ≥ 4.0/5.
+**Deps:** T2.4d should complete first (confirms whether issue is reproducibility or config). Can run in parallel with T2.4d if testing time is limited.
+
+---
+
+### T_NVFP4 — nvfp4_thinker_mass_survey — DEFERRED
+
+**Question:** Is the NVFP4 format (Blackwell-native FP4 tensor cores) worth pursuing for the thinker role, using a trusted publisher?
+
+**Why deferred:** T2.4c used `sakamakismile` (untrusted publisher). Cannot distinguish format benefit from publisher calibration quality. Do not pull additional NVFP4 quants until T2.4d/e/f determine whether the root cause is KV precision (which NVFP4 doesn't directly address) or model capability (which NVFP4 also doesn't address).
+
+**When to un-defer:** After T2.4e result. If AWQ + bf16 KV + TP=2 passes (KV precision was the issue), then NVFP4 is theoretically superior (native FP4 weights + BF16 KV headroom). Pull from trusted publishers at that point:
+- `nvidia/Qwen3.6-27B-NVFP4` (if available)
+- `bartowski/Qwen3.6-27B-NVFP4` (established publisher)
+- Do NOT use `sakamakismile` again.
+
+**What to measure:** TPS seq=1 vs AWQ baseline (77.4 t/s) + th02 quality only (the discriminating task). If TPS ≥ 80 t/s AND th02 correct → worth a full 8-task run.
+
+**Deps:** T2.4e DONE.
 
 ---
 
@@ -751,19 +831,23 @@ Single-GPU cohabitation with Qwen3.6-35B coder is physically impossible at these
 
 ---
 
-## TESTING_QUEUE — status summary addendum (R14, 2026-04-24)
+## TESTING_QUEUE — status summary (R16, 2026-04-25)
 
 | Item | Status | Priority | Notes |
 |------|--------|----------|-------|
-| T2.4 | DONE | — | Qwen3.6-27B-AWQ as thinker — FAILED, exhibited confident incorrectness on th02/th03 |
-| T2.4c | OPEN | HIGH | Qwen3.6-27B NVFP4 on TP=2 — Retesting T2.4 failures under looser memory/KV constrains |
-| T2.3c | OPEN | MEDIUM | Gemma4-31B as coder — no deps, parallel with T_CV1 |
+| T2.4f | OPEN | HIGH | RoPE theta + chunked-prefill config audit — zero cost, run first |
+| T2.4d | OPEN | HIGH | AWQ run 4 reproducibility ×3 — gates capability ceiling hypothesis |
+| T2.4e | OPEN | HIGH | AWQ + bf16 KV + TP=2 — isolates KV precision variable |
+| T2.3c | OPEN | MEDIUM | Gemma4-31B as coder — GPU0, no deps, parallel with T2.4x on GPU1 |
 | T_CV1 | OPEN | MEDIUM | Convergence startup timing — no deps |
+| T2.4b | OPEN | LOW | Qwopus SFT as thinker — run if T2.4d confirms capability ceiling |
+| T_NVFP4 | DEFERRED | — | NVFP4 mass-pull survey — defer until T2.4e result |
 | T_CV2 | OPEN | LOW | Thread count sweep — after T_CV1 |
 | T_CV3 | OPEN | LOW | Partial GPU expert offload — after T_CV2 |
-| T2.4b | OPEN | HIGH | Qwopus SFT as thinker — T2.4 base failure triggers this as an alternate fix path |
+| T2.4 | INCONCLUSIVE | — | AWQ TP=1: run 4 correct (~4.25/5), other runs have errors. Root cause TBD. |
+| T2.4c | INCONCLUSIVE | — | NVFP4 TP=2: full run ~3.94/5 (th02 semantic error). PASS was premature (2/8 tasks). |
 | T2.3b | DONE | — | Gemma4-31B as thinker — REJECTED; redirected to T2.3c |
-| T1.5 Phase B | DEFERRED | — | kvcached blocked (GDN/DeltaNet unsupported). Re-evaluate after kvcached upstream adds DeltaNetSpec |
+| T1.5 Phase B | DEFERRED | — | kvcached blocked (GDN/DeltaNet unsupported) |
 
 ---
 
