@@ -26,3 +26,4 @@ config/hardware.env
 .DS_Store
 Thumbs.db
 CLAUDE.local.md
+llama.log
