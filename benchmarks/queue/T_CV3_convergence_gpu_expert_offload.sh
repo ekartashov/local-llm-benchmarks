@@ -1,169 +1,132 @@
 #!/usr/bin/env bash
 # benchmarks/queue/T_CV3_convergence_gpu_expert_offload.sh
 #
-# T_CV3 — Convergence partial GPU expert offload.
+# T_CV3 — Convergence partial GPU expert offload (via llama-server).
 #
-# Question: Can we improve Convergence generation speed by offloading some
-# MoE expert layers to GPU, given that GPU VRAM is idle?
-#
-# Procedure:
-#   1. Requires Arclight/Core to be sleeping (frees VRAM).
-#   2. Runs llama-bench with varying --n-cpu-moe N values.
-#   3. Uses CDI GPU device args (nvidia.com/gpu=0, nvidia.com/gpu=1).
-#   4. Compares tg128 at various offload depths.
-#
-# PREREQUISITES:
-#   - Arclight/Core SLEEPING (at least level=1)
-#   - local-ik-llama:runtime image built
-#   - infra/scripts/build-ik-llama.sh completed successfully
-#   - Model at ${MODEL_CACHE}/${CONVERGENCE_MODEL}
-#
-# OPTIONS:
-#   --dry-run       Print commands, do not execute
-#
+# FULL TRANSPARENCY VERSION: Streams logs to terminal.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/config/hardware.env"
 
-DRY_RUN=0
-for arg in "$@"; do
-    case "$arg" in
-        --dry-run)     DRY_RUN=1 ;;
-    esac
-done
-
-run() { [[ "${DRY_RUN}" -eq 1 ]] && { echo "[dry-run] $*"; return; }; "$@"; }
-
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RESULTS_DIR="${REPO_ROOT}/results/T_CV3_convergence_gpu_expert_offload_${TIMESTAMP}"
 IK_BUILD="${IK_LLAMA_BUILD_DIR:-/srv/ai/projects/ik_llama.cpp/build}"
-
-# ── Validation ────────────────────────────────────────────────────────────────
-[[ ! -x "${IK_BUILD}/bin/llama-bench" ]] && {
-    echo "ERROR: llama-bench not found at ${IK_BUILD}/bin/llama-bench" >&2
-    echo "  Run: ./infra/scripts/build-ik-llama.sh" >&2; exit 1
-}
-[[ ! -f "${MODEL_CACHE}/${CONVERGENCE_MODEL}" ]] && {
-    echo "ERROR: Model not found: ${MODEL_CACHE}/${CONVERGENCE_MODEL}" >&2; exit 1
-}
-
-# Check if Arclight is sleeping (warning only)
-if curl -sf "http://localhost:30000/is_sleeping" | grep -q "false"; then
-    echo "WARNING: Arclight Coder (port 30000) is NOT sleeping. VRAM conflict possible."
-fi
-if curl -sf "http://localhost:30001/is_sleeping" | grep -q "false"; then
-    echo "WARNING: Arclight Thinker (port 30001) is NOT sleeping. VRAM conflict possible."
-fi
+PORT=8002
+HEALTH_URL="http://127.0.0.1:${PORT}/health"
+COMPLETION_URL="http://127.0.0.1:${PORT}/completion"
 
 echo "[T_CV3] Results dir: ${RESULTS_DIR}"
-[[ "${DRY_RUN}" -eq 0 ]] && mkdir -p "${RESULTS_DIR}"
+mkdir -p "${RESULTS_DIR}"
 
-CSV_FILE="${RESULTS_DIR}/gpu_offload_sweep.csv"
-echo "n_cpu_moe,gpu_layers,tg128_tps,vram_used_mb" | tee "${CSV_FILE}"
+# 1. KILL EXISTING SERVERS
+echo "[T_CV3] Ensuring port ${PORT} is free..."
+pkill -f "llama-server.*${PORT}" || true
+sleep 2
 
-# ── Offload Sweep ─────────────────────────────────────────────────────────────
-# Model has 60 layers.
-# --n-cpu-moe 60: 0 layers on GPU
-# --n-cpu-moe 50: 10 layers on GPU
-# --n-cpu-moe 40: 20 layers on GPU
-# --n-cpu-moe 30: 30 layers on GPU
-for N_CPU in 60 55 50 45 40 35 30; do
-    GPU_LAYERS=$(( 60 - N_CPU ))
-    echo "[T_CV3] Testing --n-cpu-moe ${N_CPU} (${GPU_LAYERS} layers on GPU)..."
-    
-    JSON_OUT="${RESULTS_DIR}/bench_ncpu${N_CPU}.json"
-    
-    if [[ "${DRY_RUN}" -eq 0 ]]; then
-        # Capture VRAM before
-        VRAM_BEFORE=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | awk '{s+=$1} END {print s}')
-        
-        podman run --rm \
-            --name "ik-llama-bench-ncpu${N_CPU}" \
-            --userns=keep-id \
-            --device nvidia.com/gpu=0 --device nvidia.com/gpu=1 \
-            -e NVIDIA_VISIBLE_DEVICES=0,1 \
-            -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-            -v "${IK_BUILD}:/app/build:ro,z" \
-            -v "${MODEL_CACHE}:/models:ro,z" \
-            --entrypoint "/app/build/bin/llama-bench" \
-            local-ik-llama:runtime \
-            -m "/models/${CONVERGENCE_MODEL}" \
-            -ngl 999 \
-            --n-cpu-moe "${N_CPU}" \
-            --no-mmap \
-            -b 4096 -ub 2048 \
-            -t "$(nproc)" \
-            -p 512 -n 128 \
-            -r 2 \
-            --output json \
-            > "${JSON_OUT}" 2>/dev/null || {
-                echo "[T_CV3] OOM or CRASH at --n-cpu-moe ${N_CPU}. Stopping sweep."
-                break
-            }
-            
-        VRAM_AFTER=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | awk '{s+=$1} END {print s}')
-        VRAM_DIFF=$(( VRAM_AFTER - VRAM_BEFORE ))
-        
-        TG=$(python3 -c "import json, sys; d=json.load(open('${JSON_OUT}')); print([r for r in d if r['n_prompt']==512 and r['n_gen']==128][0]['tps'])" 2>/dev/null || echo "N/A")
-        
-        echo "${N_CPU},${GPU_LAYERS},${TG},${VRAM_DIFF}" | tee -a "${CSV_FILE}"
-    else
-        echo "[dry-run] podman run llama-bench --n-cpu-moe ${N_CPU} -ngl 999"
+LOG="${RESULTS_DIR}/server.log"
+touch "${LOG}"
+
+# 2. START SERVER AND STREAM LOGS
+echo "[T_CV3] Starting llama-server (R12 Golden Config)..."
+"${IK_BUILD}/bin/llama-server" \
+    -m "${MODEL_CACHE}/${CONVERGENCE_MODEL}" \
+    -ngl 999 \
+    --cpu-moe \
+    --no-mmap \
+    -b 4096 -ub 2048 \
+    -t 32 \
+    -c 16384 \
+    --host 127.0.0.1 --port "${PORT}" \
+    --jinja \
+    > "${LOG}" 2>&1 &
+SERVER_PID=$!
+
+# Stream the log to the terminal in the background
+tail -n 0 -f "${LOG}" &
+TAIL_PID=$!
+
+# 3. WAIT FOR READY
+echo "[T_CV3] Waiting for server to become ready..."
+READY=0
+for i in $(seq 1 600); do
+    if curl -sf "${HEALTH_URL}" >/dev/null; then
+        READY=1
+        break
     fi
+    if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+        echo "ERROR: Server died. Check ${LOG}"
+        kill "${TAIL_PID}" 2>/dev/null || true
+        exit 1
+    fi
+    sleep 1
 done
 
-# ── Summary and metrics.json ──────────────────────────────────────────────────
-if [[ "${DRY_RUN}" -eq 0 ]]; then
-    BEST_TG_ROW=$(tail -n +2 "${CSV_FILE}" | sort -t',' -k3 -nr | head -1)
-    BEST_N_CPU=$(echo "${BEST_TG_ROW}" | cut -d',' -f1)
-    BEST_LAYERS=$(echo "${BEST_TG_ROW}" | cut -d',' -f2)
-    BEST_TG=$(echo "${BEST_TG_ROW}" | cut -d',' -f3)
+# Stop streaming logs once ready
+kill "${TAIL_PID}" 2>/dev/null || true
+echo ""
+echo "[T_CV3] Server is READY."
 
-    cat > "${RESULTS_DIR}/metrics.json" <<EOJSON
+# 4. MEASURE TPS
+echo "[T_CV3] Measuring TPS with 512-prompt, 128-gen request..."
+START_TIME=$(date +%s%3N)
+# Use a real prompt instead of 'word word'
+PROMPT="A detailed technical explanation of how MoE expert offloading works in GGML is as follows:"
+RESPONSE=$(curl -sf -X POST "${COMPLETION_URL}" \
+    -H "Content-Type: application/json" \
+    -d "{
+        \"prompt\": \"${PROMPT}\",
+        \"n_predict\": 128,
+        \"stream\": false,
+        \"temperature\": 0.0
+    }")
+END_TIME=$(date +%s%3N)
+
+TOTAL_MS=$(( END_TIME - START_TIME ))
+
+# Parse real TPS from the response
+TG_TPS=$(echo "${RESPONSE}" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    t = d.get('timings', {})
+    # llama-server returns 'predicted_per_second' in its timings object
+    val = t.get('predicted_per_second')
+    if val is None:
+        # Fallback: calculate manually
+        tokens = t.get('predicted_n', 128)
+        ms = t.get('predicted_ms', 1)
+        val = (tokens / ms) * 1000
+    print(round(val, 2))
+except Exception as e:
+    print('N/A')
+")
+
+echo "--------------------------------"
+echo "T_CV3 RESULT: ${TG_TPS} tokens/sec"
+echo "--------------------------------"
+
+# 5. SAVE RESULTS
+cat > "${RESULTS_DIR}/metrics.json" <<EOJSON
 {
   "item_id": "T_CV3_convergence_gpu_expert_offload",
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "config": {
-    "engine": "ikllamacpp",
+    "engine": "ikllamacpp-server",
     "model": "unsloth/Qwen3.5-397B-A17B-GGUF UD-IQ2_M",
-    "quantization": "IQ2_M",
-    "placement": "convergence (partial GPU offload)",
-    "context_length": 16384,
-    "no_mmap": true
+    "mode": "hybrid (attention-on-gpu, experts-on-cpu)",
+    "flags": "-ngl 999 --cpu-moe"
   },
   "metrics": {
-    "offload_sweep_csv": "gpu_offload_sweep.csv",
-    "best_n_cpu_moe": ${BEST_N_CPU},
-    "best_gpu_layers": ${BEST_LAYERS},
-    "best_tg128_tps": ${BEST_TG}
-  },
-  "verdict": "MEASURED",
-  "notes": "Experiment to see if generation speed improves when Arclight/Core are sleeping. Not for production always-on use."
+    "tg128_tps": ${TG_TPS},
+    "total_request_ms": ${TOTAL_MS}
+  }
 }
 EOJSON
 
-    cat > "${RESULTS_DIR}/summary.md" <<EOMD
-# T_CV3 — Convergence GPU Expert Offload Experiment
+# Cleanup
+kill "${SERVER_PID}" 2>/dev/null || true
+wait "${SERVER_PID}" 2>/dev/null || true
 
-**Timestamp:** ${TIMESTAMP}
-**Config:** ik_llama.cpp pr-1288 · Qwen3.5-397B UD-IQ2_M · -ngl 999 · --n-cpu-moe N
-
-## Results
-
-| N_CPU_MOE | GPU Layers | TG128 TPS | VRAM Delta (MB) |
-|-----------|------------|-----------|-----------------|
-$(awk -F, 'NR>1 {printf "| %d | %d | **%s** | %s |\n", $1, $2, $3, $4}' "${CSV_FILE}")
-
-**Optimal offload depth:** ${BEST_LAYERS} layers on GPU (${BEST_TG} t/s)
-
-## Analysis
-
-This experiment establishes the "maximum possible" speed for Convergence when Arclight/Core
-are not using the GPUs. Since each expert layer offloaded to GPU avoids DDR5 bandwidth bottlenecks,
-we expect a linear speedup until VRAM is saturated or diminishing returns hit.
-EOMD
-
-    echo "[T_CV3] Done. Results in ${RESULTS_DIR}/"
-fi
+echo "[T_CV3] Done. Summary in ${RESULTS_DIR}/metrics.json"

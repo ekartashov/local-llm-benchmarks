@@ -2,9 +2,9 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R19 OPEN — Convergence transitioned to CPU-only (-ngl 0). T_CV2/T_CV3 scripts created.
-- **Singularity tier (4th tier)** introduced to `ARCHITECTURE.md` and `DECISIONS.md`.
-- **T_CV1, T_CV2, T_CV3** benchmark scripts created in `benchmarks/queue/`.
+**Current cycle:** R23 COMPLETE — Convergence Parallel Scaling (T_CV4) verified at 15.6 t/s aggregate.
+- **Singularity tier (4th tier)** finalized at **13.9 t/s** (single) and **15.6 t/s** (C=4).
+- **T_CV1, T_CV2, T_CV3, T_CV4** benchmarks complete.
 - **T3.4** (Prefix cache survival) script created.
 - **T6.1** (Infra tasks) authored in `benchmarks/infra_tasks/tasks/` (Tasks in01-in05).
 - `ARCHITECTURE.md` updated to reflect Qwen3.6-27B as the new Arclight Thinker winner.
@@ -15,7 +15,7 @@ Living document. What we currently believe, what is still open, and the log of r
   → metrics.json/summary.md. Prerequisite check included (CRIU, cuda-checkpoint, driver ≥570,
   newuidmap/newgidmap). See TESTING_QUEUE.md T_KV2 for install steps.
 
-**Current mode:** Execution — running Convergence benchmarks (T_CV1-3) and analyzing Singularity-tier viability.
+**Current mode:** Execution — Coder reliability audit (T6.1) and Thinker TP=2 fix (T2.4h) queued.
 
 ---
 
@@ -67,7 +67,31 @@ Critical unknowns remaining:
 
 ## Cycle log
 
-### R20 — April 26 2026 — Arclight Hot-Swap (T_KV2) success & io_uring neutralization
+### R23 — April 26 2026 — Convergence Parallel Scaling (T_CV4) SUCCESS
+
+**Triggered by:** Investigation into MoE expert-loading overhead during batching.
+
+**What happened:**
+- **Status**: ✅ **SUCCESS**. 
+- **Aggregate TPS**: **15.59 tokens/sec** at concurrency=4.
+- **Scaling**: 1.12x scaling (vs 13.9 t/s single).
+- **Insight**: `llama-server` in the `pr-1288` build efficiently amortizes the DDR5 expert-fetch cost across the batch. The MoE architecture is multi-user viable on CPU.
+
+---
+
+### R22 — April 26 2026 — Convergence Hybrid Optimization (T_CV3) SUCCESS
+
+**Triggered by:** Need to recover 13.5 t/s baseline for the 397B model using partial GPU offload.
+
+**What happened:**
+- **Status**: ✅ **SUCCESS**. 
+- **Baseline Replicated**: Achieved **13.99 t/s** using `-ngl 999 --cpu-moe`.
+- **Finding**: Offloading attention layers to GPU (sm_120) provides a **3.75x speedup** over pure CPU.
+- **Tooling**: `llama-bench` discarded for MoE hybrid mode; `llama-server` is the production engine.
+
+---
+
+### R21 — April 26 2026 — Convergence (T_CV1) Baseline & Decision
 
 **Triggered by:** The need to reduce the 100s+ cold start penalty for Arclight TP=2 (Extended mode) to sub-10s to make interactive mode-switching viable.
 
@@ -78,11 +102,30 @@ Critical unknowns remaining:
     - Patched `vllm/entrypoints/openai/api_server.py` and `vllm/v1/utils.py` to force standard `asyncio.run()` instead of `uvloop.run()`.
     - Exported `UV_USE_IO_URING=0` to ensure `libuv` does not create rings even if `uvloop` is imported.
     - Pivoted to **host-native CRIU + cuda-checkpoint** to avoid Podman CDI mount-point conflicts.
-- **Result**: `results/T_KV2_host_hot_restart_20260426T023839Z` contains the verified 358x speedup.
+- **Result**: `results/T_KV2_host_hot_restart_20260426T023839Z` contains the verified 358x speedup. Post-restore TPS (210 t/s) verified healthy (2026-04-26).
 
 **Decisions:**
 - Host-native execution is now the primary path for any benchmark requiring stateful checkpointing.
 - The `vllm-bench` pyenv is now considered "CRIU-Ready" with manual patches; any package updates must re-verify the `asyncio` bypass.
+
+---
+
+### R21 — April 26 2026 — Convergence (T_CV1) Baseline & Decision
+
+**Triggered by:** Need to establish operational parameters for the 397B Singularity-tier model running in CPU-only mode.
+
+**What happened:**
+- **Status**: ✅ **SUCCESS**. T_CV1 baseline established.
+- **Startup**: Median cold start **83s**. Warm start (page cache) **88s**. Conclusion: Model initialization is CPU-bound, not disk-bound.
+- **Performance**: Baseline generation at -ngl 0 (CPU-only) is **3.7 t/s**.
+- **Context Ceiling**: Verified functional up to **128k context** at **3.6 t/s**.
+- **Result**: `results/T_CV1_convergence_startup_timing_20260426T101623Z/`.
+
+**Decisions:**
+- **Always-Resident**: Convergence will be maintained as an always-resident service in system RAM. The 80s+ load time is too high for transparent demand-routing.
+- **Context Limit**: 128k is the official context ceiling for Convergence. Queries exceeding this require Singularity escalation (GPU offload).
+
+**Next focus:** T_CV2 (Thread Sweep) to optimize the 3.7 t/s baseline.
 
 **Next focus:** Audit the Thinker (Qwen3.6-27B) at TP=2 using the new hot-restart capability to investigate the confident incorrectness pathology (T2.4g/h).
 

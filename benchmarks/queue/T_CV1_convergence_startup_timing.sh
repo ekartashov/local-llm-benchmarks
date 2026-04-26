@@ -70,10 +70,12 @@ startup_once() {
     local rep="$1"
     local mode="$2"   # "cold" or "warm"
 
-    echo "[T_CV1] Rep ${rep} (${mode}): starting server..."
+    echo "[T_CV1] Rep ${rep}/${RUNS} (${mode}): starting server..." >&2
     local T_START_MS
     T_START_MS=$(date +%s%3N)
 
+    local LOG="${RESULTS_DIR}/server_${mode}_${rep}.log"
+    touch "${LOG}"
     "${IK_BUILD}/bin/llama-server" \
         -m "${MODEL_CACHE}/${CONVERGENCE_MODEL}" \
         --port "${PORT_CONVERGENCE:-8002}" \
@@ -84,10 +86,13 @@ startup_once() {
         -t "$(nproc)" \
         -c 16384 \
         --jinja \
-        > "${RESULTS_DIR}/server_${mode}_${rep}.log" 2>&1 &
+        > "${LOG}" 2>&1 &
     local SERVER_PID=$!
 
-    echo "[T_CV1] Rep ${rep}: polling ${HEALTH_URL} every 500ms..."
+    echo "[T_CV1] Rep ${rep}/${RUNS} (${mode}): polling ${HEALTH_URL} every 500ms (streaming logs below)..." >&2
+    tail --retry -f "${LOG}" >&2 &
+    local TAIL_PID=$!
+
     local T_READY_MS=0
     while true; do
         if curl -sf --max-time 2 "${HEALTH_URL}" &>/dev/null; then
@@ -96,17 +101,20 @@ startup_once() {
         fi
         if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
             echo "[T_CV1] ERROR: server died during ${mode} rep ${rep}" >&2
+            kill "${TAIL_PID}" 2>/dev/null || true
             cat "${RESULTS_DIR}/server_${mode}_${rep}.log" >&2
             return 1
         fi
         sleep 0.5
     done
 
+    kill "${TAIL_PID}" 2>/dev/null || true
+
     kill "${SERVER_PID}" 2>/dev/null || true
     wait "${SERVER_PID}" 2>/dev/null || true
 
     local STARTUP_MS=$(( T_READY_MS - T_START_MS ))
-    echo "[T_CV1] Rep ${rep} (${mode}): ready in ${STARTUP_MS} ms ($(( STARTUP_MS / 1000 ))s)"
+    echo "[T_CV1] Rep ${rep} (${mode}): ready in ${STARTUP_MS} ms ($(( STARTUP_MS / 1000 ))s)" >&2
     echo "${STARTUP_MS}"
 }
 
@@ -122,7 +130,7 @@ stop_server
 declare -a COLD_MS=()
 for i in $(seq 1 "${RUNS}"); do
     if [[ "${SKIP_DROP}" -eq 0 ]]; then
-        echo "[T_CV1] Dropping page cache (requires sudo)..."
+        echo "[T_CV1] Rep ${i}/${RUNS}: Dropping page cache (requires sudo)..."
         run sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
     fi
     if [[ "${DRY_RUN}" -eq 0 ]]; then
@@ -148,19 +156,34 @@ if [[ "${DRY_RUN}" -eq 0 ]]; then
     "${IK_BUILD}/bin/llama-bench" \
         -m "${MODEL_CACHE}/${CONVERGENCE_MODEL}" \
         -ngl 0 \
-        --no-mmap \
+        --mmap 0 \
         -b 4096 -ub 2048 \
         -t "$(nproc)" \
         -p 512 -n 128 \
         -r 3 \
         --output json \
-        > "${TPS_JSON}" 2>&1
+        | tee "${TPS_JSON}"
     echo "[T_CV1] llama-bench output → ${TPS_JSON}"
     TPS_TG=$(python3 -c "
-import json
-d = json.load(open('${TPS_JSON}'))
-rows = [r for r in d if r.get('n_prompt')==512 and r.get('n_gen')==128]
-print(rows[0]['avg_ts'] if rows else 'N/A')
+import json, os, re
+f = '${TPS_JSON}'
+if not os.path.exists(f): print('N/A'); exit()
+try:
+    lines = open(f).readlines()
+    # Filter out debug lines starting with ~ or = or other non-JSON junk
+    clean = []
+    for l in lines:
+        l_s = l.strip()
+        if not l_s: continue
+        if l_s.startswith('~') or l_s.startswith('=') or l_s.startswith('usage:'): continue
+        # Handle trailing junk on the same line as a closing brace
+        l = re.sub(r'(\}|\]|,)\s*~.*', r'\1', l)
+        clean.append(l)
+    d = json.loads(''.join(clean))
+    rows = [r for r in d if r.get('n_gen')==128]
+    print(rows[0]['avg_ts'] if rows else 'N/A')
+except:
+    print('N/A')
 " 2>/dev/null || echo "N/A")
     echo "[T_CV1] Baseline tg128 at ngl=0: ${TPS_TG} t/s"
 else
@@ -179,7 +202,9 @@ if [[ "${SKIP_CTX}" -eq 0 ]] && [[ "${DRY_RUN}" -eq 0 ]]; then
             break
         fi
 
-        echo "[T_CV1] Testing -c ${CTX}..."
+        echo "[T_CV1] Testing -c ${CTX} (streaming logs below)..."
+        LOG="${RESULTS_DIR}/server_ctx${CTX}.log"
+        touch "${LOG}"
         "${IK_BUILD}/bin/llama-server" \
             -m "${MODEL_CACHE}/${CONVERGENCE_MODEL}" \
             --port "${PORT_CONVERGENCE:-8002}" \
@@ -189,8 +214,10 @@ if [[ "${SKIP_CTX}" -eq 0 ]] && [[ "${DRY_RUN}" -eq 0 ]]; then
             -t "$(nproc)" \
             -c "${CTX}" \
             --jinja \
-            > "${RESULTS_DIR}/server_ctx${CTX}.log" 2>&1 &
+            > "${LOG}" 2>&1 &
         CTX_PID=$!
+        tail --retry -f "${LOG}" >&2 &
+        CTX_TAIL_PID=$!
 
         # Wait for ready
         CTX_READY=0
@@ -201,6 +228,8 @@ if [[ "${SKIP_CTX}" -eq 0 ]] && [[ "${DRY_RUN}" -eq 0 ]]; then
             if ! kill -0 "${CTX_PID}" 2>/dev/null; then break; fi
             sleep 0.5
         done
+
+        kill "${CTX_TAIL_PID}" 2>/dev/null || true
 
         if [[ ${CTX_READY} -eq 0 ]]; then
             echo "[T_CV1] -c ${CTX}: server failed to start (OOM or crash)"
@@ -214,7 +243,7 @@ if [[ "${SKIP_CTX}" -eq 0 ]] && [[ "${DRY_RUN}" -eq 0 ]]; then
         CTX_BENCH_JSON="${RESULTS_DIR}/bench_ctx${CTX}.json"
         "${IK_BUILD}/bin/llama-bench" \
             -m "${MODEL_CACHE}/${CONVERGENCE_MODEL}" \
-            -ngl 0 --no-mmap \
+            -ngl 0 --mmap 0 \
             -b 4096 -ub 2048 \
             -t "$(nproc)" \
             -p "${PROMPT_TOKENS}" -n 64 \
@@ -223,12 +252,23 @@ if [[ "${SKIP_CTX}" -eq 0 ]] && [[ "${DRY_RUN}" -eq 0 ]]; then
             > "${CTX_BENCH_JSON}" 2>/dev/null || true
 
         CTX_TPS=$(python3 -c "
-import json, os
+import json, os, re
 f = '${CTX_BENCH_JSON}'
 if not os.path.exists(f): print('N/A'); exit()
-d = json.load(open(f))
-rows = [r for r in d if r.get('n_gen', 0) > 0]
-print(rows[0]['avg_ts'] if rows else 'N/A')
+try:
+    lines = open(f).readlines()
+    clean = []
+    for l in lines:
+        l_s = l.strip()
+        if not l_s: continue
+        if l_s.startswith('~') or l_s.startswith('=') or l_s.startswith('usage:'): continue
+        l = re.sub(r'(\}|\]|,)\s*~.*', r'\1', l)
+        clean.append(l)
+    d = json.loads(''.join(clean))
+    rows = [r for r in d if isinstance(r, dict) and r.get('n_gen', 0) > 0]
+    print(rows[0]['avg_ts'] if rows else 'N/A')
+except:
+    print('N/A')
 " 2>/dev/null || echo "N/A")
 
         echo "[T_CV1] -c ${CTX}: tg64 = ${CTX_TPS} t/s"
@@ -243,21 +283,14 @@ elif [[ "${SKIP_CTX}" -eq 0 ]]; then
 fi
 
 # ── Compute median of cold starts ─────────────────────────────────────────────
-median_of() {
-    local -n _arr=$1
-    local sorted
-    IFS=$'\n' sorted=($(sort -n <<<"${_arr[*]}")); unset IFS
-    local mid=$(( ${#sorted[@]} / 2 ))
-    echo "${sorted[$mid]}"
-}
-
 if [[ "${DRY_RUN}" -eq 0 ]] && [[ ${#COLD_MS[@]} -gt 0 ]]; then
-    COLD_MEDIAN_MS=$(median_of COLD_MS)
-    COLD_MEDIAN_S=$(echo "scale=1; ${COLD_MEDIAN_MS}/1000" | bc)
+    SORTED_COLD=$(printf "%s\n" "${COLD_MS[@]}" | sort -n)
+    MEDIAN_COLD=$(echo "${SORTED_COLD}" | awk '{a[NR]=$1} END {if (NR%2==1) print a[(NR+1)/2]; else print (a[NR/2]+a[NR/2+1])/2}')
+    MEDIAN_COLD_S=$(( MEDIAN_COLD / 1000 ))
     WARM_S=$(echo "scale=1; ${WARM_MS}/1000" | bc)
 
-    if   [[ "${COLD_MEDIAN_MS}" -lt 30000 ]]; then VERDICT="cold-start-on-demand-ok"
-    elif [[ "${COLD_MEDIAN_MS}" -lt 90000 ]]; then VERDICT="escalation-acceptable"
+    if   [[ "${MEDIAN_COLD}" -lt 30000 ]]; then VERDICT="cold-start-on-demand-ok"
+    elif [[ "${MEDIAN_COLD}" -lt 90000 ]]; then VERDICT="escalation-acceptable"
     else                                            VERDICT="always-resident-required"
     fi
 
@@ -265,9 +298,7 @@ if [[ "${DRY_RUN}" -eq 0 ]] && [[ ${#COLD_MS[@]} -gt 0 ]]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo " T_CV1 Results"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo " Cold start (median of ${RUNS}): ${COLD_MEDIAN_S}s"
-    printf " Cold start reps: %s ms\n" "${COLD_MS[@]}"
-    echo " Warm start:                  ${WARM_S}s"
+    echo " Cold start (median of ${RUNS}): ${MEDIAN_COLD_S}s"
     echo " TPS baseline (ngl=0):        ${TPS_TG} t/s"
     echo " Verdict: ${VERDICT}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -296,8 +327,8 @@ if [[ "${DRY_RUN}" -eq 0 ]] && [[ ${#COLD_MS[@]} -gt 0 ]]; then
   },
   "metrics": {
     "cold_start_ms_reps": [$(IFS=,; echo "${COLD_MS[*]}")],
-    "cold_start_ms_median": ${COLD_MEDIAN_MS},
-    "cold_start_s_median": ${COLD_MEDIAN_S},
+    "cold_start_ms_median": ${MEDIAN_COLD},
+    "cold_start_s_median": ${MEDIAN_COLD_S},
     "warm_start_ms": ${WARM_MS},
     "warm_start_s": ${WARM_S},
     "tps_baseline_ngl0": "${TPS_TG}",
@@ -318,7 +349,7 @@ EOJSON
 
 | Mode | Startup time |
 |------|-------------|
-| Cold start median (${RUNS} reps) | **${COLD_MEDIAN_S}s** |
+| Cold start median (3 reps) | **${MEDIAN_COLD_S}s** |
 | Warm start (page cache hot) | **${WARM_S}s** |
 
 Cold start reps (ms): ${COLD_MS[*]}

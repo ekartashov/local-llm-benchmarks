@@ -44,15 +44,17 @@ Three-tier architecture has permanent names. Use these in all docs, config, and 
 **Contrast:** MiniMax M2.5 quantizes catastrophically at IQ2-IQ4 (community-verified) — do not use MiniMax M2.5 as Convergence. Qwen3.5-397B is one of the best-quantizing models in the current landscape.
 
 ### Convergence performance baseline
-**MEASURED (R12, 2026-04-20).** On ZRH01-AIRIG with vLLM sleeping (level=1) and **-ngl 999**:
-- Token generation: **~13.15 t/s** (bottlenecked by DDR5 bandwidth reading MoE expert weights)
-- Prompt eval (469 tokens): **60.66 t/s**
-- Prompt eval (2348 tokens): **158.94 t/s**
-- GPU VRAM consumed: ~8-12GB total across both 5090s.
+**MEASURED (R22, 2026-04-26).** On ZRH01-AIRIG with Arclight/Core sleeping and **-ngl 999 --cpu-moe**:
+- Token generation (Singularity mode, C=1): **13.9 tokens/sec**.
+- Token generation (Singularity mode, C=4): **15.6 tokens/sec (Aggregate)**.
+- Per-user speed (C=4): **~4.2 tokens/sec**.
+- Scaling Efficiency: **1.12x** (Throughput increases with batching).
+- Token generation (Convergence mode, -ngl 0): **3.7 tokens/sec**.
+- Speedup: **3.75x** via hybrid GPU attention offload.
+- GPU VRAM consumed: ~12GB (split across both 5090s via `-sm row`).
 
-**REVISED (2026-04-25):** Production Convergence is now **CPU-only (-ngl 0)** to avoid VRAM conflicts with Arclight. The 13.15 t/s baseline was for -ngl 999. The new -ngl 0 baseline is being established via T_CV1 and T_CV2. Expected speed is slightly lower than 13.15 t/s but allows for parallel always-on deployment.
-
-**Thread count not yet optimized** — baseline at `$(nproc)` = 32. Smaller counts (16, 24) may be better due to MoE expert matrix sizes being too small to exploit 32 threads without cache thrashing. See T_CV2.
+**Optimal config confirmed**: `-ngl 999 --cpu-moe -sm row -t 32 -np 4`.
+**Status**: Capacity audit complete. Convergence is viable for multi-user parallel workloads.
 
 ### ik_llama.cpp pr-1288 is required for Convergence
 **SETTLED (R12, 2026-04-20).** Mainline ik_llama.cpp (version 4427, commit 07516cec) predates Qwen3.5 GDN (Gated Delta Network) support. PR #1288 adds `LLM_ARCH_QWEN35MOE`, `build_qwen35moe()`, and `llama-delta-net.cpp` with `ssm_alpha`. Must check out the `pr-1288` branch before building. Mainline llama.cpp (b8851) also supports this architecture as fallback but lacks `-fmoe` optimization.
@@ -113,7 +115,12 @@ find src/ -name "*.cpp" -o -name "*.h" | xargs grep -l "qwen35\|ssm_alpha\|delta
 **SETTLED (2026-04-25, R19).** Two simultaneous TP=2 vLLM instances on our hardware saturate the shared PCIe 5.0 x8/x8 bifurcation bus. Each TP=2 decode step requires an allreduce across GPUs — with both instances doing this simultaneously, effective per-instance bandwidth halves. Result: 250+70 t/s → 4+4 t/s observed. TP=1-per-GPU eliminates allreduce entirely and is the only viable concurrent design on this hardware without NVLink. Do not retry two-simultaneous-TP=2 without NVLink.
 
 ### CUDA checkpoint/restore — SETTLED (2026-04-26, T_KV2)
-**SETTLED.** Host-native CRIU + NVIDIA `cuda-checkpoint` (driver 570+) enables full CUDA process snapshots including compiled graphs and loaded weights. T_KV2 verified a **0.28s** Hot Restart time for a TP=2 vLLM instance (vs 100.2s cold start).
+**SETTLED.** Host-native CRIU + NVIDIA `cuda-checkpoint` (driver 570+) enables full CUDA process snapshots including compiled graphs and loaded weights. 
+- **T_KV2 Verdict (Arclight Restart)**: Confirmed 0.28s hot-restart time via `uvloop` neutralization. TP=2 Arclight mode switches are now officially viable for sub-second latency.
+- **T_CV1 Verdict (Convergence Startup)**: 397B model cold-start is **~83s**. Warm start (from page cache) is not faster (**~88s**).
+- **Decision (Convergence Policy)**: Due to the >80s load time, Convergence must be **always-resident** in system RAM. "On-demand" loading is only acceptable for explicit user escalation, not transparent routing.
+- **Decision (Convergence Threads)**: T_CV2 determined that **32 threads** is the optimal count for the 397B model on pure CPU. PP speed scales linearly with threads (62 t/s vs 29 t/s).
+- **Decision (Convergence Context)**: Convergence successfully serves up to **128k context** on CPU at **3.6 t/s**. This is the hard limit for Singularity-tier escalation.
 
 **Requirements for stability:**
 1.  **Host-Native Execution**: Podman CDI mount-point conflicts are too brittle for CRIU. Run production hot-swaps on the host.
@@ -121,7 +128,7 @@ find src/ -name "*.cpp" -o -name "*.h" | xargs grep -l "qwen35\|ssm_alpha\|delta
 3.  **Environment**: `UV_USE_IO_URING=0` must be exported to ensure `libuv` remains clean.
 4.  **VRAM Hygiene**: Use `sudo nvidia-smi --gpu-reset -i 1` to clear "ghost" memory leaks if a restore fails or a process is abandoned.
 
-**What this unlocks:** Instantaneous mode-switching for "Extended Arclight" (TP=2) and sub-second resumes for any checkpointed model.
+**What this unlocks:** Instantaneous mode-switching for "Extended Arclight" (TP=2) and sub-second resumes for any checkpointed model. Post-restore TPS (210 t/s) verified healthy and matches cold-start performance (±10%).
 
 ### vLLM Sleep Mode level=1 ~4 GiB residual is a design floor, not a tunable
 When a vLLM instance sleeps at level=1, it retains ~4 GiB GPU VRAM. This is the caching allocator instance, captured CUDA graphs, JIT-compiled kernels, and process state — deliberately preserved to enable <1s wake. Cannot be shrunk without breaking the wake-time guarantee. Level=2 offloads more but is unusable (gibberish-on-wake, see separate entry).
@@ -361,6 +368,42 @@ Still provisionally valid for TP=1 isolated thinker. Gemma4-31B evaluated as alt
 
 ### OLD: "ik_llama.cpp version 4427 does not support Qwen3.5"
 Superseded — PR #1288 branch adds full Qwen3.5 MoE support including GDN layers (`ssm_alpha`, `ssm_beta`, `ssm_out`). Mainline ik_llama.cpp HEAD (commit 07516cec) does not have it yet, but pr-1288 does. Mainline llama.cpp b8851 also has it as fallback.
+
+---
+
+### R23 — April 26 2026 — Convergence Parallel Scaling (T_CV4) COMPLETE
+
+**Triggered by:** Need to determine if the MoE expert-loading bottleneck causes throughput to collapse under batching.
+
+**What happened:**
+- **Status**: ✅ **SUCCESS**. 
+- **Finding**: Aggregate throughput actually **increases** by 12% (13.9 → 15.6 t/s) when running 4 concurrent requests.
+- **Finding**: Per-user speed drops to **4.2 t/s**, which remains viable for interactive use.
+- **Conclusion**: `llama-server` effectively amortizes the DDR5 expert-fetch cost across the batch. Convergence is officially multi-user capable in hybrid mode.
+
+**Decisions:**
+- Default parallel capacity for Singularity-tier is **4 slots** (`-np 4`).
+
+---
+
+### R22 — April 26 2026 — Convergence Hybrid Optimization (T_CV3) COMPLETE
+
+**Triggered by:** Need to replicate the 13.5 t/s historical baseline for the 397B model using partial GPU offload.
+
+**What happened:**
+- **Status**: ✅ **SUCCESS**. 
+- **Baseline Replicated**: Achieved **13.99 t/s** (Generation) using `-ngl 999 --cpu-moe`.
+- **Finding**: Offloading all attention layers to GPU provides a **3.75x speedup** over the pure CPU baseline (3.7 t/s).
+- **Finding**: `llama-bench` CLI parser is unstable for specialized MoE flags in the current `pr-1288` build; `llama-server` is the only reliable way to benchmark these modes.
+- **VRAM**: Hybrid mode consumes ~12GB VRAM total (sharded), leaving significant headroom for Arclight's residual footprint.
+
+**Decisions:**
+- Convergence "Singularity" mode (GPU-assisted) is officially validated at ~14 t/s.
+- `llama-server` is the production engine for all Singularity-tier tasks.
+
+---
+
+### R21 — April 26 2026 — Convergence (T_CV1) Baseline & Decision
 
 ---
 

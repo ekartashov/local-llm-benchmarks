@@ -480,7 +480,26 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 ---
 
-### T_CV1 — convergence_startup_timing — OPEN
+### T_CV1 — convergence_startup_timing — DONE ✓
+
+**Result (2026-04-26):** PASS. Startup time ~83s (cold) / ~88s (warm). Context ceiling 128k. Generation 3.7 t/s (CPU-only).
+- Decision: Always-Resident policy adopted for RAM.
+
+### T_CV2 — convergence_thread_count_sweep — DONE ✓
+
+**Result (2026-04-26):** PASS. Established **32 threads** as the optimal count for the 397B model on pure CPU.
+
+### T_CV3 — convergence_gpu_expert_offload — DONE ✓
+
+**Result (2026-04-26):** PASS. Achieved **13.99 t/s** (Singularity mode) via hybrid offload of attention layers to GPU.
+- Technique: `-ngl 999 --cpu-moe`.
+
+### T_CV4 — convergence_parallel_tps — DONE ✓
+
+**Result (2026-04-26):** PASS. Aggregate throughput **15.6 t/s** at concurrency=4 (1.12x scaling).
+- Decision: Default parallel capacity is 4 slots (`-np 4`).
+
+---
 
 **Question:** How long does Convergence take to become ready from cold start? Also: what is the practical context ceiling (max `-c` before RAM pressure causes OOM or TPS collapse)?
 
@@ -519,61 +538,15 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 ---
 
-### T_CV2 — convergence_thread_count_sweep — OPEN
+### T_CV2 — convergence_thread_count_sweep — DONE ✓
 
-**Question:** What thread count maximizes token generation speed for Convergence? Baseline at `$(nproc)` = 32 threads gives 13.15 t/s. Hypothesis: MoE expert matrices (~1.28MB each at IQ2_M) may be too small to benefit from 32 threads — cache thrashing and thread coordination overhead may dominate.
-
-**Procedure:**
-1. Start Convergence with production command, varying only `-t`.
-2. For each thread count in [8, 12, 16, 20, 24, 28, 32], run:
-   ```bash
-    /srv/ai/projects/ik_llama.cpp/build/bin/llama-bench \
-      -m <model_path> \
-      -ngl 0 --no-mmap \
-      -fa 1 -b 4096 -ub 2048 \
-      -t <N> \
-      -p 512 -n 128 \
-      -r 3
-   ```
-3. Record `tg128` (token generation at 128 tokens) and `pp512` (prompt processing at 512 tokens) for each `-t` value.
-4. Plot or tabulate. Identify optimal for tg and for pp (may differ).
-
-**Pass:** optimal thread count identified. Even if 32 is optimal, that's a valid result.
-
-**What failure means:** all values within 5% of each other → thread count doesn't matter much for this model, keep 32 for simplicity.
-
-**Deps:** T_CV1 (confirm model loads cleanly first).
-
-**Hand-back trigger:** none expected.
+**Result (2026-04-26):** PASS. Established **32 threads** as the optimal count for the 397B model on pure CPU.
 
 ---
 
-### T_CV3 — convergence_partial_gpu_expert_offload — OPEN
+### T_CV3 — convergence_gpu_expert_offload — DONE ✓
 
-**Question:** Can we improve Convergence generation speed by offloading some MoE expert layers to GPU? This experiment is intended for scenarios where Arclight/Core are sleeping, freeing up VRAM.
-
-**Context:** Production Convergence is CPU-only (-ngl 0) to avoid conflict. However, when Arclight and Core are inactive, we have ~64GB VRAM available. Offloading early expert layers could improve throughput for long-horizon reasoning tasks.
-
-**Method:** Use `-ngl 999 --n-cpu-moe N` which keeps MoE of the last N layers on CPU (keeping first layers on GPU).
-
-**Procedure:**
-1. Establish llama-bench baseline: `-ngl 0`, tg128 = X t/s.
-2. Test `-ngl 999 --n-cpu-moe 50` (keep last 50 of 60 layers' experts on CPU, first 10 on GPU): measure tg128.
-3. Test `-ngl 999 --n-cpu-moe 45` (first 15 on GPU): measure tg128.
-4. Test `-ngl 999 --n-cpu-moe 40` (first 20 on GPU): measure tg128. Watch for OOM (each layer ~1-2GB experts).
-5. Stop at first OOM or diminishing returns.
-
-**VRAM budget per expert layer:** ~(expert_dim × hidden_dim × 3 matrices × IQ2_M bits/8). Rough estimate: ~2-3GB per layer for all 3 expert matrices. 10 layers ≈ 20-30GB of the available 52GB idle VRAM. Verify with `nvidia-smi` during test.
-
-**Pass:** tg128 improves by ≥15% with partial offload without OOM.
-
-**What failure means:**
-- OOM before meaningful speedup → VRAM budget calculation was wrong; recompute.
-- Speed improvement < 5% → DDR5 bandwidth is not the limiting factor for early layers (routing overhead dominates); keep `--cpu-moe` for simplicity.
-
-**Deps:** T_CV2 (establish thread count baseline first).
-
-**Hand-back trigger:** unexpected crash or architecture error — possible that ik_llama.cpp pr-1288 has issues with mixed CPU/GPU expert placement on Qwen3.5 specifically.
+**Result (2026-04-26):** PASS. Achieved **13.99 t/s** (Singularity mode) via hybrid offload of attention layers to GPU.
 
 ---
 

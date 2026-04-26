@@ -60,27 +60,59 @@ for T in 8 12 16 20 24 28 32; do
     JSON_OUT="${RESULTS_DIR}/bench_t${T}.json"
     
     if [[ "${DRY_RUN}" -eq 0 ]]; then
-        podman run --rm \
-            --name "ik-llama-bench-t${T}" \
-            --userns=keep-id \
-            -v "${IK_BUILD}:/app/build:ro,z" \
-            -v "${MODEL_CACHE}:/models:ro,z" \
-            --entrypoint "/app/build/bin/llama-bench" \
-            local-ik-llama:runtime \
-            -m "/models/${CONVERGENCE_MODEL}" \
+        # Run llama-bench with verbose logs for loading visibility
+        # We capture JSON to a file and let logs go to terminal
+        "${IK_BUILD}/bin/llama-bench" \
+            --verbose \
+            -m "${MODEL_CACHE}/${CONVERGENCE_MODEL}" \
             -ngl 0 \
-            --no-mmap \
+            --mmap 0 \
             -b 4096 -ub 2048 \
             -t "${T}" \
             -p 512 -n 128 \
             -r 3 \
             --output json \
-            > "${JSON_OUT}" 2>/dev/null
+            > "${JSON_OUT}" 2> >(stdbuf -oL grep -v "markdown" >&2)
             
         # Extract TPS values from JSON
-        # jq is usually available in this environment. If not, use python.
-        PP=$(python3 -c "import json, sys; d=json.load(open('${JSON_OUT}')); print([r for r in d if r['n_prompt']==512 and r['n_gen']==0][0]['tps'])" 2>/dev/null || echo "N/A")
-        TG=$(python3 -c "import json, sys; d=json.load(open('${JSON_OUT}')); print([r for r in d if r['n_prompt']==512 and r['n_gen']==128][0]['tps'])" 2>/dev/null || echo "N/A")
+        PP=$(python3 -c "
+import json, sys, re
+f = '${JSON_OUT}'
+try:
+    content = open(f).read()
+    # Find all JSON objects { ... }
+    objs = re.findall(r'\{[^{}]*\}', content, re.DOTALL)
+    val = 'N/A'
+    for obj_str in objs:
+        try:
+            d = json.loads(obj_str)
+            if d.get('n_prompt') == 512 and (d.get('n_gen') == 0 or d.get('test') == 'pp512'):
+                val = d.get('avg_ts', 'N/A')
+                break
+        except: continue
+    print(val)
+except Exception as e:
+    print(f'N/A (Error: {e})')
+" 2>/dev/null || echo "N/A")
+
+        TG=$(python3 -c "
+import json, sys, re
+f = '${JSON_OUT}'
+try:
+    content = open(f).read()
+    objs = re.findall(r'\{[^{}]*\}', content, re.DOTALL)
+    val = 'N/A'
+    for obj_str in objs:
+        try:
+            d = json.loads(obj_str)
+            if d.get('n_gen') == 128:
+                val = d.get('avg_ts', 'N/A')
+                break
+        except: continue
+    print(val)
+except Exception as e:
+    print(f'N/A (Error: {e})')
+" 2>/dev/null || echo "N/A")
         
         echo "${T},${PP},${TG}" | tee -a "${CSV_FILE}"
     else
