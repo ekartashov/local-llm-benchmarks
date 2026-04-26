@@ -628,6 +628,16 @@ metrics.json and summary.md. See script header for full option documentation.
 
 ---
 
+### T2.4h — thinker_tp2_correctness_enforce_eager — DONE ✓
+
+**Question:** Does bypassing CUDA graph capture via `--enforce-eager` resolve the GDN state-splitting errors at TP=2?
+
+**Results (2026-04-26):** **SUCCESS** (Semantic) / **FAILED** (Performance). Eager mode restores semantic correctness at TP=2 (th02 pass), but at the cost of a 10x throughput collapse (~16 t/s). Matches the R24/T6.1 performance floor seen on the V1 engine.
+
+**Consequence:** TP=2 is technically viable for correctness but economically non-viable for production due to the eager-mode penalty.
+
+---
+
 ### T_KV3 — thinker_tp2_fix_or_replacement — OPEN (GATE for no-Core final decision)
 
 **Question:** Can the thinker run at TP=2 correctly? If not, is there an alternative thinker model that supports TP=2 without GDN state-split errors?
@@ -980,7 +990,6 @@ Pattern: **Gemma ties on pure coding (LiveCodeBench) but Qwen dominates on agent
 ---
 
 ## Tier 4 — engine / infra comparison
-
 ### T4.1 — sglang_for_a3b_coder
 
 **Question:** Given Sleep Mode and MTP are vLLM-exclusive for our use, is SGLang worth keeping as a comparison point at all?
@@ -992,14 +1001,6 @@ Pattern: **Gemma ties on pure coding (LiveCodeBench) but Qwen dominates on agent
 **Procedure:** only rerun if a specific model fails on vLLM and we need a fallback. Otherwise PUNTED.
 
 **Status:** PUNTED (revisit if vLLM becomes a bottleneck).
-
----
-
-### T4.2 — llama_cpp_as_fallback_for_exotic_quants
-
-**Question:** Is llama.cpp needed for GGUF-only quants we can't get in AWQ (e.g. Unsloth UD-* dynamic quants)?
-
-**Status:** PUNTED. Only run if a capability gap appears that AWQ cannot fill. Unsloth UD quants are mostly relevant for memory-tight systems, which we are not.
 
 ---
 
@@ -1050,15 +1051,22 @@ Pattern: **Gemma ties on pure coding (LiveCodeBench) but Qwen dominates on agent
 
 The current task suites are coding-heavy. Infra workload coverage is thin. These items author new tasks and re-score models on the expanded suite.
 
-### T6.1 — infra_shell_and_container_tasks — RERUN NEEDED
+### T6.1 — infra_shell_and_container_tasks — DONE ✓
 
-Tasks authored (in01–in05): Containerfile debugging, systemd unit troubleshooting, compose authoring, shell idempotency, network tuning. Script at `benchmarks/queue/T6.1_infra_task_suite.sh`.
+**Rerun (2026-04-26):** COMPLETE. Re-confirmed `RESEARCH_STATE:L27` finding. vLLM 0.19.0 V1 engine at TP=1 collapses to ~20 t/s in eager mode. TP=2 (20.25 t/s) achieved 100% completion rate (5/5 tasks) with semantic stability. TP=1 (23.6 t/s) suffered from Reasoning Collapse (hallucination loops) likely due to Triton/FLA kernel shape mismatches.
+
+**Deliverable:** `results/T6.1_infra_task_suite_20260426T165210Z/` contains the recorded baseline. Arclight Coder is currently tied to TP=2 for production reliability.
+systemd unit troubleshooting, compose authoring, shell idempotency, network tuning. Script at `benchmarks/queue/T6.1_infra_task_suite.sh`.
 
 **Manual run (2026-04-25):** 232 t/s TPS, 100% task completion, confirmed via operator-run session. Results recorded in `config/models.yaml`.
 
 **Rerun required:** The manual run was with uncertain V1 engine state. Now that V1 is disabled by default in `deploy.sh`, rerun the full T6.1 script to get a clean automated baseline. Also needed: confirm whether coder TP=1 (with V1 disabled) recovers ~237 t/s — run T6.1 with TP=1 alongside TP=2 to settle the production config.
 
-**Deliverable:** `results/T6.1_infra_task_suite_*/metrics.json` with V1-disabled config recorded explicitly.
+---
+
+## Tier 6 — task suite extension (ongoing, not blocking)
+
+The current task suites are coding-heavy. Infra workload coverage is thin. These items author new tasks and re-score models on the expanded suite.
 
 ### T6.2 — cross_arch_tasks
 

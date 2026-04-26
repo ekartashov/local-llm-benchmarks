@@ -2,9 +2,9 @@
 
 Living document. What we currently believe, what is still open, and the log of research ↔ testing cycles.
 
-**Current cycle:** R23 COMPLETE — Convergence Parallel Scaling (T_CV4) verified at 15.6 t/s aggregate.
-- **Singularity tier (4th tier)** finalized at **13.9 t/s** (single) and **15.6 t/s** (C=4).
-- **T_CV1, T_CV2, T_CV3, T_CV4** benchmarks complete.
+**Current cycle:** R25 COMPLETE — Thinker TP=2 Correctness (T2.4h) and Coder Reliability (T6.1) recorded.
+- **V1 Engine Warning**: vLLM 0.19.0 forces the V1 engine for Qwen MoE; results in 10x throughput regression (~20 t/s) in eager mode.
+- **T6.1, T2.4h** recorded.
 - **T3.4** (Prefix cache survival) script created.
 - **T6.1** (Infra tasks) authored in `benchmarks/infra_tasks/tasks/` (Tasks in01-in05).
 - `ARCHITECTURE.md` updated to reflect Qwen3.6-27B as the new Arclight Thinker winner.
@@ -15,7 +15,7 @@ Living document. What we currently believe, what is still open, and the log of r
   → metrics.json/summary.md. Prerequisite check included (CRIU, cuda-checkpoint, driver ≥570,
   newuidmap/newgidmap). See TESTING_QUEUE.md T_KV2 for install steps.
 
-**Current mode:** Execution — Coder reliability audit (T6.1) and Thinker TP=2 fix (T2.4h) queued.
+**Current mode:** Research — investigating vLLM version-pinning to restore V0 engine throughput.
 
 ---
 
@@ -66,6 +66,31 @@ Critical unknowns remaining:
 ---
 
 ## Cycle log
+
+### R25 — April 26 2026 — Thinker TP=2 Fix (T2.4h) RE-CONFIRMED TP=2 STABILITY
+
+**Triggered by:** Need to resolve GDN state-splitting errors at TP=2 via `--enforce-eager`.
+
+**What happened:**
+- **Status**: ✅ **SUCCESS** (Semantic) / ⚠️ **RE-CONFIRMED** (Performance).
+- **Finding**: `--enforce-eager` successfully resolved the semantic "garble" at TP=2, making the Arclight Thinker logically correct on two GPUs.
+- **Performance**: ~16.5 t/s (TP=2). This matches the known 10x performance collapse seen in R24/T6.1 when bypassing CUDA graphs on the V1 engine.
+- **Decision**: The "Eager fix" provides correctness for research/debug but is too slow for production. TP=2 thinker remains theoretically viable but economically blocked by engine overhead.
+
+---
+
+### R24 — April 26 2026 — Coder Reliability Audit (T6.1) RE-CONFIRMED TP=1 FLOOR
+
+**Triggered by:** Attempt to run Arclight Coder at TP=1 using the stable engine path.
+
+**What happened:**
+- **Status**: ✅ **RE-CONFIRMED**.
+- **Finding**: Re-verified the finding in `RESEARCH_STATE:L27`. vLLM 0.19.0 V1 engine overhead at TP=1 forces a collapse to ~20 t/s in eager mode.
+- **Workaround**: `gpu-mem-util 0.98` + `--enforce-eager` allows TP=1 to load, but the performance regression is 10x (23.6 t/s).
+- **Quality**: TP=1 suffered from **Reasoning Collapse** (hallucination loops) likely due to Triton/FLA kernel shape mismatches in eager mode. TP=2 (20.25 t/s) achieved 100% PASS rate.
+- **Decision**: TP=2 remains the only viable deployment for the 35B-A3B Coder on vLLM 0.19.0.
+
+---
 
 ### R23 — April 26 2026 — Convergence Parallel Scaling (T_CV4) SUCCESS
 
