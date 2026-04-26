@@ -36,7 +36,9 @@ The two GPUs are a **shared pool via tensor parallelism**, not two independent s
 
 ## Operating model: research ↔ testing loop
 
-This is the central workflow. Read it before doing anything else.
+- **Arclight Hot-Swap (T_KV2)**: Uses host-native CRIU + `cuda-checkpoint`.
+    - **CRITICAL**: vLLM is patched to disable `uvloop` (io_uring). Do not revert `api_server.py` or `v1/utils.py` changes.
+    - **Environment**: Always set `UV_USE_IO_URING=0`.
 
 ```
 ┌──────────────┐  open question    ┌──────────────┐

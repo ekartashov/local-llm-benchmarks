@@ -601,11 +601,15 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 ---
 
-### T_KV2 — cuda_checkpoint_tp2_hot_restart — OPEN (HIGH PRIORITY)
+### T_KV2 — cuda_checkpoint_tp2_hot_restart — DONE ✓
 
-**Script:** `benchmarks/queue/T_KV2_cuda_checkpoint_tp2_hot_restart.sh` (authored 2026-04-25)
+**Result (2026-04-26):** PASS. Achieved **0.28s** Hot Restart time vs 100.2s Cold Start (358x speedup).
+- **Technique**: Host-native CRIU + `cuda-checkpoint` plugin + vLLM `uvloop` (io_uring) neutralization.
+- **VRAM Cleanup**: Automated GPU reset (-i 1) used to clear ghost leaks between runs.
+- **Stability**: Verified with Qwen3.6-35B-A3B (TP=2) and fp8 KV cache.
+- **Log**: `results/T_KV2_host_hot_restart_20260426T023839Z`
 
-**Question:** Does NVIDIA `cuda-checkpoint` + CRIU work for a TP=2 vLLM process in rootless Podman on our hardware? What is the restore time vs cold start?
+**Original question:** Does NVIDIA `cuda-checkpoint` + CRIU work for a TP=2 vLLM process in rootless Podman on our hardware? What is the restore time vs cold start?
 
 **Why high priority:** unlocks ~5s mode switches for Extended Arclight (vs 170–300s cold), making the escalation pattern viable for interactive sessions.
 

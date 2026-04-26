@@ -18,13 +18,15 @@ RUN_ID="T_KV2_host_hot_restart_${TIMESTAMP}"
 RUN_DIR="${RESULTS_BASE}/${RUN_ID}"
 
 mkdir -p "${RUN_DIR}"
+rm -rf "${CHECKPOINT_DIR}"
 mkdir -p "${CHECKPOINT_DIR}"
 
 # Environment
 export HF_HOME="/srv/ai/models"
+export UV_USE_IO_URING=0
 export UVLOOP_NO_IO_URING=1
-export VLLM_USE_V1=0
-export VLLM_V1_ENABLED=0
+export VLLM_V1_ENABLED=1
+export VLLM_USE_V1=1
 export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
 
 # Utility paths
@@ -83,15 +85,19 @@ for p in $PIDS; do
     sudo "${CUDA_CHECKPOINT}" --toggle --pid "$p" || echo "Warning: PID $p not a CUDA process"
 done
 
+# Diagnostic: Check for io_uring FDs before dump
+echo "[T_KV2] Auditing FDs for PID ${VLLM_PID} before dump..."
+sudo ls -l /proc/${VLLM_PID}/fd | grep -i io_uring || echo "No io_uring FDs in main process."
+pgrep -P ${VLLM_PID} | xargs -I {} sh -c 'echo "Child {}:"; sudo ls -l /proc/{}/fd | grep -i io_uring || echo "None"'
+
 echo "[T_KV2] Performing CRIU Dump..."
 START_DUMP=$(date +%s%N)
-if ! sudo "${CRIU}" dump \
-    --tree "${VLLM_PID}" \
-    --images-dir "${CHECKPOINT_DIR}" \
-    --shell-job \
-    --tcp-established \
-    --file-locks \
-    --leave-stopped; then
+    if ! sudo "${CRIU}" dump \
+        --tree "${VLLM_PID}" \
+        --images-dir "${CHECKPOINT_DIR}" \
+        --shell-job \
+        --tcp-established \
+        --file-locks; then
     echo "[T_KV2] ERROR: CRIU Dump failed. Running diagnostics..."
     for p in $PIDS; do
         echo "[T_KV2] Checking FDs for PID $p:"
@@ -102,7 +108,17 @@ fi
 
 END_DUMP=$(date +%s%N)
 DUMP_SEC=$(echo "scale=3; ($END_DUMP - $START_DUMP) / 1000000000" | bc)
-echo "[T_KV2] Checkpoint created in ${DUMP_SEC}s. Process is now frozen."
+echo "[T_KV2] Dump Complete: ${DUMP_SEC}s"
+
+# Wait for PIDs to be fully released
+echo "[T_KV2] Waiting for PIDs to clear..."
+sleep 2
+for p in $PIDS; do
+    if kill -0 $p 2>/dev/null; then
+        echo "[T_KV2] PID $p still exists, force killing..."
+        sudo kill -9 $p || true
+    fi
+done
 
 # 3. Hot Restart (Restore) Phase
 echo "[T_KV2] Measuring Hot Restart (Restore)..."
@@ -169,15 +185,15 @@ cat <<EOF > "${RUN_DIR}/summary.md"
 
 ## Configuration
 - **Model:** \`${MODEL}\`
-- **Engine:** vLLM 0.19.1 (V1 disabled)
+- **Engine:** vLLM 0.19.1 (V1 Enabled)
 - **Method:** Host-native CRIU + NVIDIA cuda-checkpoint
 - **Hardware:** Dual RTX 5090 (TP=2)
 
 ## Analysis
-$( ( ( $(echo "$HOT_RESTART_SEC < 10.0" | bc -l) == 1 ) ) && echo "✅ SUCCESS: Sub-10s hot swap achieved!" || echo "❌ FAILURE: Still above 10s target.")
+$(if [ "$(echo "$HOT_RESTART_SEC < 10.0" | bc -l)" -eq 1 ]; then echo "✅ SUCCESS: Sub-10s hot swap achieved!"; else echo "❌ FAILURE: Still above 10s target."; fi)
 EOF
 
 echo "[T_KV2] Benchmark complete. Results saved to ${RUN_DIR}"
 
 # Cleanup (kill the restored process)
-kill $VLLM_PID || true
+sudo kill -9 $VLLM_PID 2>/dev/null || true

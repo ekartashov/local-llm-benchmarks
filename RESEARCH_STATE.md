@@ -67,6 +67,27 @@ Critical unknowns remaining:
 
 ## Cycle log
 
+### R20 — April 26 2026 — Arclight Hot-Swap (T_KV2) success & io_uring neutralization
+
+**Triggered by:** The need to reduce the 100s+ cold start penalty for Arclight TP=2 (Extended mode) to sub-10s to make interactive mode-switching viable.
+
+**What happened:**
+- **Status**: ✅ **SUCCESS**. Achieved **0.28s** Hot Restart time (down from 100.2s cold start) for Qwen3.6-35B-A3B (TP=2).
+- **Blocker Resolved**: The `Unknown shit 600 (anon_inode:[io_uring])` CRIU error was neutralized by stripping `uvloop` from the vLLM entrypoints and background workers.
+- **Technical Path**: 
+    - Patched `vllm/entrypoints/openai/api_server.py` and `vllm/v1/utils.py` to force standard `asyncio.run()` instead of `uvloop.run()`.
+    - Exported `UV_USE_IO_URING=0` to ensure `libuv` does not create rings even if `uvloop` is imported.
+    - Pivoted to **host-native CRIU + cuda-checkpoint** to avoid Podman CDI mount-point conflicts.
+- **Result**: `results/T_KV2_host_hot_restart_20260426T023839Z` contains the verified 358x speedup.
+
+**Decisions:**
+- Host-native execution is now the primary path for any benchmark requiring stateful checkpointing.
+- The `vllm-bench` pyenv is now considered "CRIU-Ready" with manual patches; any package updates must re-verify the `asyncio` bypass.
+
+**Next focus:** Audit the Thinker (Qwen3.6-27B) at TP=2 using the new hot-restart capability to investigate the confident incorrectness pathology (T2.4g/h).
+
+---
+
 ### R19 — April 25 2026 — Convergence transition & Singularity intro
 
 **Triggered by:** Confirmation that Arclight thinker is settled (T2.4g complete). Transitioning focus to the high-parameter tiers (Convergence and Singularity).

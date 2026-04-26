@@ -112,16 +112,16 @@ find src/ -name "*.cpp" -o -name "*.h" | xargs grep -l "qwen35\|ssm_alpha\|delta
 ### PCIe fight root cause — settled
 **SETTLED (2026-04-25, R19).** Two simultaneous TP=2 vLLM instances on our hardware saturate the shared PCIe 5.0 x8/x8 bifurcation bus. Each TP=2 decode step requires an allreduce across GPUs — with both instances doing this simultaneously, effective per-instance bandwidth halves. Result: 250+70 t/s → 4+4 t/s observed. TP=1-per-GPU eliminates allreduce entirely and is the only viable concurrent design on this hardware without NVLink. Do not retry two-simultaneous-TP=2 without NVLink.
 
-### CUDA checkpoint/restore — viable mechanism, one test needed (HIGH PRIORITY)
-**PROVISIONAL (2026-04-25, R19).** NVIDIA `cuda-checkpoint` (github.com/NVIDIA/cuda-checkpoint, driver 570+) + CRIU enables full CUDA process snapshots including compiled graphs, loaded weights, and CUDA context. Modal demonstrated 45s → 5s startup for a vLLM instance. Our RTX 5090s require driver 570+ (confirmed for sm_120 Blackwell).
+### CUDA checkpoint/restore — SETTLED (2026-04-26, T_KV2)
+**SETTLED.** Host-native CRIU + NVIDIA `cuda-checkpoint` (driver 570+) enables full CUDA process snapshots including compiled graphs and loaded weights. T_KV2 verified a **0.28s** Hot Restart time for a TP=2 vLLM instance (vs 100.2s cold start).
 
-**What this unlocks:** Extended Arclight mode switch from ~170–300s cold to ~5s. Also enables session-start-once for any TP=2 configuration.
+**Requirements for stability:**
+1.  **Host-Native Execution**: Podman CDI mount-point conflicts are too brittle for CRIU. Run production hot-swaps on the host.
+2.  **`io_uring` Neutralization**: vLLM must be patched to disable `uvloop` (Networking/Async core) as `io_uring` rings are incompatible with CRIU.
+3.  **Environment**: `UV_USE_IO_URING=0` must be exported to ensure `libuv` remains clean.
+4.  **VRAM Hygiene**: Use `sudo nvidia-smi --gpu-reset -i 1` to clear "ghost" memory leaks if a restore fails or a process is abandoned.
 
-**Unknown:** TP=2 multi-GPU with CRIU (two CUDA contexts, more complex), and rootless Podman compatibility with CRIU.
-
-**Action:** T_KV2 — one test to confirm. Promote to SETTLED after T_KV2 PASS. Until then: use "session-start-once" pattern (pay cold start at session begin, keep warm for session duration) and rely on torch.compile disk cache (~70% startup reduction on second+ invocations, `~/.cache/vllm/torch_compile_cache`).
-
-**Re-evaluate after:** T_KV2.
+**What this unlocks:** Instantaneous mode-switching for "Extended Arclight" (TP=2) and sub-second resumes for any checkpointed model.
 
 ### vLLM Sleep Mode level=1 ~4 GiB residual is a design floor, not a tunable
 When a vLLM instance sleeps at level=1, it retains ~4 GiB GPU VRAM. This is the caching allocator instance, captured CUDA graphs, JIT-compiled kernels, and process state — deliberately preserved to enable <1s wake. Cannot be shrunk without breaking the wake-time guarantee. Level=2 offloads more but is unusable (gibberish-on-wake, see separate entry).
