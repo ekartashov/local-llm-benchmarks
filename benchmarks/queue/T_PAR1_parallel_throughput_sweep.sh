@@ -268,7 +268,7 @@ if [[ "${SKIP_CONV}" -eq 0 ]]; then
     log "Part B — Convergence (port ${PORT_CONVERGENCE}): concurrent request sweep..."
     CONV_ENDPOINT="http://localhost:${PORT_CONVERGENCE}/v1"
     if [[ "${DRY_RUN}" -eq 0 ]]; then
-        if ! curl -sf "${CONV_ENDPOINT}/health" >/dev/null 2>&1; then
+        if ! curl -sf "http://localhost:${PORT_CONVERGENCE}/health" >/dev/null 2>&1; then
             log "WARNING: Convergence not responding on port ${PORT_CONVERGENCE}."
             log "  Start it with: llama-server -ngl 999 --cpu-moe -t 32 -np 4 -c 16384 ..."
             log "  Skipping Convergence sweep."

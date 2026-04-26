@@ -3,7 +3,7 @@
 
 Working architectural source of truth.
 
-> **Status (R19, 2026-04-25):** Core tier **RETIRED** — escalation now via Extended Arclight (one Arclight sleeps, survivor goes TP=2). Arclight hot pair confirmed (coder TP=1 GPU0 + thinker TP=1 GPU1). Convergence CPU-only confirmed. Thinker TP=2 gated on T_KV3.
+> **Status (R26, 2026-04-26):** Arclight Coder 65K context mode confirmed (T_KV1 PASS). Core tier **RETIRED** — escalation now via Extended Arclight (one Arclight sleeps, survivor goes TP=2). Arclight hot pair confirmed (coder TP=1 GPU0 + thinker TP=1 GPU1). Convergence CPU-only confirmed. Thinker TP=2 gated on T_KV3.
 
 ---
 
@@ -94,7 +94,8 @@ The surviving model now spans both GPUs. VRAM available for KV: 64GB total minus
 
 **Coder Extended mode** (tested, 232 t/s at TP=2 confirmed):
 - Sleep thinker → restart coder TP=2
-- KV budget: ~37GB at fp8 → ~60–75K tokens context
+- KV budget: ~37GB at fp8 → **65,536 tokens context** (SETTLED T_KV1, 2026-04-26)
+- **Swap Extension**: FAILED. vLLM 0.19.0 does not recognize `--swap-space 32`. Spill-to-DRAM currently unavailable.
 
 **Thinker Extended mode** (GATED on T_KV3):
 - Thinker TP=2 is broken for GDN (T2.4g SETTLED). Cannot use until T_KV3 confirms a fix or a replacement thinker that supports TP=2.
@@ -137,7 +138,7 @@ Takes ALL system resources — stops Arclight + Convergence.
 | Mode | Who sleeps | Active model | VRAM for KV | Approx max context |
 |------|------------|--------------|-------------|-------------------|
 | Hot pair (normal) | nobody | coder TP=1 + thinker TP=1 | ~9GB + ~11GB | ~32K each |
-| Extended coder | thinker | coder TP=2 | ~37GB at fp8 | ~60–75K |
+| Extended coder | thinker | coder TP=2 | ~37GB at fp8 | **65K** |
 | Extended thinker | coder | thinker TP=2 | ~37GB at fp8 | ~150K* |
 | Convergence | nobody | 397B CPU-only | RAM KV | ~130–200K** |
 | Singularity | everyone | 397B high-quant | GPU attention | 32K–128K |
@@ -153,10 +154,11 @@ Takes ALL system resources — stops Arclight + Convergence.
 
 | Tier | Mechanism | Single-seq TPS | Lever | Expected aggregate |
 |------|-----------|---------------|-------|-------------------|
-| Arclight coder | vLLM `--max-num-seqs` | 232 t/s (TP=2) | N=4 | ~500–700 t/s |
-| Arclight thinker | vLLM `--max-num-seqs` | 77 t/s | N=4 | ~150–230 t/s |
-| Convergence | ik_llama.cpp `-np` | 13.99 t/s (ngl=999 --cpu-moe); 3.7 t/s (ngl=0) | N=4 | 15.6 t/s (measured T_CV4) |
-| Singularity | ik_llama.cpp `-np` | TBD | N=2 | TBD |
+| Arclight coder | vLLM `--max-num-seqs` | 238 t/s (TP=2) | N=8 | **1,196 t/s** |
+| Arclight thinker | vLLM `--max-num-seqs` | 76 t/s | **N=1** | **76 t/s (Serial)** |
+| Convergence | ik_llama.cpp `-np` | 15.6 t/s (ngl=999) | **N=1** | **15.6 t/s (Serial)** |
+| Singularity | ik_llama.cpp `-np` | TBD | N=1 | TBD |
+
 
 See T_PAR1 for the measurement procedure.
 
@@ -262,7 +264,7 @@ cmake --build build --config Release -j$(nproc)
 8. ~~**Gemma4-31B as Arclight thinker.**~~ **SETTLED (T2.3b, 2026-04-24): REJECTED.**
 9. ~~**Gemma4-31B as Arclight coder.**~~ **SKIPPED (2026-04-25): Qwen3.6-35B-A3B clearly superior.**
 10. ~~**kvcached Phase B with non-Mamba thinker.**~~ **CLOSED: GDN (Qwen3.6-27B) not supported by kvcached (DeltaNetSpec missing, no upstream timeline). Static `--max-model-len` asymmetry is the available lever for per-model context budgets.**
-11. **Coder big-context mode: max usable context with thinker sleeping.** T_KV1.
+11. ~~**Coder big-context mode: max usable context with thinker sleeping.**~~ **SETTLED (T_KV1, 2026-04-26): 65,536 tokens confirmed.**
 12. **CUDA checkpoint/restore for TP=2 hot-restart** (HIGH PRIORITY). T_KV2.
 13. **Thinker TP=2 fix or alternative model — GATE for finalized no-Core architecture.** T_KV3.
 14. **Parallel throughput sweep (--max-num-seqs for vLLM, -np for ik_llama.cpp).** T_PAR1.

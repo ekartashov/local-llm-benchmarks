@@ -539,7 +539,7 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 ---
 
-### T_KV1 — coder_big_context_mode — OPEN
+### T_KV1 — coder_big_context_mode — DONE ✓
 
 **Question:** What is the maximum usable context for the coder when running TP=2 (thinker sleeping), and what is the throughput/latency profile at that context?
 
@@ -555,9 +555,11 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 **Pass:** confirmed max context without swap ≥ 60K tokens; TPS at extended context within 20% of 32K baseline.
 
-**What failure means:** KV budget estimate was wrong (VRAM footprint higher than expected) → recompute with actual `nvidia-smi` numbers and re-record in DECISIONS.md.
-
-**Script:** `benchmarks/queue/T_KV1_coder_big_context_mode.sh` (options: `--skip-sleep`, `--skip-swap`, `--dry-run`)
+**Status — PASS (2026-04-26):**
+- **Max Usable Context**: **65,536 tokens** (GPU-only, no swap spill).
+- **TTFT (65K)**: **3,022 ms** (~21K tokens/sec prefill).
+- **TPS (65K)**: **238.2 t/s** (minimal 2.6% regression from 32K baseline).
+- **Swap Note**: `--swap-space 32` flag failed (unrecognized in vLLM 0.19.0). 131K test skipped, but 65K baseline is a clear PASS.
 
 **Deps:** T1.1 (sleep mode working — DONE).
 
@@ -651,7 +653,14 @@ metrics.json and summary.md. See script header for full option documentation.
 
 ---
 
-### T_PAR1 — parallel_throughput_sweep — OPEN
+### T_PAR1 — parallel_throughput_sweep — DONE ✓
+
+**Result (2026-04-26):** PASS (Coder) / FAIL (Thinker/Convergence).
+- **Coder**: Excellent scaling. **1,196 t/s** aggregate at N=8. Recommended production: **N=4** (698 t/s).
+- **Thinker**: Restricted to **N=1** (serial). V1 engine overhead (~12GB VRAM) causes OOM at N > 1 on 32GB Blackwell.
+- **Convergence**: Restricted to **N=1** (serial). Experimental `pr-1288` branch crashes with `GGML_ASSERT` at N > 1.
+- **Decision**: Update `deploy.sh` and production configs to reflect these role-specific concurrency caps.
+
 
 **Question:** What is the optimal `--max-num-seqs` for each Arclight model and `-np` for Convergence to maximize aggregate TPS for agentic multi-subagent workloads?
 

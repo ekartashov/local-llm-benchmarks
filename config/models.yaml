@@ -167,10 +167,13 @@ models:
       - "Does not fit alongside the coder at gpu-mem 0.40 each — would need ~0.55+ gpu-mem-util for thinker alone. Revisit concurrent-dual viability if picked."
     test_items: [T2.3]
     notes: >
-      106B total / 12B active MoE. Hybrid thinking+non-thinking modes. Strong
-      on tool invocation and agentic benchmarks per Z.ai tech report. Larger
-      VRAM footprint than Qwen3.5-27B-AWQ means the concurrent-dual assumption
-      needs re-validation if GLM-4.5-Air wins T2.3.
+      Group_size=64 Marlin kernel caps TP=2 (perfect for us). Fits 64GB total VRAM
+      with 9 GiB headroom for KV. 106B total / 12B active MoE. Hybrid
+      thinking+non-thinking modes. Strong on tool invocation and agentic
+      benchmarks per Z.ai tech report. Larger VRAM footprint than
+      Qwen3.5-27B-AWQ means the concurrent-dual assumption needs re-validation
+      if GLM-4.5-Air wins T2.3.
+
 
   # ── ACTIVE thinker (SETTLED 2026-04-25) ─────────────────────────────────────
   qwen36_27b_awq:

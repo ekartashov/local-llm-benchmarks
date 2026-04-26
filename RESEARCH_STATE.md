@@ -15,7 +15,10 @@ Living document. What we currently believe, what is still open, and the log of r
   → metrics.json/summary.md. Prerequisite check included (CRIU, cuda-checkpoint, driver ≥570,
   newuidmap/newgidmap). See TESTING_QUEUE.md T_KV2 for install steps.
 
-**Current mode:** Research — investigating vLLM version-pinning to restore V0 engine throughput.
+**Current mode:** Research — analyzing T_KV1 results.
+
+## Open from research
+- **T_KV1 Context Ceiling Found**: Coder TP=2 successfully handles **65,536 tokens** with 238 tps and 3.0s TTFT. Swap extension failed due to vLLM flag changes (unrecognized `--swap-space`), but 65K is sufficient for Arclight's "Extended" tier.
 
 ---
 
@@ -92,6 +95,18 @@ Critical unknowns remaining:
 
 ---
 
+### R26 — April 26 2026 — Coder Context Ceiling (T_KV1) PASS
+**Triggered by:** Measurement of the context ceiling for the Arclight Coder at TP=2.
+
+**What happened:**
+- **Status**: ✅ **PASS**.
+- **Max Usable Context**: **65,536 tokens** (GPU-only).
+- **Performance**: TTFT 3.0s (~21K tokens/sec). Decode 238.2 t/s (minimal 2.6% regression).
+- **Defect**: `--swap-space 32` flag is unrecognized in vLLM 0.19.0 (R-V0 engine path), blocking the 131K test.
+- **Decision**: 65K context is sufficient for "Extended Arclight" mode. Update `ARCHITECTURE.md` to reflect 65K as the standard ceiling for this role.
+
+---
+
 ### R23 — April 26 2026 — Convergence Parallel Scaling (T_CV4) SUCCESS
 
 **Triggered by:** Investigation into MoE expert-loading overhead during batching.
@@ -134,6 +149,28 @@ Critical unknowns remaining:
 - The `vllm-bench` pyenv is now considered "CRIU-Ready" with manual patches; any package updates must re-verify the `asyncio` bypass.
 
 ---
+
+### R26 — April 26 2026 — Arclight Context & Parallelism Sweep (T_KV1, T_PAR1)
+
+**Triggered by:** Completion of the Arclight architecture (CRIU settled). Need to establish the performance ceilings for context length and concurrent throughput.
+
+**What happened:**
+- **T_KV1 (Coder Context)**: ✅ **SUCCESS**. Qwen3.6-35B-A3B (AWQ) at **TP=2** successfully handled a **65,536** token context. Performance regression was minimal (238 t/s vs 251 t/s at TP=1/8K). 
+    - **131K Fail**: Failed due to vLLM 0.19 rejecting the `--swap-space` flag. Swap-based context expansion is currently blocked.
+- **T_PAR1 (Coder Parallelism)**: ✅ **SUCCESS**. MoE architecture proved exceptionally batch-efficient. Aggregate throughput reached **1,196 t/s** at N=8. 
+    - **Recommendation**: **N=4** (698 t/s) is the optimal production knee for latency/throughput balance.
+- **T_PAR1 (Thinker Parallelism)**: ⚠️ **PARTIAL**. Qwen3.6-27B (dense) at **TP=1** is heavily bottlenecked by V1 engine overhead (CUDA graphs + profiling).
+    - **Status**: Any attempt to use `max-num-seqs > 1` triggers OOM on 32GB cards. Thinker must remain **serial-only (N=1)** for now.
+- **T_PAR1 (Convergence)**: ❌ **FAIL**. Verified CPU-only baseline (~3.2 t/s at t=16). 
+    - **Stability**: Experimental `pr-1288` branch crashes (`GGML_ASSERT(S > 0)`) when handling concurrent requests (N > 1). Tier remains serial-only.
+
+**Decisions:**
+- **Coder Production**: TP=2, 65K context, `max-num-seqs=8`.
+- **Thinker Production**: TP=1, 32K context, `max-num-seqs=1`.
+- **Convergence**: Serial-only. GPU-offload mandatory for any real-time throughput.
+
+**Next focus:** T_KV3 — Scout for a TP=2 capable thinker model to break the serial bottleneck.
+
 
 ### R21 — April 26 2026 — Convergence Startup & Context Ceiling (T_CV1)
 

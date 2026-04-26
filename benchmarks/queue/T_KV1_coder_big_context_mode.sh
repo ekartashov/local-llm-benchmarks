@@ -102,16 +102,15 @@ sleep 3
 
 # ── Step 3: Deploy coder TP=2 with extended context ───────────────────────────
 log "Deploying coder TP=2 with --max-model-len 65536, fp8 KV..."
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_V1_ENABLED=0 \
 run "${REPO_ROOT}/infra/scripts/deploy.sh" vllm tp2a "${MODEL}" \
     --gpu-mem-util 0.90 \
     --ctx 65536 \
     --kv-cache-dtype fp8 \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
-    --enable-auto-tool-choice \
-    -- \
-    VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-    VLLM_V1_ENABLED=0
+    --enable-auto-tool-choice
 
 if [[ "${DRY_RUN}" -eq 0 ]]; then
     log "Waiting for coder TP=2 to be ready..."
@@ -264,6 +263,8 @@ if [[ "${SKIP_SWAP}" -eq 0 ]]; then
     log "Restarting coder TP=2 with --swap-space 32, --max-model-len 131072..."
     run podman stop bench-vllm-tp2a 2>/dev/null || true
     sleep 5
+    VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+    VLLM_V1_ENABLED=0 \
     run "${REPO_ROOT}/infra/scripts/deploy.sh" vllm tp2a "${MODEL}" \
         --gpu-mem-util 0.90 \
         --ctx 131072 \
@@ -271,10 +272,7 @@ if [[ "${SKIP_SWAP}" -eq 0 ]]; then
         --swap-space 32 \
         --tool-call-parser qwen3_coder \
         --reasoning-parser qwen3 \
-        --enable-auto-tool-choice \
-        -- \
-        VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-        VLLM_V1_ENABLED=0
+        --enable-auto-tool-choice
 
     if [[ "${DRY_RUN}" -eq 0 ]]; then
         log "Waiting for swap-extended coder to be ready..."
