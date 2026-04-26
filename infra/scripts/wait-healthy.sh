@@ -21,7 +21,8 @@ while true; do
 
     # Fast-fail: detect a crashed container rather than waiting the full timeout.
     if [[ -n "${CONTAINER_NAME}" ]]; then
-        status=$(podman container inspect "${CONTAINER_NAME}" \
+        PODMAN_CMD=(${PODMAN:-podman})
+        status=$("${PODMAN_CMD[@]}" container inspect "${CONTAINER_NAME}" \
             --format '{{.State.Status}}' 2>/dev/null || echo "gone")
         if [[ "${status}" == "exited" || "${status}" == "stopped" || "${status}" == "gone" ]]; then
             echo "[wait-healthy] ERROR: container '${CONTAINER_NAME}' exited (status=${status}) — engine crashed before becoming healthy." >&2
@@ -32,7 +33,7 @@ while true; do
     now=$(date +%s)
     elapsed=$(( now - start ))
     if (( elapsed >= TIMEOUT )); then
-        echo "[wait-healthy] ERROR: timed out after ${TIMEOUT}s waiting for ${HEALTH_URL}" >&2
+        echo "[wait-healthy] ERROR: timed out after ${TIMEOUT}s waiting for ${HEALlTH_URL}" >&2
         exit 1
     fi
     echo "[wait-healthy] Not ready yet (${elapsed}s elapsed). Retrying in ${INTERVAL}s..."

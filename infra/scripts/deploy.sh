@@ -140,16 +140,20 @@ echo "[deploy] Model=${MODEL_ID:-${MODEL_FILE:-}}  Port=${PORT}  CTX=${CTX_LEN} 
 echo "[deploy] GPUs=${NVIDIA_VISIBLE_STR:-none (CPU-only)}  Container=${CONTAINER_NAME}"
 [[ ${#EXTRA_ARGS[@]} -gt 0 ]] && echo "[deploy] Extra engine args: ${EXTRA_ARGS[*]}"
 
+# ── Configure Podman command ──────────────────────────────────────────────────
+# Use an array to correctly handle multi-word commands (e.g. "sudo podman")
+PODMAN_CMD=(${PODMAN:-podman})
+
 # ── Tear down any existing container with this name ───────────────────────────
-if podman container exists "${CONTAINER_NAME}" 2>/dev/null; then
+if "${PODMAN_CMD[@]}" container exists "${CONTAINER_NAME}" 2>/dev/null; then
     echo "[deploy] Removing existing container ${CONTAINER_NAME}..."
-    podman stop "${CONTAINER_NAME}" 2>/dev/null || true
-    podman rm   "${CONTAINER_NAME}" 2>/dev/null || true
+    "${PODMAN_CMD[@]}" stop "${CONTAINER_NAME}" 2>/dev/null || true
+    "${PODMAN_CMD[@]}" rm   "${CONTAINER_NAME}" 2>/dev/null || true
 fi
 
 # ── Build engine-specific podman run command ──────────────────────────────────
 COMMON=(
-    podman run -d
+    "${PODMAN_CMD[@]}" run -d
     --name "${CONTAINER_NAME}"
     "${CDI_DEVICE_ARGS[@]+"${CDI_DEVICE_ARGS[@]}"}"
     -e "HF_HOME=/root/.cache/huggingface"
@@ -157,6 +161,7 @@ COMMON=(
     -p "${PORT}:8000"
     --shm-size=4g
     --restart=no
+    -v "/srv/ai/cache/vllm:/root/.cache/vllm:z"
 )
 # Only inject NVIDIA env vars when GPU devices are actually assigned.
 # CPU-only placements (ikllamacpp convergence) must NOT set NVIDIA_VISIBLE_DEVICES —
@@ -282,9 +287,9 @@ echo "[deploy] ${CMD[*]}"
 # ── Stream container logs to stderr in background ────────────────────────────
 echo ""
 echo "[deploy] ── Live log stream (Ctrl-C does not stop the container) ──"
-echo "[deploy] Follow logs manually: podman logs -f ${CONTAINER_NAME}"
+echo "[deploy] Follow logs manually: ${PODMAN_CMD[*]} logs -f ${CONTAINER_NAME}"
 echo ""
-podman logs -f "${CONTAINER_NAME}" 2>&1 | sed "s/^/  [${ENGINE}-${PLACEMENT}] /" &
+"${PODMAN_CMD[@]}" logs -f "${CONTAINER_NAME}" 2>&1 | sed "s/^/  [${ENGINE}-${PLACEMENT}] /" &
 LOGS_PID=$!
 
 # ── Wait for the health endpoint ──────────────────────────────────────────────
@@ -304,7 +309,7 @@ kill "${LOGS_PID}" 2>/dev/null || true
 if [[ ${WAIT_RC} -ne 0 ]]; then
     echo "" >&2
     echo "[deploy] ── Last 50 log lines ────────────────────────────────────" >&2
-    podman logs --tail 50 "${CONTAINER_NAME}" 2>&1 >&2 || true
+    "${PODMAN_CMD[@]}" logs --tail 50 "${CONTAINER_NAME}" 2>&1 >&2 || true
     exit "${WAIT_RC}"
 fi
 

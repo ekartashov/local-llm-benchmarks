@@ -13,33 +13,43 @@ RESULTS_DIR="${REPO_ROOT}/results/T6.1_infra_task_suite_${TIMESTAMP}"
 mkdir -p "${RESULTS_DIR}"
 
 # --- Configuration ---
-# Force stable vLLM image to avoid V1 engine bugs/slowdown
 export BENCH_IMAGE="vllm/vllm-openai:latest"
+export VLLM_V1_ENABLED=0
 
 MODEL="cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit"
-PLACEMENT="tp2a"
-GPU_MEM_UTIL="0.85"
 CTX="32768"
+GPU_MEM_UTIL="0.85"
 
-# --- Step 1: Deploy Coder ---
-echo "[T6.1] Deploying Arclight Coder (Stable Engine)..."
-./infra/scripts/deploy.sh vllm "${PLACEMENT}" "${MODEL}" \
-    --gpu-mem-util "${GPU_MEM_UTIL}" \
-    --ctx "${CTX}" \
-    --tool-call-parser qwen3_coder \
-    --reasoning-parser qwen3 \
-    --enable-auto-tool-choice
+for TP_SIZE in 1 2; do
+    if [ "$TP_SIZE" -eq 1 ]; then
+        PLACEMENT="gpu0"
+    else
+        PLACEMENT="tp2a"
+    fi
 
-# --- Step 2: Run Infrastructure Tasks ---
-echo "[T6.1] Running Infra Task Suite (in01-in05)..."
-python3 -m benchmarks.phase2_model_selection.bench \
-    --mode quality \
-    --tasks benchmarks/infra_tasks/tasks/ \
-    --label "Qwen3.6-35B-A3B (T6.1 Infra Suite)" \
-    --results-dir "${RESULTS_DIR}"
+    RUN_DIR="${RESULTS_DIR}/tp${TP_SIZE}"
+    mkdir -p "${RUN_DIR}"
 
-# --- Step 3: Cleanup ---
-echo "[T6.1] Cleaning up..."
-podman stop "bench-vllm-${PLACEMENT}" || true
+    # --- Step 1: Deploy Coder ---
+    echo "[T6.1] Deploying Arclight Coder (TP=${TP_SIZE}, Stable Engine)..."
+    ./infra/scripts/deploy.sh vllm "${PLACEMENT}" "${MODEL}" \
+        --gpu-mem-util "${GPU_MEM_UTIL}" \
+        --ctx "${CTX}" \
+        --tool-call-parser qwen3_coder \
+        --reasoning-parser qwen3 \
+        --enable-auto-tool-choice
+
+    # --- Step 2: Run Infrastructure Tasks ---
+    echo "[T6.1] Running Infra Task Suite (in01-in05) for TP=${TP_SIZE}..."
+    python3 -m benchmarks.phase2_model_selection.bench \
+        --mode quality \
+        --tasks benchmarks/infra_tasks/tasks/ \
+        --label "Qwen3.6-35B-A3B (T6.1 Infra Suite, TP=${TP_SIZE})" \
+        --results-dir "${RUN_DIR}"
+
+    # --- Step 3: Cleanup ---
+    echo "[T6.1] Cleaning up TP=${TP_SIZE}..."
+    podman stop "bench-vllm-${PLACEMENT}" || true
+done
 
 echo "[T6.1] Complete. Results in: ${RESULTS_DIR}"

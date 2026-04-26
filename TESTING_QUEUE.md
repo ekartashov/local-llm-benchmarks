@@ -603,23 +603,40 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 ### T_KV2 — cuda_checkpoint_tp2_hot_restart — OPEN (HIGH PRIORITY)
 
+**Script:** `benchmarks/queue/T_KV2_cuda_checkpoint_tp2_hot_restart.sh` (authored 2026-04-25)
+
 **Question:** Does NVIDIA `cuda-checkpoint` + CRIU work for a TP=2 vLLM process in rootless Podman on our hardware? What is the restore time vs cold start?
 
 **Why high priority:** unlocks ~5s mode switches for Extended Arclight (vs 170–300s cold), making the escalation pattern viable for interactive sessions.
 
-**Prerequisites:**
-- CUDA driver 570+ confirmed (RTX 5090 baseline)
-- Install `cuda-checkpoint` CLI: `github.com/NVIDIA/cuda-checkpoint`
-- CRIU installed on host: `apt install criu` (or equivalent)
+**Prerequisites (one-time host setup):**
+```bash
+# 1. CRIU
+sudo apt install criu
+criu check          # verify kernel features; 'criu check --full' for exhaustive audit
+
+# 2. cuda-checkpoint CLI + CRIU hooks (needed for GPU memory in checkpoint)
+git clone https://github.com/NVIDIA/cuda-checkpoint /srv/ai/tools/cuda-checkpoint
+cd /srv/ai/tools/cuda-checkpoint && make
+sudo make install   # installs binary to /usr/local/bin/ + CRIU plugin to /usr/lib/criu/
+
+# 3. Checkpoint directory
+mkdir -p /srv/ai/checkpoints/coder-tp2
+```
+
+**Checkpoint strategy:** uses `podman container checkpoint --export <archive>` (CRIU-based,
+handles rootless user-namespace mapping). With the cuda-checkpoint CRIU plugin installed,
+GPU device memory (weights + compiled CUDA graphs) is included in the checkpoint — enabling
+fast restore. Without the plugin, GPU state is excluded and restore is slow (no speedup over
+cold). The script tests both conditions and reports which was active.
 
 **Procedure:**
-1. Boot coder TP=2 (pay full cold start, ~170–300s). Verify ready on port 30000.
-2. Record cold start time as baseline.
-3. Take snapshot: `cuda-checkpoint --pid $(pgrep -f "vllm") --action dump --dir /srv/ai/checkpoints/coder-tp2/`
-4. Kill the vLLM process.
-5. Restore: `cuda-checkpoint --action restore --dir /srv/ai/checkpoints/coder-tp2/`
-6. Record restore time. Verify coder responds correctly (run one inference).
-7. Repeat restore 3× — confirm consistency.
+```bash
+bash benchmarks/queue/T_KV2_cuda_checkpoint_tp2_hot_restart.sh
+# Options: --dry-run, --reps N, --ctx N, --gpu-mem F, --skip-cold
+```
+The script handles: cold-start baseline, checkpoint, 3× restore with timing, cleanup,
+metrics.json and summary.md. See script header for full option documentation.
 
 **Pass:** restore time < 30s (10× improvement over cold); inference output matches pre-snapshot behavior.
 

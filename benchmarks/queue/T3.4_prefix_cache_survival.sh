@@ -44,7 +44,8 @@ run_query() {
     # Using a dummy file or generated text
     local PROMPT_FILE="${RESULTS_DIR}/prompt_4k.txt"
     if [[ ! -f "${PROMPT_FILE}" ]]; then
-        python3 -c "print('The quick brown fox ' * 100)" > "${PROMPT_FILE}"
+        # Create a ~4000 token prompt (roughly 4 characters per token average)
+        python3 -c "print('The quick brown fox jumps over the lazy dog. ' * 400)" > "${PROMPT_FILE}"
     fi
 
     local START_MS
@@ -74,9 +75,9 @@ if [[ "${DRY_RUN}" -eq 0 ]]; then
     VLLM_USE_V1=0 \
     VLLM_USE_V1_ENGINE=0 \
     VLLM_V1=0 \
-    ./infra/scripts/deploy.sh vllm gpu0 "${MODEL}" \
+    ./infra/scripts/deploy.sh vllm tp2a "${MODEL}" \
         --gpu-mem-util 0.90 \
-        --ctx 2048 \
+        --ctx 8192 \
         --enable-prefix-caching \
         --enable-sleep-mode \
         --kv-cache-dtype fp8 \
@@ -98,8 +99,20 @@ if [[ "${DRY_RUN}" -eq 0 ]]; then
     # 5. Wake up
     echo "[T3.4] Waking up..."
     curl -X POST "http://localhost:${PORT}/wake_up"
-    # Wait for wake
+    
+    # Wait for wake to complete
+    echo "[T3.4] Waiting for wake-up completion..."
     while curl -sf "http://localhost:${PORT}/is_sleeping" | grep -q "true"; do
+        sleep 1
+    done
+    
+    # Wait for health (ensure API is actually responding again)
+    echo "[T3.4] Waiting for health endpoint..."
+    for i in $(seq 1 30); do
+        if curl -sf "http://localhost:${PORT}/health" &>/dev/null; then
+            echo "[T3.4] Server is healthy."
+            break
+        fi
         sleep 1
     done
     
@@ -126,8 +139,8 @@ EOJSON
 
     # Cleanup
     echo "[T3.4] Cleaning up..."
-    podman stop bench-vllm-gpu0 >/dev/null 2>&1 || true
-    podman rm bench-vllm-gpu0 >/dev/null 2>&1 || true
+    podman stop bench-vllm-tp2a >/dev/null 2>&1 || true
+    podman rm bench-vllm-tp2a >/dev/null 2>&1 || true
 
     echo "[T3.4] Done. Results in ${RESULTS_DIR}/"
 else

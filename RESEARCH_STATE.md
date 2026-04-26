@@ -8,6 +8,12 @@ Living document. What we currently believe, what is still open, and the log of r
 - **T3.4** (Prefix cache survival) script created.
 - **T6.1** (Infra tasks) authored in `benchmarks/infra_tasks/tasks/` (Tasks in01-in05).
 - `ARCHITECTURE.md` updated to reflect Qwen3.6-27B as the new Arclight Thinker winner.
+- **T_KV2 script authored (2026-04-25):** `benchmarks/queue/T_KV2_cuda_checkpoint_tp2_hot_restart.sh`.
+  Uses `podman container checkpoint --export` (CRIU, rootless-safe). With cuda-checkpoint CRIU
+  plugin installed: GPU memory (weights + compiled graphs) included → fast restore. Without plugin:
+  CPU-only checkpoint, slow restore baseline. Script handles cold start → checkpoint → 3× restore
+  → metrics.json/summary.md. Prerequisite check included (CRIU, cuda-checkpoint, driver ≥570,
+  newuidmap/newgidmap). See TESTING_QUEUE.md T_KV2 for install steps.
 
 **Current mode:** Execution — running Convergence benchmarks (T_CV1-3) and analyzing Singularity-tier viability.
 
