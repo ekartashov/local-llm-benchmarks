@@ -116,7 +116,7 @@ Critical unknowns remaining:
 
 ---
 
-### R21 — April 26 2026 — Convergence (T_CV1) Baseline & Decision
+### R20 — April 26 2026 — Extended Arclight Hot Restart (T_KV2)
 
 **Triggered by:** The need to reduce the 100s+ cold start penalty for Arclight TP=2 (Extended mode) to sub-10s to make interactive mode-switching viable.
 
@@ -135,7 +135,7 @@ Critical unknowns remaining:
 
 ---
 
-### R21 — April 26 2026 — Convergence (T_CV1) Baseline & Decision
+### R21 — April 26 2026 — Convergence Startup & Context Ceiling (T_CV1)
 
 **Triggered by:** Need to establish operational parameters for the 397B Singularity-tier model running in CPU-only mode.
 

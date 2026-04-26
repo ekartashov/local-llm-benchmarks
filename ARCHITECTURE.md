@@ -75,7 +75,7 @@ Working architectural source of truth.
 
 Coder (GPU0) and Thinker (GPU1) run as completely isolated vLLM processes. Physical GPU isolation eliminates CUDA context time-slicing — the mechanism that collapsed concurrent throughput to ~2% in T1.2. Each model gets full GPU memory bandwidth.
 
-**V1 engine disabled by default** (`VLLM_V1_ENABLED=0` in deploy.sh): V1 was degrading coder TP=1 to ~18 t/s (engine bug, not a TP limitation). With V1 disabled, TP=1 is expected to recover ~237 t/s. Current production config is TP=2 at 232 t/s (confirmed via manual T6.1 run). TP=1 with V1 disabled is untested post-fix — T6.1 rerun will confirm which is optimal. TP=2 remains the hot pair config until that rerun.
+**V1 engine disabled by default** (`VLLM_V1_ENABLED=0` in deploy.sh). **TP=2 is the production config at 232 t/s** (manual T6.1 baseline, 2026-04-25). TP=1 suffers Reasoning Collapse (hallucination loops from Triton/FLA kernel shape mismatches in eager mode) and cannot serve as production without a non-eager path — untested and not worth validating while TP=2 is healthy.
 
 **Thinker: TP=1 only.** TP=2 confirmed broken for GDN architecture (T2.4g). Do not change until T_KV3 resolves.
 
@@ -99,23 +99,17 @@ The surviving model now spans both GPUs. VRAM available for KV: 64GB total minus
 **Thinker Extended mode** (GATED on T_KV3):
 - Thinker TP=2 is broken for GDN (T2.4g SETTLED). Cannot use until T_KV3 confirms a fix or a replacement thinker that supports TP=2.
 
-**Mode switch time:** ~15–25s cold. With CUDA checkpoint/restore (T_KV2, HIGH PRIORITY), this drops to ~5s — restoring a pre-warmed CUDA process snapshot instead of recompiling graphs. NVIDIA `cuda-checkpoint` confirmed on driver 570+ (our RTX 5090 baseline). TP=2 multi-GPU + rootless Podman untested: see T_KV2.
+**Mode switch time:** **0.28s** hot restart via CUDA checkpoint/restore (T_KV2 SETTLED, 2026-04-26). Host-native CRIU + NVIDIA `cuda-checkpoint` snapshots the entire TP=2 CUDA process including compiled graphs. Post-restore TPS 210 t/s (matches cold-start performance). See DECISIONS.md for requirements (uvloop patch, UV_USE_IO_URING=0, host-native execution).
 
 ### Convergence — ik_llama.cpp, RAM-resident, CPU-only
 
 Architecturally independent from the vLLM tier. Runs as a native ik_llama.cpp process on port 8002. CPU-only (ngl=0) — all layers in DDR5 RAM. No VRAM contention with Arclight; runs in parallel, always-on.
 
-**Parallel request handling:** ik_llama.cpp `-np N` enables N concurrent decode sequences. At 13 t/s single-seq (IQ2_M baseline with ngl=999; ngl=0 baseline TBD via T_CV1/T_CV2), `-np 4` yields 2–3× aggregate TPS. Essential for agentic runs where multiple subagents query Convergence simultaneously. See T_PAR1.
+**Parallel request handling:** ik_llama.cpp `-np 4` (production default) gives **15.6 t/s aggregate** at concurrency=4 (T_CV4 SETTLED, 1.12× scaling over single-seq). Single-seq baseline: **13.99 t/s** (Singularity mode, ngl=999 --cpu-moe). Essential for agentic runs where multiple subagents query Convergence simultaneously.
 
-**Context ceiling:** `-c` sets max context, bounded by RAM. With ~65GB free above model weights at ngl=0:
-- IQ2_M per-token KV (GDN hybrid, ~25% full-attention layers): estimated ~0.3–0.5 MB/token
-- Theoretical ceiling: ~130–200K tokens
-- Current deployment: `-c 16384` (conservative baseline)
-- T_CV1 context sweep will establish the practical ceiling
+**Context ceiling:** **128k tokens** confirmed usable at 3.6 t/s (T_CV1 SETTLED). Queries beyond 128k require Singularity escalation (full GPU offload for attention layers). Production deployment uses `-c 131072`.
 
-**Two deployment modes:**
-1. **Always-resident:** Start at boot. ~123GB RAM constant. Recommended.
-2. **Cold-start on demand:** Start when requested. Cold start time: measuring via T_CV1.
+**Deployment mode:** **Always-resident only.** Cold start is 83s (CPU-bound — model initialization, not disk I/O). On-demand loading is not viable for transparent routing; always-resident adds ~123GB RAM overhead which is within budget (171GB/192GB with Arclight sleep weights).
 
 RAM budget with Convergence + Arclight:
 ```
@@ -149,7 +143,7 @@ Takes ALL system resources — stops Arclight + Convergence.
 | Singularity | everyone | 397B high-quant | GPU attention | 32K–128K |
 
 \* Extended thinker GATED on T_KV3 — TP=2 broken for GDN until resolved.
-\*\* Convergence context ceiling untested — T_CV1 context sweep pending.
+\*\* Convergence context ceiling: **128k tokens** (T_CV1 SETTLED). Beyond this requires Singularity.
 
 **CPU KV overflow (`--swap-space N`):** KV blocks spill to DRAM when GPU KV is full. Useful for prefill-heavy flows (ingest large doc, generate short answer). Generation TPS penalty proportional to spill fraction.
 
@@ -161,7 +155,7 @@ Takes ALL system resources — stops Arclight + Convergence.
 |------|-----------|---------------|-------|-------------------|
 | Arclight coder | vLLM `--max-num-seqs` | 232 t/s (TP=2) | N=4 | ~500–700 t/s |
 | Arclight thinker | vLLM `--max-num-seqs` | 77 t/s | N=4 | ~150–230 t/s |
-| Convergence | ik_llama.cpp `-np` | ~13 t/s (ngl=999 baseline; ngl=0 TBD) | N=4 | ~25–40 t/s |
+| Convergence | ik_llama.cpp `-np` | 13.99 t/s (ngl=999 --cpu-moe); 3.7 t/s (ngl=0) | N=4 | 15.6 t/s (measured T_CV4) |
 | Singularity | ik_llama.cpp `-np` | TBD | N=2 | TBD |
 
 See T_PAR1 for the measurement procedure.

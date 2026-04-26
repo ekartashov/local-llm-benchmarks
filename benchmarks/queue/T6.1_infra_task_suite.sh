@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # T6.1_infra_task_suite.sh
 # Quality evaluation of the Arclight Coder on infrastructure automation tasks.
-# Uses the stable vLLM engine to restore production-level TPS (expected ~230+).
+#
+# NOTE: This script uses --enforce-eager, which disables CUDA graph capture and
+# results in ~20 t/s (eager-mode floor), NOT the production 232 t/s baseline.
+# It was written to compare TP=1 vs TP=2 quality in eager mode (for T2.4h
+# context). The production TPS baseline (232 t/s, TP=2, non-eager) is from the
+# manual T6.1 run on 2026-04-25. To get a production-mode baseline, remove
+# --enforce-eager and set GPU_MEM_UTIL to 0.85 for both TP configs.
 
 set -euo pipefail
 

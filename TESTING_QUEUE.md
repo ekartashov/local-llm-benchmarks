@@ -482,24 +482,7 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 ### T_CV1 — convergence_startup_timing — DONE ✓
 
-**Result (2026-04-26):** PASS. Startup time ~83s (cold) / ~88s (warm). Context ceiling 128k. Generation 3.7 t/s (CPU-only).
-- Decision: Always-Resident policy adopted for RAM.
-
-### T_CV2 — convergence_thread_count_sweep — DONE ✓
-
-**Result (2026-04-26):** PASS. Established **32 threads** as the optimal count for the 397B model on pure CPU.
-
-### T_CV3 — convergence_gpu_expert_offload — DONE ✓
-
-**Result (2026-04-26):** PASS. Achieved **13.99 t/s** (Singularity mode) via hybrid offload of attention layers to GPU.
-- Technique: `-ngl 999 --cpu-moe`.
-
-### T_CV4 — convergence_parallel_tps — DONE ✓
-
-**Result (2026-04-26):** PASS. Aggregate throughput **15.6 t/s** at concurrency=4 (1.12x scaling).
-- Decision: Default parallel capacity is 4 slots (`-np 4`).
-
----
+**Result (2026-04-26):** PASS. Startup time ~83s (cold) / ~88s (warm). Context ceiling 128k tokens. Generation 3.7 t/s (ngl=0 CPU-only). Decision: Always-Resident policy adopted — >80s cold start is too high for on-demand routing.
 
 **Question:** How long does Convergence take to become ready from cold start? Also: what is the practical context ceiling (max `-c` before RAM pressure causes OOM or TPS collapse)?
 
@@ -540,13 +523,19 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 
 ### T_CV2 — convergence_thread_count_sweep — DONE ✓
 
-**Result (2026-04-26):** PASS. Established **32 threads** as the optimal count for the 397B model on pure CPU.
+**Result (2026-04-26):** PASS. Established **32 threads** as the optimal count for the 397B model on pure CPU. PP speed scales linearly with threads (62 t/s vs 29 t/s at 16 threads). Script: `benchmarks/queue/T_CV2_convergence_thread_sweep.sh`.
 
 ---
 
 ### T_CV3 — convergence_gpu_expert_offload — DONE ✓
 
-**Result (2026-04-26):** PASS. Achieved **13.99 t/s** (Singularity mode) via hybrid offload of attention layers to GPU.
+**Result (2026-04-26):** PASS. Achieved **13.99 t/s** (Singularity/hybrid mode) via `-ngl 999 --cpu-moe` — attention layers on GPU, MoE experts in RAM. 3.75x speedup over ngl=0 CPU-only (3.7 t/s). Script: `benchmarks/queue/T_CV3_convergence_gpu_expert_offload.sh`.
+
+---
+
+### T_CV4 — convergence_parallel_tps — DONE ✓
+
+**Result (2026-04-26):** PASS. Aggregate throughput **15.6 t/s** at concurrency=4 (1.12x scaling over 13.9 t/s single-seq). Decision: Production config uses `-np 4` as default parallel capacity. Script: `benchmarks/queue/T_CV4_convergence_parallel_tps.sh`.
 
 ---
 
@@ -567,6 +556,8 @@ These tune parameters on the settled role assignments. Lower priority than Tier 
 **Pass:** confirmed max context without swap ≥ 60K tokens; TPS at extended context within 20% of 32K baseline.
 
 **What failure means:** KV budget estimate was wrong (VRAM footprint higher than expected) → recompute with actual `nvidia-smi` numbers and re-record in DECISIONS.md.
+
+**Script:** `benchmarks/queue/T_KV1_coder_big_context_mode.sh` (options: `--skip-sleep`, `--skip-swap`, `--dry-run`)
 
 **Deps:** T1.1 (sleep mode working — DONE).
 
@@ -638,29 +629,25 @@ metrics.json and summary.md. See script header for full option documentation.
 
 ---
 
-### T_KV3 — thinker_tp2_fix_or_replacement — OPEN (GATE for no-Core final decision)
+### T_KV3 — thinker_tp2_fix_or_replacement — BLOCKED on research (Sub-Q2)
 
 **Question:** Can the thinker run at TP=2 correctly? If not, is there an alternative thinker model that supports TP=2 without GDN state-split errors?
 
 **Why this is a gate:** The "no Core" architecture is provisional. Extended Arclight (thinker TP=2) is the only path to long-context thinker escalation. If TP=2 remains broken for GDN indefinitely, we need a replacement thinker that doesn't have this constraint — or accept that only coder gets Extended mode.
 
-**Two sub-questions to resolve in order:**
+**Sub-Q1 — SETTLED (T2.4g, 2026-04-25):** TP=2 still fails with V1 disabled. T2.4g was run with deploy.sh's default `VLLM_V1_ENABLED=0`. Result: th02 SEMANTIC ERROR × 0/3 at TP=2 + cp-ON + bf16 KV. H-TP2 CONFIRMED. Sub-Q1 is closed — no re-run needed.
 
-**Sub-Q1 — vLLM version fix:** Does current vLLM 0.19+ (with V1 disabled) still reproduce the T2.4g TP=2 quality failure for Qwen3.6-27B?
-- T2.4g was run with V1 engine state unknown. V1 disabling may have changed behavior.
-- Re-run T2.4g exact procedure (th02 × 3 reps, TP=2 + cp-ON) with current deploy.sh (V1 disabled).
-- If now CORRECT: TP=2 thinker works, Extended thinker mode is unblocked. Update DECISIONS.md.
-- If still INCORRECT: proceed to Sub-Q2.
-
-**Sub-Q2 — alternative thinker:** Research and test a thinker model that:
+**Sub-Q2 — BLOCKED on research:** Research and identify a thinker model that:
 - Is not GDN-hybrid (pure Transformer or MLA) — TP=2 shard is mathematically safe
 - Has quality ≥ Qwen3.6-27B (4.875/5) on the 8-task thinker suite
 - Fits within ~21GB AWQ at TP=1 for normal hot-pair mode
-- Candidates to evaluate: strong reasoning models released 2025–2026 with pure Transformer or MLA architecture; community distills of top-tier proprietary models (o1, Claude-3.5-Sonnet style SFT on open base); small-company / individual researcher fine-tunes with documented tool-calling benchmarks
+- Candidates: strong reasoning models released 2025–2026 with pure Transformer or MLA architecture; community distills of top-tier proprietary models; fine-tunes with documented tool-calling benchmarks
 
-**Deps:** T_KV2 (have checkpoint infrastructure before committing to thinker TP=2 operational use).
+**No script yet** — Sub-Q2 requires research mode to vet candidates before a test script can be written.
 
-**Hand-back trigger:** Any Sub-Q2 candidate research — return to research mode to identify and vet models before running tests.
+**Deps:** T_KV2 (DONE). Sub-Q1 (SETTLED by T2.4g).
+
+**Hand-back trigger:** This item is by definition a research hand-off. Research mode scouts Sub-Q2 candidates; returns a model slug + deploy config; testing mode runs the benchmark.
 
 ---
 
@@ -689,7 +676,9 @@ metrics.json and summary.md. See script header for full option documentation.
 
 **What failure means:** aggregate TPS does not improve with N → memory bandwidth is the bottleneck even for batched requests; keep N=1 for predictable per-request latency.
 
-**Deps:** T_CV2 (Convergence thread baseline before adding concurrency).
+**Script:** `benchmarks/queue/T_PAR1_parallel_throughput_sweep.sh` (options: `--skip-coder`, `--skip-thinker`, `--skip-convergence`, `--max-seqs LIST`, `--reps N`, `--dry-run`)
+
+**Deps:** T_CV2 (DONE).
 
 **Hand-back trigger:** none expected — this is a parameter sweep.
 
@@ -968,23 +957,30 @@ Pattern: **Gemma ties on pure coding (LiveCodeBench) but Qwen dominates on agent
 
 ---
 
-## TESTING_QUEUE — status summary (R17, 2026-04-25)
+## TESTING_QUEUE — status summary (R25, 2026-04-26)
 
 | Item | Status | Priority | Notes |
 |------|--------|----------|-------|
+| T_KV2 | DONE ✓ | — | 0.28s hot restart; 358x speedup over cold. uvloop patch required. Host-native CRIU. |
+| T_CV1 | DONE ✓ | — | 83s cold start; 128k ctx ceiling; 3.7 t/s CPU-only. Always-resident policy adopted. |
+| T_CV2 | DONE ✓ | — | 32 threads optimal for 397B model on pure CPU |
+| T_CV3 | DONE ✓ | — | 13.99 t/s Singularity/hybrid mode (-ngl 999 --cpu-moe); 3.75x speedup |
+| T_CV4 | DONE ✓ | — | 15.6 t/s aggregate at concurrency=4; -np 4 as production default |
+| T2.4h | DONE ✓ | — | --enforce-eager restores semantic correctness at TP=2 but 10x perf penalty (~16 t/s) |
+| T6.1 | DONE ✓ | — | Production baseline: 232 t/s TP=2 (manual 2026-04-25). Automated rerun in eager mode only (see note in item). |
 | T2.4f | DONE ✓ | — | rope_theta=10M confirmed; cp-OFF OOM at TP=1 confirmed |
 | T2.4d | DONE ✓ | — | TP=1 th02 correct 3/3; quality **4.875/5** (R17 scored) |
+| T2.4g | DONE ✓ | — | H-TP2 CONFIRMED: th02 SEMANTIC ERROR 0/3; TP=2 definitively broken for GDN regardless of cp |
 | T2.4e | DONE (INCONCLUSIVE) | — | th02 INCORRECT; confounded by TP=2+cp-OFF; see R17 |
-| T2.3c | SKIPPED | — | Gemma4-31B as coder — benchmark evidence (SWE/Terminal/MCP) shows Qwen clearly better; no test needed |
-| T_CV1 | OPEN | MEDIUM | Convergence startup timing — no deps |
-| T2.4g | DONE (H-TP2 CONFIRMED) | — | th02 SEMANTIC ERROR 0/3; TP=2 definitively broken for GDN regardless of cp |
-| T_NVFP4 | DEFERRED | — | NVFP4 mass-pull — restricted to TP=1 only; no urgency; defer indefinitely |
-| T_CV2 | OPEN | LOW | Thread count sweep — after T_CV1 |
-| T_CV3 | OPEN | LOW | Partial GPU expert offload — after T_CV2 |
+| T2.3c | SKIPPED | — | Gemma4-31B as coder — benchmark evidence shows Qwen clearly better |
 | T2.4b | SKIPPED | — | Qwopus SFT — dep condition met (T2.4d quality ≥ 4.0, th02/th05 pass) |
-| T2.4 | DONE (settled by T2.4d) | — | AWQ TP=1: reproducible correct at 4.875/5. |
-| T2.4c | INCONCLUSIVE | — | NVFP4 TP=2: full run ~3.94/5 (th02 semantic error). |
+| T2.4 | DONE (settled by T2.4d) | — | AWQ TP=1: reproducible correct at 4.875/5 |
+| T2.4c | INCONCLUSIVE | — | NVFP4 TP=2: full run ~3.94/5 (th02 semantic error) |
 | T2.3b | DONE | — | Gemma4-31B as thinker — REJECTED; redirected to T2.3c |
+| T_NVFP4 | DEFERRED | — | Restricted to TP=1 only; no urgency; defer indefinitely |
+| T_KV1 | OPEN | HIGH | Coder extended context sweep — all deps met (T1.1 DONE) |
+| T_KV3 | BLOCKED (research) | HIGH | Sub-Q1 settled (T2.4g). Sub-Q2 needs research to identify TP=2-capable thinker candidate. |
+| T_PAR1 | OPEN | MEDIUM | Parallel throughput sweep — deps met (T_CV2 DONE) |
 | T1.5 Phase B | DEFERRED | — | kvcached blocked (GDN/DeltaNet unsupported) |
 
 ---

@@ -115,20 +115,29 @@ find src/ -name "*.cpp" -o -name "*.h" | xargs grep -l "qwen35\|ssm_alpha\|delta
 **SETTLED (2026-04-25, R19).** Two simultaneous TP=2 vLLM instances on our hardware saturate the shared PCIe 5.0 x8/x8 bifurcation bus. Each TP=2 decode step requires an allreduce across GPUs — with both instances doing this simultaneously, effective per-instance bandwidth halves. Result: 250+70 t/s → 4+4 t/s observed. TP=1-per-GPU eliminates allreduce entirely and is the only viable concurrent design on this hardware without NVLink. Do not retry two-simultaneous-TP=2 without NVLink.
 
 ### CUDA checkpoint/restore — SETTLED (2026-04-26, T_KV2)
-**SETTLED.** Host-native CRIU + NVIDIA `cuda-checkpoint` (driver 570+) enables full CUDA process snapshots including compiled graphs and loaded weights. 
-- **T_KV2 Verdict (Arclight Restart)**: Confirmed 0.28s hot-restart time via `uvloop` neutralization. TP=2 Arclight mode switches are now officially viable for sub-second latency.
-- **T_CV1 Verdict (Convergence Startup)**: 397B model cold-start is **~83s**. Warm start (from page cache) is not faster (**~88s**).
-- **Decision (Convergence Policy)**: Due to the >80s load time, Convergence must be **always-resident** in system RAM. "On-demand" loading is only acceptable for explicit user escalation, not transparent routing.
-- **Decision (Convergence Threads)**: T_CV2 determined that **32 threads** is the optimal count for the 397B model on pure CPU. PP speed scales linearly with threads (62 t/s vs 29 t/s).
-- **Decision (Convergence Context)**: Convergence successfully serves up to **128k context** on CPU at **3.6 t/s**. This is the hard limit for Singularity-tier escalation.
+**SETTLED.** Host-native CRIU + NVIDIA `cuda-checkpoint` (driver 570+) enables full CUDA process snapshots including compiled graphs and loaded weights.
+
+- **Result**: 0.28s hot-restart time vs 100.2s cold start — 358× speedup. Post-restore TPS (210 t/s) verified healthy (±10% of cold-start 232 t/s).
+- **Scope**: Arclight Coder TP=2 (Qwen3.6-35B-A3B-AWQ) on two RTX 5090s. Extended Arclight mode switches are now sub-second.
 
 **Requirements for stability:**
-1.  **Host-Native Execution**: Podman CDI mount-point conflicts are too brittle for CRIU. Run production hot-swaps on the host.
-2.  **`io_uring` Neutralization**: vLLM must be patched to disable `uvloop` (Networking/Async core) as `io_uring` rings are incompatible with CRIU.
-3.  **Environment**: `UV_USE_IO_URING=0` must be exported to ensure `libuv` remains clean.
-4.  **VRAM Hygiene**: Use `sudo nvidia-smi --gpu-reset -i 1` to clear "ghost" memory leaks if a restore fails or a process is abandoned.
+1. **Host-native execution**: Podman CDI mount-point conflicts break CRIU. Run production hot-swaps on the host directly.
+2. **`io_uring` neutralization**: vLLM must be patched to disable `uvloop` (`api_server.py` and `v1/utils.py` to use `asyncio.run()` instead of `uvloop.run()`). See CLAUDE.md. Do not revert.
+3. **Environment**: `UV_USE_IO_URING=0` must be exported so `libuv` also stays clean.
+4. **VRAM hygiene**: `sudo nvidia-smi --gpu-reset -i 1` clears ghost VRAM leaks after a failed restore.
 
-**What this unlocks:** Instantaneous mode-switching for "Extended Arclight" (TP=2) and sub-second resumes for any checkpointed model. Post-restore TPS (210 t/s) verified healthy and matches cold-start performance (±10%).
+**What this unlocks:** Sub-second mode-switching for Extended Arclight (thinker sleeps → coder spans TP=2 at 60–75K context). See T_KV1 for the context ceiling measurement.
+
+### Convergence operational parameters — SETTLED (2026-04-26, T_CV1/T_CV2/T_CV3/T_CV4)
+**SETTLED.** All four Convergence benchmarks are complete.
+
+- **Startup (T_CV1)**: Median cold-start **83s**; warm-cache start **88s** (CPU-bound, not disk-bound). Cold-start on-demand is unacceptable for transparent routing — always-resident is mandatory.
+- **Thread count (T_CV2)**: **32 threads** is optimal on i9-14900K. PP throughput scales linearly; 62 t/s at 32t vs 29 t/s at 16t.
+- **Hybrid GPU offload (T_CV3)**: `-ngl 999 --cpu-moe` puts attention/norm/embed on GPU, MoE experts stay in RAM. Result: **13.99 t/s** — 3.75× speedup over ngl=0 (3.7 t/s). This is the Singularity mode for Convergence.
+- **Parallel capacity (T_CV4)**: `-np 4` gives **15.6 t/s aggregate** at concurrency=4 (1.12× scaling). Production default: `-np 4`.
+- **Context ceiling (T_CV1)**: Verified functional at **128k tokens** at 3.6 t/s. This is the hard ceiling for Convergence; queries beyond this require Singularity escalation (full GPU offload).
+
+**Production launch command:** see DECISIONS.md "Convergence launch command" entry — add `-np 4` and `-t 32`.
 
 ### vLLM Sleep Mode level=1 ~4 GiB residual is a design floor, not a tunable
 When a vLLM instance sleeps at level=1, it retains ~4 GiB GPU VRAM. This is the caching allocator instance, captured CUDA graphs, JIT-compiled kernels, and process state — deliberately preserved to enable <1s wake. Cannot be shrunk without breaking the wake-time guarantee. Level=2 offloads more but is unusable (gibberish-on-wake, see separate entry).
