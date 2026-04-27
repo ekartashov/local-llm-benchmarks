@@ -81,6 +81,7 @@ if [[ "${DRY_RUN}" -eq 0 ]]; then
         --enable-prefix-caching \
         --enable-sleep-mode \
         --kv-cache-dtype fp8 \
+        --max-num-batched-tokens 4096 \
         --enforce-eager
 
     echo "label,ms" > "${RESULTS_DIR}/timings.csv"
