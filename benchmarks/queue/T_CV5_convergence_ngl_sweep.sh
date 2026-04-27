@@ -5,6 +5,7 @@
 set -euxo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "${REPO_ROOT}/config/hardware.env"
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 RESULTS_DIR="${REPO_ROOT}/results/T_CV5_ngl_sweep_${TIMESTAMP}"
 mkdir -p "${RESULTS_DIR}"
@@ -26,6 +27,7 @@ for NGL in 10 20 35 50; do
     fi
 
     # Deploy with new -ngl
+    IK_LLAMA_IMAGE="localhost/container_llama-server:latest" \
     VLLM_V1_ENABLED=0 \
     "${REPO_ROOT}/infra/scripts/deploy.sh" ikllamacpp convergence "${CONVERGENCE_MODEL}" \
       -- -ngl ${NGL} --cpu-moe -t 32 -np 1 -c 4096
