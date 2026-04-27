@@ -1,0 +1,484 @@
+{
+  "item_id": "T_PAR1_parallel_throughput_sweep",
+  "timestamp": "20260427T182955Z",
+  "config": {
+    "max_seqs_tested": "1,2,4,8",
+    "reps_per_level": 3,
+    "coder_endpoint": "http://localhost:30000/v1",
+    "thinker_endpoint": "http://localhost:30001/v1",
+    "conv_endpoint": "http://localhost:8002/v1"
+  },
+  "metrics": {
+    "coder_knee_n": null,
+    "thinker_knee_n": 2,
+    "convergence_np": 4,
+    "coder_detail": null,
+    "thinker_detail": {
+      "results_by_n": {
+        "1": {
+          "n_seqs": 1,
+          "median_agg_tps": 76.9,
+          "rounds": [
+            {
+              "median_ttft_ms": 1716.4,
+              "median_tps": 77.8,
+              "aggregate_tps": 61.7,
+              "total_tokens": 512,
+              "wall_s": 8.3,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 1716.4,
+                  "decode_tps": 77.8,
+                  "tokens": 512,
+                  "latency_ms": 8299.0,
+                  "error": null
+                }
+              },
+              "errors": []
+            },
+            {
+              "median_ttft_ms": 73.9,
+              "median_tps": 77.7,
+              "aggregate_tps": 76.9,
+              "total_tokens": 512,
+              "wall_s": 6.66,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 73.9,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 6659.1,
+                  "error": null
+                }
+              },
+              "errors": []
+            },
+            {
+              "median_ttft_ms": 73.8,
+              "median_tps": 77.7,
+              "aggregate_tps": 76.9,
+              "total_tokens": 512,
+              "wall_s": 6.66,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 73.8,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 6659.2,
+                  "error": null
+                }
+              },
+              "errors": []
+            }
+          ]
+        },
+        "2": {
+          "n_seqs": 2,
+          "median_agg_tps": 76.9,
+          "rounds": [
+            {
+              "median_ttft_ms": 3400.8,
+              "median_tps": 77.8,
+              "aggregate_tps": 76.9,
+              "total_tokens": 1024,
+              "wall_s": 13.32,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 75.2,
+                  "decode_tps": 77.8,
+                  "tokens": 512,
+                  "latency_ms": 6659.6,
+                  "error": null
+                },
+                "1": {
+                  "ttft_ms": 6726.3,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 13315.0,
+                  "error": null
+                }
+              },
+              "errors": []
+            },
+            {
+              "median_ttft_ms": 3401.8,
+              "median_tps": 77.7,
+              "aggregate_tps": 76.9,
+              "total_tokens": 1024,
+              "wall_s": 13.32,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 73.8,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 6663.3,
+                  "error": null
+                },
+                "1": {
+                  "ttft_ms": 6729.8,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 13320.4,
+                  "error": null
+                }
+              },
+              "errors": []
+            },
+            {
+              "median_ttft_ms": 3402.2,
+              "median_tps": 77.7,
+              "aggregate_tps": 76.9,
+              "total_tokens": 1024,
+              "wall_s": 13.32,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 73.2,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 6664.2,
+                  "error": null
+                },
+                "1": {
+                  "ttft_ms": 6731.1,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 13321.8,
+                  "error": null
+                }
+              },
+              "errors": []
+            }
+          ]
+        },
+        "4": {
+          "n_seqs": 4,
+          "median_agg_tps": 76.9,
+          "rounds": [
+            {
+              "median_ttft_ms": 10059.8,
+              "median_tps": 77.7,
+              "aggregate_tps": 76.9,
+              "total_tokens": 2048,
+              "wall_s": 26.64,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 73.5,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 6664.7,
+                  "error": null
+                },
+                "1": {
+                  "ttft_ms": 6731.0,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 13321.5,
+                  "error": null
+                },
+                "2": {
+                  "ttft_ms": 13388.5,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 19979.5,
+                  "error": null
+                },
+                "3": {
+                  "ttft_ms": 20046.3,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 26636.8,
+                  "error": null
+                }
+              },
+              "errors": []
+            },
+            {
+              "median_ttft_ms": 10062.1,
+              "median_tps": 77.7,
+              "aggregate_tps": 76.9,
+              "total_tokens": 2048,
+              "wall_s": 26.64,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 76.0,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 6666.4,
+                  "error": null
+                },
+                "1": {
+                  "ttft_ms": 6733.3,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 13324.8,
+                  "error": null
+                },
+                "3": {
+                  "ttft_ms": 13390.9,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 19984.2,
+                  "error": null
+                },
+                "2": {
+                  "ttft_ms": 20050.8,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 26643.6,
+                  "error": null
+                }
+              },
+              "errors": []
+            },
+            {
+              "median_ttft_ms": 10064.6,
+              "median_tps": 77.6,
+              "aggregate_tps": 76.8,
+              "total_tokens": 2048,
+              "wall_s": 26.65,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 73.9,
+                  "decode_tps": 77.7,
+                  "tokens": 512,
+                  "latency_ms": 6667.1,
+                  "error": null
+                },
+                "1": {
+                  "ttft_ms": 6734.4,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 13328.3,
+                  "error": null
+                },
+                "2": {
+                  "ttft_ms": 13394.9,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 19989.2,
+                  "error": null
+                },
+                "3": {
+                  "ttft_ms": 20056.1,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 26650.7,
+                  "error": null
+                }
+              },
+              "errors": []
+            }
+          ]
+        },
+        "8": {
+          "n_seqs": 8,
+          "median_agg_tps": 76.8,
+          "rounds": [
+            {
+              "median_ttft_ms": 23391.4,
+              "median_tps": 77.6,
+              "aggregate_tps": 76.8,
+              "total_tokens": 4096,
+              "wall_s": 53.31,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 75.8,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 6669.9,
+                  "error": null
+                },
+                "2": {
+                  "ttft_ms": 6737.2,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 13332.2,
+                  "error": null
+                },
+                "1": {
+                  "ttft_ms": 13399.0,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 19993.5,
+                  "error": null
+                },
+                "5": {
+                  "ttft_ms": 20060.7,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 26654.9,
+                  "error": null
+                },
+                "4": {
+                  "ttft_ms": 26722.1,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 33316.8,
+                  "error": null
+                },
+                "3": {
+                  "ttft_ms": 33387.7,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 39981.9,
+                  "error": null
+                },
+                "6": {
+                  "ttft_ms": 40048.1,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 46644.6,
+                  "error": null
+                },
+                "7": {
+                  "ttft_ms": 46710.6,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 53304.7,
+                  "error": null
+                }
+              },
+              "errors": []
+            },
+            {
+              "median_ttft_ms": 23390.0,
+              "median_tps": 77.6,
+              "aggregate_tps": 76.8,
+              "total_tokens": 4096,
+              "wall_s": 53.31,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 74.8,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 6669.2,
+                  "error": null
+                },
+                "2": {
+                  "ttft_ms": 6735.3,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 13329.2,
+                  "error": null
+                },
+                "1": {
+                  "ttft_ms": 13396.4,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 19991.1,
+                  "error": null
+                },
+                "5": {
+                  "ttft_ms": 20059.3,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 26654.0,
+                  "error": null
+                },
+                "4": {
+                  "ttft_ms": 26720.7,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 33314.8,
+                  "error": null
+                },
+                "7": {
+                  "ttft_ms": 33381.6,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 39976.4,
+                  "error": null
+                },
+                "6": {
+                  "ttft_ms": 40047.5,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 46642.4,
+                  "error": null
+                },
+                "3": {
+                  "ttft_ms": 46709.9,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 53305.3,
+                  "error": null
+                }
+              },
+              "errors": []
+            },
+            {
+              "median_ttft_ms": 23389.9,
+              "median_tps": 77.6,
+              "aggregate_tps": 76.8,
+              "total_tokens": 4096,
+              "wall_s": 53.3,
+              "slot_results": {
+                "0": {
+                  "ttft_ms": 75.7,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 6671.2,
+                  "error": null
+                },
+                "1": {
+                  "ttft_ms": 6736.8,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 13331.4,
+                  "error": null
+                },
+                "3": {
+                  "ttft_ms": 13397.6,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 19992.4,
+                  "error": null
+                },
+                "4": {
+                  "ttft_ms": 20059.0,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 26653.8,
+                  "error": null
+                },
+                "6": {
+                  "ttft_ms": 26720.8,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 33315.6,
+                  "error": null
+                },
+                "2": {
+                  "ttft_ms": 33383.0,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 39978.2,
+                  "error": null
+                },
+                "5": {
+                  "ttft_ms": 40045.8,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 46640.5,
+                  "error": null
+                },
+                "7": {
+                  "ttft_ms": 46707.2,
+                  "decode_tps": 77.6,
+                  "tokens": 512,
+                  "latency_ms": 53301.4,
+                  "error": null
+                }
+              },
+              "errors": []
+            }
+          ]
+        }
+      },
+      "knee_n": 2
+    },
+    "convergence_detail": null
+  },
+  "verdict": "PASS",
+  "notes": "Coder knee: N=None. Thinker knee: N=2. Convergence -np 4 already settled by T_CV4."
+}
