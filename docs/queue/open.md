@@ -44,36 +44,97 @@ For thinker: run once at production `--max-num-seqs 1` (baseline behavior), then
 
 ---
 
-### T_KV3 — thinker_tp2_fix_or_replacement — BLOCKED on research (Sub-Q2)
+### T_KV3 — thinker_extended_context — BLOCKED on research (Sub-Q2)
 
-**Sub-Q1 SETTLED (T2.4g):** GDN TP=2 broken regardless of chunked-prefill.
+**Why this is CRITICAL (not just high-priority):** The thinker is the model most in need of large context — reasoning over long chains, large codebases, multi-document synthesis. Real workloads already show the 27B thinker hitting context ceiling and failing to conclude. Coder extended context (65K, SETTLED) is useful but less urgent. Extended thinker is operationally necessary.
 
-**Sub-Q2 BLOCKED:** Research needed to identify a thinker candidate that:
+**Sub-Q1 SETTLED (T2.4g):** GDN TP=2 broken regardless of chunked-prefill. Tensor-parallel sharding of DeltaNet state is mathematically incorrect.
+
+**Sub-Q2 BLOCKED — two unblocking paths (either one suffices):**
+
+**Path A: Non-GDN replacement (vLLM + AWQ)**
+Find a thinker candidate that:
 - Is NOT GDN-hybrid (pure Transformer or MLA) — TP=2 shard is mathematically safe
 - Quality ≥ Qwen3.6-27B (4.875/5) on the 8-task thinker suite
 - Fits ~21GB AWQ at TP=1 for normal hot-pair mode
-- Candidates: strong reasoning models released 2025–2026 with pure Transformer or MLA architecture
+- First candidates to research: DeepSeek-R1-Distill-Qwen-32B, QwQ-32B (pure Transformer reasoning models with strong AIME/GPQA scores). Verify architecture in model card before testing.
+
+**Path B: ik_llama.cpp + tensor-split on existing Qwen3.6-27B (no model swap needed)**
+ik_llama.cpp pr-1288 already has DeltaNet support (used by 397B MoE). llama.cpp's `--tensor-split` is layer-split (pipeline parallelism), NOT tensor-parallel sharding. DeltaNet recurrent state lives entirely within a single layer and is never split across GPUs — the vLLM TP=2 failure mode does not apply.
+
+Test: run Qwen3.6-27B GGUF with `--tensor-split 0.5,0.5` on ik_llama.cpp, verify inference correctness on the thinker task suite (specifically th02 which catches GDN recurrent state errors). If correct: VRAM splits ~16GB per GPU, enabling larger KV cache. This path is lower-risk and doesn't require finding a new model.
 
 **No script yet.** Research mode required first. Return here after research provides a model slug + deploy config.
 
 ---
 
+### T_CRIU2 — criu_for_ikllamacpp_convergence — OPEN
+
+**Question:** Does CRIU + cuda-checkpoint work for ik_llama.cpp serving Convergence (397B MoE hybrid)?
+
+**Why this matters:** If CRIU works for ik_llama.cpp, the 83s always-resident policy is optional rather than mandatory. Convergence could be CRIU-checkpointed when idle, freeing 12GB GPU VRAM for Extended Arclight modes. Also proves CRIU is engine-agnostic — enabling the same fast-swap capability for any engine (vLLM, ik_llama.cpp, future alternatives).
+
+**Procedure:**
+1. Start Convergence with `--no-mmap` (current config). Run a test inference. Checkpoint via CRIU + cuda-checkpoint.
+2. Stop server. Restore from checkpoint. Verify inference produces correct output.
+3. Repeat with mmap (remove `--no-mmap`). Compare checkpoint size, restore time, and inference latency for first request (page-fault warmup).
+
+**What to watch for:**
+- CRIU failure modes: exotic fd types, shared memory, or cuda-checkpoint conflicts with ik_llama.cpp's CUDA allocations
+- Checkpoint size with `--no-mmap`: expected ~135GB (all model weights in anon RAM). Dump time ~20s.
+- Checkpoint size with mmap: expected ~12GB (GPU state only). Restore expected sub-second.
+- Post-restore inference quality: run th02 equivalent to check no state corruption
+
+**Pass:** Restore completes and produces correct inference. Any restore time < 83s is a win.
+
+**Hand-back trigger:** If CRIU fails with an unfamiliar fd type or CUDA error not covered in criu-ops.md.
+
+---
+
+### T_CRIU3 — criu_universal_checkpoint_library — OPEN (design + implement)
+
+**Question:** Standardize CRIU checkpointing for ALL vLLM processes, not just coder-tp2. Enable the model checkpoint library concept.
+
+**What this enables:**
+- Any model config can be restored in 0.28s instead of ~100s cold start
+- T_KV3 model swap iteration speed: checkpoint settled thinker → swap candidate → evaluate → restore settled thinker (0.28s instead of 100s per iteration)
+- Path to Sequential TP=2 architecture: all models checkpointed, any one restored on demand
+- Frees 44GB RAM currently held by sleep-mode Arclight weights → enables UD-IQ3_XXS for Convergence
+
+**Scope:**
+1. Document checkpoint management: naming convention, storage location, expiry policy
+2. Add checkpoint targets: coder-tp2-32k, thinker-tp1-32k, (future) extended variants
+3. Automate: deploy.sh should optionally checkpoint before stopping any vLLM process
+4. Pre-load hook: `posix_fadvise(POSIX_FADV_WILLNEED)` or background cat on checkpoint file when a model switch is anticipated. Relevant for large checkpoints (ik_llama.cpp --no-mmap) where SSD restore is 18s without pre-warm vs 0.28s with page-cache warm.
+
+**KV cache preservation sub-question (measure as part of this item):**
+`cuda-checkpoint` captures all CUDA memory state, including vLLM's paged-attention KV blocks. A checkpoint taken after a long-context session should restore with the KV cache populated — meaning no re-prefill on restore. This is qualitatively better than sleep mode (which drops KV state on process restart). Questions to answer:
+- Confirm: does the restored model respond to continuations without re-prefilling the prior context?
+- Checkpoint size delta: how much does a populated KV cache (e.g., 16K tokens at fp8) add to the checkpoint file size?
+- SSD wear policy: frequent CRIU dumps with full KV cache vs. checkpoint only at idle (minimal cache). The NM790 has 3,000 TBW; at 37GB checkpoint + 20 dumps/day = 740 GB/day = ~11 years. Generous, but establish the write-cost model before designing an aggressive dump policy.
+
+**Deps:** T_KV2 ✓ (CRIU mechanism settled for vLLM). T_CRIU2 (for ik_llama.cpp, can run independently).
+
+---
+
 ## MEDIUM priority
 
-### T3.4 — prefix_cache_survival_across_sleep — OPEN
+### T3.4 — prefix_cache_survival_across_sleep — OPEN (scope updated)
 
-**Question:** Does vLLM's CPU-offloaded prefix cache survive a sleep/wake cycle at level=1?
+**Original question:** Does vLLM's CPU-offloaded prefix cache survive a sleep/wake cycle at level=1?
+
+**Updated scope with CRIU context:** CRIU checkpoints all process memory (including CPU-side prefix cache, since it lives in anonymous process RAM). Prefix cache survival across CRIU restore is expected by construction — but needs empirical verification. Run this test against both sleep/wake AND CRIU restore to understand the full picture.
 
 **Procedure:**
 1. Deploy any model with `--enable-prefix-caching --cpu-offload-gb 8`, TP=2.
 2. Send 4k-token prompt, record prefill time.
 3. Send same prompt again — verify cache hit (prefill time drops).
-4. `POST /sleep?level=1`, then `POST /wake_up`.
-5. Send same prompt again, measure prefill time.
+4a. `POST /sleep?level=1`, then `POST /wake_up`. Send same prompt, measure prefill time.
+4b. CRIU checkpoint the process. Restore. Send same prompt, measure prefill time.
 
-**Pass:** post-wake prefill ≈ pre-sleep cached time (not cold-prefill time).
+**Pass:** CRIU restore preserves prefix cache (prefill ≈ cached time). Sleep/wake result may differ.
 
-**What failure means:** Prefix cache flushed on sleep → first request after wake costs full prefill. Architecturally fine but user-visible latency. Note in `docs/arch/current.md`.
+**What failure means (sleep):** Prefix cache flushed on sleep → user-visible latency on first post-wake request. Note in `docs/arch/current.md`. Does not affect CRIU path.
 
 **Deps:** T1.1 ✓. Script at `benchmarks/queue/T3.4_prefix_cache_survival.sh` (verify exists or create).
 
@@ -89,6 +150,68 @@ For thinker: run once at production `--max-num-seqs 1` (baseline behavior), then
 **Out of scope:** running any benchmark. This is a research-mode item.
 
 **Deps:** T1.3 ✓, T2.4 ✓.
+
+---
+
+### T_CV5 — convergence_gpu_offload_sweep — OPEN
+
+**Question:** What is the optimal -ngl value and --cpu-moe setting for maximum TPS? Currently only the two extremes are measured (ngl=0 → 3.7 t/s; ngl=999 --cpu-moe → 13.99 t/s).
+
+**Configs to sweep:**
+- ngl=0 (CPU-only baseline, already measured)
+- ngl=10, ngl=20, ngl=35 (partial offload with --cpu-moe still set)
+- ngl=999 --cpu-moe (current production, already measured)
+- ngl=999 without --cpu-moe (full offload including MoE experts — VRAM may exceed 32GB per GPU; measure OOM threshold)
+
+**What to watch for:**
+- TPS vs VRAM curve: is there a sweet spot with partial MoE offload that beats the current --cpu-moe setting?
+- VRAM used at each -ngl value (nvidia-smi). Find the highest -ngl that fits within available VRAM during co-deployment with Arclight.
+- Sequential pipelining TPS at optimal setting (repeat T_CV4 run at best config)
+
+**Pass:** TPS profile documented. Optimal -ngl for single-request and pipelined throughput identified.
+
+**Deps:** None. Convergence already settled; this is parameter optimization.
+
+---
+
+### T_ENGINE_EVAL — engine_comparison_for_arclight_roles — OPEN (research + test)
+
+**Context:** vLLM was originally chosen partly for its sleep mode. With CRIU providing engine-agnostic fast-swap, engine selection should now be based purely on capability: TPS, architecture support, tool-call reliability.
+
+**Models that failed on vLLM and should be re-evaluated on ik_llama.cpp:**
+- GLM-4.7-Flash (30B-A3B): `TRITON_MLA PIECEWISE CUDA graph instability on Blackwell`. This is a vLLM Triton kernel issue. ik_llama.cpp uses its own CUDA kernels (not Triton) for MLA — the same crash may not occur.
+- Any future model with CUDA graph / EngineCore conflicts on vLLM 0.19.0 + sm_120.
+
+**Scope of this item:**
+1. Test GLM-4.7-Flash on ik_llama.cpp: load GGUF, run tool-call suite, measure TPS. Compare to coder baseline (232 t/s).
+2. If GLM passes: re-open T2.2 with ik_llama.cpp as the engine instead of vLLM.
+3. Document cross-engine compatibility decisions in a new `docs/decisions/engines.md`.
+
+**Deps:** T_CRIU2 (confirms ik_llama.cpp is a viable engine for CRIU deployment). Can be researched in parallel.
+
+---
+
+### QX_PRELOAD — nvme_checkpoint_preload_mechanism — OPEN (design + implement)
+
+**Context:** CRIU restore from page cache (RAM-warm checkpoint) = 0.28s. Restore from cold NVMe = proportional to checkpoint size (e.g., 135GB at 7,400 MB/s = ~18s for ik_llama.cpp --no-mmap). Pre-loading the checkpoint into OS page cache before the switch eliminates the disk latency.
+
+**Hardware:** Lexar NM790 4TB (7,400 MB/s read). Loading 135GB → ~18s. Router needs ~10s advance notice to trigger pre-warm before the switch is visible to the user.
+
+**Pre-warm mechanism:**
+```bash
+posix_fadvise(fd, 0, checkpoint_size, POSIX_FADV_WILLNEED)
+# or equivalently:
+cat /srv/ai/checkpoints/convergence/checkpoint.tar.gz > /dev/null &
+```
+
+**Router integration points:**
+- OpenCode routing: "next task invokes Convergence" → trigger pre-warm of Convergence checkpoint
+- Context growth triggers: token count approaching 30K → pre-warm extended-coder checkpoint
+- Subagent dispatch: explicit @thinker routing → pre-warm thinker checkpoint
+
+**Pass:** warm restore ≤ 1s for checkpoints whose pre-warm completed. Cold restore time documented per checkpoint type.
+
+**Deps:** T_CRIU3 (checkpoint library standardization). NVMe hardware already in place.
 
 ---
 
@@ -122,6 +245,23 @@ But the current thinker (Qwen3.6-27B) is settled — this can run against it now
 ### T_NVFP4 — nvfp4_thinker_mass_survey — DEFERRED
 
 **Deferred indefinitely.** T2.4c used untrusted publisher (sakamakismile). Cannot distinguish format benefit from publisher quality. TP=1 only (TP=2 broken for GDN). When reconsidered: use `nvidia/` or `bartowski/` publishers only. Re-evaluate if: AWQ + bf16 KV + TP=2 passes (KV precision was the issue) OR if a non-GDN thinker with TP=2 viability is found.
+
+---
+
+### T_TRT_LLM — tensorrt_llm_peak_throughput — LOW (post-settlement optimization)
+
+**What it is:** TensorRT-LLM (TRT-LLM) is NVIDIA's native inference compiler. It compiles a model into a GPU-specific TRT engine and can extract 20–50% higher TPS than vLLM on the same hardware for well-supported architectures. FP8 is natively accelerated on Blackwell sm_120, not emulated.
+
+**Why it's LOW priority now:** Compilation step takes hours per model and is GPU-specific. This makes it incompatible with the model exploration phase — every candidate swap requires a full recompile. It only makes sense once:
+1. All role assignments are SETTLED and stable (no more model changes expected for 6+ months)
+2. T_CRIU3 and T_ENGINE_EVAL are done (CRIU library and engine-agnostic deployment settled)
+3. The architecture is in a maintenance phase, not an exploration phase
+
+**What it would prove:** TPS ceiling for production Arclight. If coder goes from 232 → 300+ t/s and thinker from 77 → 100+ t/s, that's a meaningful latency improvement for the agent loop.
+
+**Risks:** Architecture support for MoE A3B + GDN models in TRT-LLM may be incomplete. TRITON_MLA issues that affect vLLM on sm_120 could have TRT equivalents. Start with the coder (well-understood MoE, no recurrent state) before attempting thinker.
+
+**Prerequisites:** All Arclight roles SETTLED. TRT-LLM version with confirmed sm_120 / Blackwell support. Per-model FP8 calibration dataset available.
 
 ---
 

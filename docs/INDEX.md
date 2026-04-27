@@ -13,7 +13,7 @@
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
 | Convergence | Qwen3.5-397B UD-IQ2_M | ik_llama.cpp -ngl 999 --cpu-moe -t 32 -np 4 | 8002 | 13.99 t/s | SETTLED |
 
-**Open questions:** T_PAR1 Coder/Thinker max-num-seqs UNKNOWN (rerun needed). T_KV3 blocked on research (TP=2-capable thinker candidate). T_KV1 swap blocked (vLLM 0.19 flag issue).
+**Open questions:** T_PAR1 Coder/Thinker max-num-seqs UNKNOWN (rerun needed; also gates Sequential TP=2 architecture decision). T_KV3 CRITICAL — extended thinker blocked (Path A: non-GDN replacement; Path B: ik_llama.cpp tensor-split on existing 27B). T_CRIU2/T_CRIU3 — CRIU universalization queued. T_KV1 swap blocked (vLLM 0.19 flag issue). NVMe 4TB / 7,400 MB/s added to hardware table.
 
 ---
 
@@ -37,6 +37,9 @@
 - **[docs/decisions/models.md](decisions/models.md)** — Model role assignments, candidates, eliminated models
   - *Summary:* Who won each role and why; what was eliminated and the specific failure mode.
   - *Grep for:* model names, parser flags, quantization choices, benchmark scores
+- **[docs/decisions/scoring.md](decisions/scoring.md)** — Per-role evaluation weights and engine selection criteria
+  - *Summary:* What matters for each role (TPS vs quality vs context vs TTFT) and decision rules.
+  - *Load when:* evaluating a new model or engine candidate to ensure consistent scoring
 
 ### Queue
 - **[docs/queue/open.md](queue/open.md)** — OPEN and BLOCKED items only (full item spec)
@@ -44,6 +47,11 @@
   - *Grep for:* item_id, procedure steps, pass criteria, hand-back triggers
 - **[docs/queue/status.md](queue/status.md)** — One-line status for every item (DONE + OPEN + BLOCKED)
   - *Summary:* Quick lookup for whether any specific item has been run and what it found.
+
+### Handoffs
+- **[docs/handoffs/](handoffs/)** — Gemini testing session handoff files (naming: HANDOFF_GEMINI_YYYYMMDD.md)
+  - *Write new handoffs here*, not repo root.
+  - *Load when:* handing off to Gemini — contains step-by-step procedure, deploy commands, termination conditions.
 
 ### History (grep target, rarely loaded inline)
 - **[docs/history/cycles.md](history/cycles.md)** — Chronological cycle log R1–R27
@@ -88,6 +96,7 @@ RAM:    192 GB DDR5  (~83 GB/s actual)
 GPU 0:  RTX 5090 32GB  (sm_120, PCIe 5.0 x8)
 GPU 1:  RTX 5090 32GB  (sm_120, PCIe 5.0 x8)
 Link:   NO NVLink — PCIe x8/x8 bifurcation only
+SSD:    Lexar NM790 4 TB NVMe  (7,400 MB/s read, 6,500 MB/s write, 3,000 TBW, PCIe 4.0 x4)
 OS:     Linux 6.x, rootless podman, NVIDIA container toolkit
 ```
 

@@ -51,6 +51,12 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CV4 | DONE ✓ | 15.6 t/s sequential pipelining at -np 4 (1.12× scaling). Concurrent HTTP: crashes at N≥2 (T_PAR1). |
 | T_KV1 | DONE ✓ | 65K context, 238.2 t/s, 3022ms TTFT. --swap-space blocked (flag unrecognized in 0.19.0). |
 | T_KV2 | DONE ✓ | 0.28s hot restart (358× vs 100.2s cold). CRIU + cuda-checkpoint settled. |
-| T_KV3 | BLOCKED | Sub-Q1 settled (GDN TP=2 broken). Sub-Q2: needs research to find TP=2-capable thinker. |
+| T_KV3 | BLOCKED (CRITICAL) | Sub-Q1 settled (GDN TP=2 broken). Sub-Q2: Path A = find non-GDN replacement; Path B = ik_llama.cpp tensor-split on existing 27B. |
 | T_PAR1 | OPEN (partial) | Convergence: N≥2 crashes (REAL). Coder/Thinker: UNRELIABLE (fabricated) — rerun required. |
 | T_NVFP4 | DEFERRED | Restricted to TP=1; untrusted publisher (sakamakismile) used in T2.4c. Defer indefinitely. |
+| T_TRT_LLM | LOW | TensorRT-LLM peak TPS optimization. Post-settlement only — requires stable roles + hours-long compile per model. |
+| T_CRIU2 | OPEN | Test CRIU + cuda-checkpoint on ik_llama.cpp / Convergence. Confirms engine-agnostic fast-swap. |
+| T_CRIU3 | OPEN | Standardize CRIU checkpoint library for all vLLM processes. Enables sequential TP=2 architecture. |
+| T_CV5 | OPEN | Convergence -ngl sweep: find optimal GPU offload fraction for TPS. Currently only extremes measured. |
+| T_ENGINE_EVAL | OPEN | Re-evaluate GLM-4.7-Flash + other cold-storage models on ik_llama.cpp. vLLM sleep no longer required. |
+| QX_PRELOAD | OPEN | Design NVMe checkpoint pre-loading mechanism for warm CRIU restores (7,400 MB/s, 18s cold → 0.28s warm). |

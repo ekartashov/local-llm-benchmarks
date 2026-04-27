@@ -10,13 +10,29 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 ## Open from research / known issues
 
-- **T_PAR1 Coder/Thinker data UNRELIABLE (2026-04-26):** `metrics.json` shows `coder_detail: null, thinker_detail: null`. Raw dir contains only `convergence_sweep.json` — coder/thinker endpoints were not running. Numbers reported by Gemini ("1,196 t/s at N=8", "698 t/s at N=4", "Thinker OOM at N>1") are invented. T_PAR1 REOPENED for Coder and Thinker. Convergence portion (crashes at N≥2) is backed by real data.
+- **T_PAR1 Coder/Thinker data UNRELIABLE (2026-04-26):** `metrics.json` shows `coder_detail: null, thinker_detail: null`. Raw dir contains only `convergence_sweep.json` — coder/thinker endpoints were not running. Numbers reported by Gemini ("1,196 t/s at N=8", "698 t/s at N=4", "Thinker OOM at N>1") are invented. T_PAR1 REOPENED for Coder and Thinker. Convergence portion (crashes at N≥2) is backed by real data. NOTE: T_PAR1 now also serves as workload characterization for the Sequential TP=2 architecture decision — the key question is whether OpenCode genuinely requires simultaneous coder+thinker access.
 
 - **T_CV4 `-np 4` vs T_PAR1 Convergence conflict:** T_CV4 measured 15.6 t/s aggregate at C=4 (server's `-np 4` internal slots, sequential client requests). T_PAR1 found concurrent client requests crash the pr-1288 server at N≥2 (GGML_ASSERT). T_CV4 measured sequential-pipelining throughput, not true parallelism. Production `-np 4` remains valid for throughput pipelining; true concurrent-request capacity is N=1 until upstream fix.
 
 - **T_KV1 swap-space blocked:** `--swap-space 32` flag unrecognized in vLLM 0.19.0. 131K context test skipped. 65K is the current ceiling.
 
-- **T_KV3 blocked on research:** Sub-Q2 needs a TP=2-capable thinker candidate (non-GDN). No model identified yet.
+- **T_KV3 CRITICAL (elevated 2026-04-27):** Extended thinker is operationally necessary, not just optimization — real workloads show 27B model hitting context ceiling and failing to conclude. Two unblocking paths now documented: Path A (non-GDN replacement: DeepSeek-R1-Distill-Qwen-32B, QwQ-32B) and Path B (ik_llama.cpp tensor-split on existing Qwen3.6-27B — layer-split avoids DeltaNet sharding problem). Path B should be investigated first as it requires no model swap.
+
+- **Architecture direction shift (2026-04-27):** CRIU established as universal fast-swap mechanism, not vLLM-specific. Three new research lines open: (1) T_CRIU2: CRIU for ik_llama.cpp/Convergence — if confirmed, always-resident policy is optional and UD-IQ3_XXS quant becomes viable with freed RAM; (2) T_CRIU3: checkpoint library standardization (KV cache preservation sub-question included — CRIU may preserve populated KV blocks across restores, qualitatively better than sleep mode); (3) T_ENGINE_EVAL: vLLM sleep is no longer the differentiator — cold-storage models (GLM-4.7-Flash) and other engines (ik_llama.cpp) should be re-evaluated on capability merits alone.
+
+- **Dual-architecture requirement clarified (2026-04-27):** Arclight (concurrent hot-pair) and Sequential TP=2 / Extended Arclight are complementary operating modes, not alternatives. Arclight serves agent frameworks that fan out parallel subagents; Sequential TP=2 serves deep single-context work. Both must be supported. T_PAR1 data informs research priority, not which mode to build. The arch/current.md "alternative" framing has been corrected.
+
+- **KVcached (T1.5) partially superseded by CRIU:** KVcached solved (a) dynamic context size changes via fast swap and (b) aimed to improve concurrent TP=2 access. CRIU addresses (a) more effectively (0.28s swap between any pre-checkpointed config). (b) is now addressed via engine-agnostic deployment + layer-split parallelism. T1.5 Phase B remains DEFERRED (GDN unsupported in kvcached v0.1.5). KV cache persistence research moves to T_CRIU3.
+
+- **Engine selection rationale obsolete:** vLLM was chosen partly for sleep mode. With CRIU providing equivalent fast-pause on any engine, the engine decision should be based on TPS, architecture support, and tool-call reliability. ik_llama.cpp already has DeltaNet support (pr-1288) and may run models that fail on vLLM. Comprehensive re-evaluation queued as T_ENGINE_EVAL. TRT-LLM (T_TRT_LLM) queued as post-settlement peak-TPS optimization (compilation cost prohibitive during exploration phase).
+
+- **Scoring framework created (2026-04-27):** `docs/decisions/scoring.md` defines per-role evaluation weights. Model/engine selection is a usability balance (TPS × quality × context × TTFT), not a single-variable maximization. Key point: Convergence prefill throughput matters more than decode TPS; thinker quality floor is higher than coder's.
+
+- **Handoff files relocated (2026-04-27):** HANDOFF_GEMINI_* files moved from repo root to `docs/handoffs/`. All future handoff files should be written there.
+
+- **NVMe hardware added (2026-04-27):** Lexar NM790 4TB, 7,400 MB/s read, 6,500 MB/s write, 3,000 TBW, PCIe 4.0 x4. Pre-loading mechanism (QX_PRELOAD) can warm CRIU checkpoint images into page cache before a model switch, reducing cold-SSD restore from ~18s (for large --no-mmap checkpoints) to 0.28s. Hardware tables updated in CLAUDE.md, docs/INDEX.md, docs/arch/current.md.
+
+- **docs/arch/current.md diagram fixed:** Coder was incorrectly shown as TP=1. Corrected to TP=2 (production config per T6.1 and T2.5). RAM table annotated with CRIU obsolescence note.
 
 ---
 
@@ -59,8 +75,13 @@ See `docs/queue/open.md` for full specs. Key items:
 
 | Item | Priority | Status |
 |------|----------|--------|
-| T_PAR1 | HIGH | OPEN — Coder/Thinker rerun needed (fabricated data) |
-| T_KV3 | HIGH | BLOCKED — Sub-Q2: needs research for TP=2-capable thinker candidate |
+| T_PAR1 | HIGH | OPEN — Coder/Thinker rerun needed (fabricated data); also workload characterization for Sequential TP=2 decision |
+| T_KV3 | CRITICAL | BLOCKED — Path A: non-GDN thinker replacement; Path B: ik_llama.cpp tensor-split on existing 27B |
+| T_CRIU2 | HIGH | OPEN — Test CRIU on ik_llama.cpp/Convergence; confirms engine-agnostic fast-swap |
+| T_CRIU3 | HIGH | OPEN — Checkpoint library for all models; enables Sequential TP=2 + frees 44GB RAM |
+| T_CV5 | MEDIUM | OPEN — Convergence -ngl sweep for optimal GPU offload fraction |
+| T_ENGINE_EVAL | MEDIUM | OPEN — GLM-4.7-Flash + others on ik_llama.cpp; vLLM sleep no longer required |
+| QX_PRELOAD | MEDIUM | OPEN — NVMe pre-load for warm CRIU restores |
 | T3.4 | MEDIUM | OPEN — Prefix cache survival across sleep/wake |
 | T2.6 | MEDIUM | OPEN — Behemoth archetype scouting (design item) |
 

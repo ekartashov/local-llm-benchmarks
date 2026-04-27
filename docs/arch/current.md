@@ -28,14 +28,17 @@ Core (80B Qwen3-Next) RETIRED 2026-04-25 — Extended Arclight fills its role.
 │  │                        │       │                        │         │
 │  │  vLLM: ARCLIGHT CODER  │       │  vLLM: ARCLIGHT THINKER│         │
 │  │  Qwen3.6-35B-A3B-AWQ   │       │  Qwen3.6-27B-AWQ       │         │
-│  │  TP=1, fp8 KV          │       │  TP=1, fp8 KV, cp-ON   │         │
-│  │  port 30000            │       │  port 30001            │         │
-│  │  ~23GB VRAM            │       │  ~21GB VRAM            │         │
+│  │  TP=2 (spans GPU0+1)   │       │  TP=1, fp8 KV, cp-ON   │         │
+│  │  fp8 KV, port 30000    │       │  port 30001            │         │
+│  │  ~23GB VRAM (split)    │       │  ~21GB VRAM            │         │
 │  │  ~9GB free (KV cache)  │       │  ~11GB free (KV cache) │         │
 │  └────────────────────────┘       └────────────────────────┘         │
 │                                                                      │
 │  DDR5 RAM (192 GB)                                                   │
 │  ├─ Arclight sleep weights (level=1):  ~23 + ~21 = ~44 GB            │
+│  │  NOTE: obsolete once CRIU replaces sleep mode (T_CRIU3).          │
+│  │  With CRIU: 0 bytes retained in RAM → frees 44 GB for            │
+│  │  higher-quant Convergence (UD-IQ3_XXS ~140 GB becomes viable).   │
 │  ├─ Convergence model (UD-IQ2_M):              ~123 GB               │
 │  ├─ OS + CUDA runtime:                           ~4 GB               │
 │  └─ Total (Convergence active):               ~171 GB  (89%)         │
@@ -55,7 +58,7 @@ Core (80B Qwen3-Next) RETIRED 2026-04-25 — Extended Arclight fills its role.
 
 ## Design rationale
 
-### Arclight — concurrent hot pair, TP=1-per-GPU
+### Arclight — concurrent hot pair, TP=1-per-GPU (current mode)
 Physical GPU isolation (coder GPU0, thinker GPU1) eliminates CUDA context time-slicing — the mechanism that collapsed concurrent throughput to ~2% in T1.2. Each model gets full GPU memory bandwidth.
 
 **Coder:** TP=2 is the production config at 232 t/s (T6.1 manual baseline, 2026-04-25). TP=1 suffers Reasoning Collapse (hallucination loops from Triton/FLA kernel shape mismatches in eager mode) and cannot serve as production without a non-eager path.
@@ -63,6 +66,17 @@ Physical GPU isolation (coder GPU0, thinker GPU1) eliminates CUDA context time-s
 **Thinker:** TP=1 only. TP=2 confirmed broken for GDN architecture (T2.4g). `--max-num-seqs 1` required for CUDA graph stability on single GPU. Do not change until T_KV3 resolves.
 
 **Concurrency (max-num-seqs):** UNKNOWN for production. T_PAR1 Coder/Thinker rerun required. Prior Gemini Flash numbers (1,196 t/s coder at N=8) were fabricated — no measurement exists.
+
+### Sequential TP=2 / Extended mode — complementary operating mode (NOT an alternative to Arclight)
+One model active at a time, spanning both GPUs at TP=2. Others CRIU-checkpointed, restored in 0.28s.
+
+**Both Arclight and Sequential TP=2 must coexist.** They serve distinct invocation patterns:
+- Arclight (concurrent hot-pair): agent frameworks that fan out parallel subagents (e.g., OpenCode spawning coder + thinker subagents simultaneously). Concurrency is determined by the framework design and prompts, not our choice.
+- Sequential TP=2 / Extended Arclight: deep single-context work (long reasoning chains, large codebase analysis, multi-document synthesis). Full GPU bandwidth, large KV budget, no concurrency needed.
+
+**T_PAR1 data determines usage frequency of each mode**, which informs research priority — but not which to build. Both must be supported. The original Core tier (80B TP=2) was the permanent occupant of the "deep single-context escalation" slot. Extended Arclight fills that role with the same hardware. T_KV3 (Extended Thinker) is the remaining gap in this slot.
+
+See T_CRIU3 in queue for the checkpoint-library implementation that makes 0.28s mode switching reliable.
 
 ### Extended Arclight — TP=2 escalation
 See [extended-arclight.md](extended-arclight.md) for full procedure.
@@ -72,14 +86,15 @@ See [extended-arclight.md](extended-arclight.md) for full procedure.
 
 **Coder Extended mode (65K ctx, SETTLED T_KV1):** Sleep thinker → restart coder TP=2 at ctx=65536. KV budget ~37GB at fp8.
 
-**Thinker Extended mode:** GATED on T_KV3. TP=2 broken for GDN until fix or non-GDN replacement found.
+**Thinker Extended mode:** GATED on T_KV3. See T_KV3 for current unblocking paths (non-GDN model replacement OR ik_llama.cpp tensor-split on existing GDN model).
 
-### Convergence — ik_llama.cpp, always-resident
+### Convergence — ik_llama.cpp, always-resident (policy under review)
 See [convergence.md](convergence.md) for full guide.
-- Always-resident (83s cold start too high for on-demand). Never kill it without planning restart time.
+- Currently always-resident (83s cold start is CPU-bound, too high for on-demand). Never kill without planning restart time.
 - `-ngl 999 --cpu-moe`: attention/norm/embed on GPU, MoE experts in RAM. 13.99 t/s.
 - Context ceiling: **128k tokens** (T_CV1). Beyond this requires Singularity.
 - Concurrent clients: **N=1 only** (pr-1288 crashes at N≥2). `-np 4` is sequential pipelining only.
+- **Always-resident policy may change** if T_CRIU2 confirms CRIU works for ik_llama.cpp. CRIU restore bypasses the CPU-bound 83s model construction phase; with mmap (removing `--no-mmap`), checkpoint is small and restore may be sub-second. This would free 12GB GPU VRAM when Convergence is idle.
 
 ---
 

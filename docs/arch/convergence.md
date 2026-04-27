@@ -19,7 +19,9 @@
 | True concurrent HTTP (N≥2) | ❌ CRASHES (Server disconnect / GGML_ASSERT) | T_PAR1 |
 | GPU VRAM consumed (hybrid) | ~12GB split across both 5090s | T_CV3 |
 
-**Policy:** Always-resident. Never on-demand. The 83s cold start is too high for transparent routing. Convergence must be running before any request that might escalate to it.
+**Policy:** Always-resident (current). Never on-demand in this mode. The 83s cold start is too high for transparent routing. Convergence must be running before any request that might escalate to it.
+
+**Policy may change (T_CRIU2):** CRIU bypasses the CPU-bound model construction phase (the source of the 83s). If `--no-mmap` is removed, model weights stay file-backed and the checkpoint captures only ~12GB of CUDA state. Estimated restore: sub-second. If confirmed, Convergence becomes on-demand with CRIU pre-load — freeing 12GB GPU VRAM when idle and enabling higher-quant (UD-IQ3_XXS) with the 44GB RAM freed from Arclight sleep weights. See T_CRIU2 in queue.
 
 ---
 
@@ -104,9 +106,15 @@ DDR5 bandwidth is the bottleneck: ~83 GB/s actual. Per-token read ≈ 2.3GB of e
 
 ## Model selection rationale
 
-**Why UD-IQ2_M over UD-IQ3_XXS:**
+**Why UD-IQ2_M over UD-IQ3_XXS (current rationale):**
 - UD-IQ2_M (~123GB) + Arclight sleep weights (~44GB) + OS (~4GB) = ~171GB of 192GB. 21GB headroom with `--no-mmap`.
 - UD-IQ3_XXS (~140GB) leaves only ~8GB — dangerously tight for `--no-mmap`.
 - Both are within benchmark margin of error of BF16 on this 512-expert MoE architecture (Benjamin Marie independent evaluation, H200s).
+
+**This rationale becomes obsolete with CRIU (T_CRIU3):** Once CRIU replaces vLLM sleep mode, Arclight sleep weights (~44GB) no longer reside in RAM. Available headroom becomes 192 − 4 = 188GB → UD-IQ3_XXS (~140GB) fits comfortably. Quality upgrade from IQ2→IQ3 is meaningful for orchestration tasks. Revisit quant selection after T_CRIU2 + T_CRIU3 settle.
+
+**`--no-mmap` vs mmap trade-off for CRIU:**
+- Current `--no-mmap`: all 123GB copied to anonymous RAM at startup. CRIU checkpoint = ~135GB. Dump: ~20s. Cold-SSD restore: ~18s (vs 83s cold start — 4.5× speedup even without pre-warm).
+- With mmap (remove `--no-mmap`): weights stay file-backed. CRIU checkpoint = ~12GB (GPU state only). Restore: sub-second. Trade-off: first-inference page-fault latency may increase. Test: run T_CRIU2 with both variants and compare inference latency.
 
 **Why 397B over 122B:** TAU2 gap +14.7 points (86.7 vs ~72) in multi-step agentic orchestration — exactly what Convergence is invoked for.

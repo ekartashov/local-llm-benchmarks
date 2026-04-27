@@ -18,6 +18,7 @@ RAM:    192 GB DDR5 (4×48 GB, ~83 GB/s actual due to 4-DIMM downclock)
 GPU 0:  NVIDIA RTX 5090 32 GB GDDR7 (1790 GB/s, PCIe 5.0 x8)
 GPU 1:  NVIDIA RTX 5090 32 GB GDDR7 (1790 GB/s, PCIe 5.0 x8)
 Inter:  NO NVLink — PCIe x8/x8 bifurcation
+SSD:    Lexar NM790 4 TB NVMe (7,400 MB/s read, 6,500 MB/s write, 3,000 TBW, PCIe 4.0 x4)
 OS:     Linux (kernel 6.x, rootless podman, NVIDIA container toolkit)
 ```
 
@@ -64,15 +65,13 @@ Load `docs/INDEX.md` for the full current-state summary (~150 lines — covers a
 | `CLAUDE.md` | This file — always loaded |
 | `docs/INDEX.md` | Master index — load on init |
 | `docs/arch/` | Architecture (current.md, extended-arclight.md, convergence.md) |
-| `docs/decisions/` | Settled decisions (settled.md, models.md) |
+| `docs/decisions/` | Settled decisions (settled.md, models.md, scoring.md) |
 | `docs/procedures/` | Ops how-to (vllm-deploy.md, criu-ops.md) |
 | `docs/queue/open.md` | Open items with full specs |
 | `docs/queue/status.md` | One-line status for every item |
 | `docs/history/` | Cycle log + done-items (grep target, rarely needed) |
+| `docs/handoffs/` | Gemini testing session handoff documents (naming: HANDOFF_GEMINI_YYYYMMDD.md) |
 | `RESEARCH_STATE.md` | Current research summary + open-from-testing blocks |
-| `DECISIONS.md` | → stub, see `docs/decisions/` |
-| `ARCHITECTURE.md` | → stub, see `docs/arch/` |
-| `TESTING_QUEUE.md` | → stub, see `docs/queue/` |
 | `config/models.yaml` | Model registry (annotated) |
 | `results/*/summary.md` | Benchmark run results (read first) |
 
