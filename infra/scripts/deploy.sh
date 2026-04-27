@@ -114,7 +114,7 @@ case "${ENGINE}-${PLACEMENT}" in
     ikllamacpp-convergence)
         IMAGE="${IK_LLAMA_IMAGE:-localhost/container_llama-server:latest}"
         PORT="${PORT_CONVERGENCE}"
-        GPU_IDS=()  # CPU-only: no GPU device passthrough; runs in parallel with Arclight
+        GPU_IDS=("${GPU_0_ID}" "${GPU_1_ID}")
         CTX_LEN="${CTX_LEN:-16384}"
         ;;
     *)
