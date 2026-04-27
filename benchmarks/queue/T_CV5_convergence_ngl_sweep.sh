@@ -18,7 +18,7 @@ for NGL in 10 20 35 50; do
     echo "--- Testing NGL=${NGL} ---"
     
     # Stop current Convergence
-    CONV_CONTAINER=$(podman ps --format "{{.Names}}" | grep -i "convergence\|ikllamacpp" | head -1)
+    CONV_CONTAINER=$(podman ps --format "{{.Names}}" | grep -i "convergence\|ikllamacpp" | head -1 || true)
     if [ -n "${CONV_CONTAINER}" ]; then
         echo "Stopping: ${CONV_CONTAINER}"
         podman stop "${CONV_CONTAINER}" && podman rm "${CONV_CONTAINER}"
