@@ -265,7 +265,7 @@ case "${ENGINE}" in
             "${COMMON[@]}"
             -v "${_IK_BUILD}:/app/build:ro,z"
             -v "${MODEL_CACHE}:/models:ro,z"
-            -e "LD_LIBRARY_PATH=/app/build/src:/app/build/examples/mtmd"
+            -e "LD_LIBRARY_PATH=/app/build/src:/app/build/ggml/src:/app/build/examples/mtmd"
             --entrypoint "/app/build/bin/llama-server"
             "${IMAGE}"
             --model "/models/${_IK_MODEL}"
