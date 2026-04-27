@@ -1,8 +1,12 @@
 # BENCH_06 — T_CV5: Convergence MoE Expert GPU Offload Test
 
-**Status: BLOCKED**
+**Status: DONE**
 **Blocks: nothing**
-**Blocked by: BENCH_05** — must complete with a full `metrics.json` before this handoff may begin.
+**Blocked by: nothing** (BENCH_05 completed 2026-04-27)
+
+> [!NOTE]
+> BENCH_05 did not reach the 12.6 t/s saturation point at ngl=50 (measured 8.38 t/s).
+> For this test, proceed using **SAT_NGL=50** as the "best effort" saturation point.
 
 ---
 
@@ -103,11 +107,18 @@ with open(f"results/{dirs[0]}/metrics.json") as f:
 sweep = d["sweep"]
 baseline = 13.99
 target = 0.90 * baseline
+sat_ngl = None
 for ngl in [10, 20, 35, 50]:
     key = str(ngl) if str(ngl) in sweep else ngl
     if sweep[key]["median_tps"] >= target:
-        print(ngl)
+        sat_ngl = ngl
         break
+
+# Fallback to 50 if no saturation reached (per Research Mode review)
+if sat_ngl is None:
+    print(50)
+else:
+    print(sat_ngl)
 EOF
 )
 echo "Using saturation ngl: ${SAT_NGL}"

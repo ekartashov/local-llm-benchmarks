@@ -153,27 +153,6 @@ Test: run Qwen3.6-27B GGUF with `--tensor-split 0.5,0.5` on ik_llama.cpp, verify
 
 ---
 
-### T_CV5 — convergence_gpu_offload_sweep — OPEN
-
-**Question:** What is the optimal -ngl value and --cpu-moe setting for maximum TPS? Currently only the two extremes are measured (ngl=0 → 3.7 t/s; ngl=999 --cpu-moe → 13.99 t/s).
-
-**Configs to sweep:**
-- ngl=0 (CPU-only baseline, already measured)
-- ngl=10, ngl=20, ngl=35 (partial offload with --cpu-moe still set)
-- ngl=999 --cpu-moe (current production, already measured)
-- ngl=999 without --cpu-moe (full offload including MoE experts — VRAM may exceed 32GB per GPU; measure OOM threshold)
-
-**What to watch for:**
-- TPS vs VRAM curve: is there a sweet spot with partial MoE offload that beats the current --cpu-moe setting?
-- VRAM used at each -ngl value (nvidia-smi). Find the highest -ngl that fits within available VRAM during co-deployment with Arclight.
-- Sequential pipelining TPS at optimal setting (repeat T_CV4 run at best config)
-
-**Pass:** TPS profile documented. Optimal -ngl for single-request and pipelined throughput identified.
-
-**Deps:** None. Convergence already settled; this is parameter optimization.
-
----
-
 ### T_ENGINE_EVAL — engine_comparison_for_arclight_roles — OPEN (research + test)
 
 **Context:** vLLM was originally chosen partly for its sleep mode. With CRIU providing engine-agnostic fast-swap, engine selection should now be based purely on capability: TPS, architecture support, tool-call reliability.

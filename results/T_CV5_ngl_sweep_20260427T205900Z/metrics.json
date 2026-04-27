@@ -1,0 +1,48 @@
+{
+  "item_id": "T_CV5_ngl_sweep",
+  "timestamp": "20260427T205900Z",
+  "sweep": {
+    "0": {
+      "median_tps": 3.7,
+      "raw_tps": [],
+      "source": "T_CV1"
+    },
+    "10": {
+      "median_tps": 4.1,
+      "raw_tps": [
+        3.98,
+        4.1,
+        4.11
+      ]
+    },
+    "20": {
+      "median_tps": 4.72,
+      "raw_tps": [
+        4.58,
+        4.72,
+        4.73
+      ]
+    },
+    "35": {
+      "median_tps": 6.02,
+      "raw_tps": [
+        5.89,
+        6.02,
+        6.06
+      ]
+    },
+    "50": {
+      "median_tps": 8.38,
+      "raw_tps": [
+        8.1,
+        8.38,
+        8.57
+      ]
+    },
+    "999": {
+      "median_tps": 13.99,
+      "raw_tps": [],
+      "source": "T_CV3"
+    }
+  }
+}

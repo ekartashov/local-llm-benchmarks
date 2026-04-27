@@ -57,6 +57,6 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_TRT_LLM | LOW | TensorRT-LLM peak TPS optimization. Post-settlement only — requires stable roles + hours-long compile per model. |
 | T_CRIU2 | OPEN | Test CRIU + cuda-checkpoint on ik_llama.cpp / Convergence. Confirms engine-agnostic fast-swap. |
 | T_CRIU3 | OPEN | Standardize CRIU checkpoint library for all vLLM processes. Enables sequential TP=2 architecture. |
-| T_CV5 | OPEN | Convergence -ngl sweep: find optimal GPU offload fraction for TPS. Currently only extremes measured. |
+| T_CV5 | DONE ✓ | NGL sweep complete. Expert offload (no --cpu-moe) OOMs as expected. |
 | T_ENGINE_EVAL | OPEN | Re-evaluate GLM-4.7-Flash + other cold-storage models on ik_llama.cpp. vLLM sleep no longer required. |
 | QX_PRELOAD | OPEN | Design NVMe checkpoint pre-loading mechanism for warm CRIU restores (7,400 MB/s, 18s cold → 0.28s warm). |

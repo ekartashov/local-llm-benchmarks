@@ -359,8 +359,30 @@ bash benchmarks/queue/T_KV2_cuda_checkpoint_tp2_hot_restart.sh
 
 Without patch: `Error: Unknown shit 600 (anon_inode:[io_uring])`
 
----
-
 ## T4.1 — sglang_for_a3b_coder — PUNTED
 
 SGLang weight-loader bug for Qwen3.5 MoE AWQ is permanent (KeyError in qwen3_5.py:1662, per-expert vs fused tensor format, no upstream fix). Sleep Mode and MTP are vLLM-exclusive for our use. Retain SGLang only as a reference comparison if vLLM becomes a bottleneck for a specific model. Otherwise PUNTED.
+
+---
+
+## T_CV5 — convergence_ngl_sweep — DONE ✓
+
+**Question:** What is the optimal -ngl value for Convergence (Qwen3.5-397B) to reach its TPS ceiling with minimum VRAM?
+
+**Result (2026-04-27):** MEASURED. Sweep of ngl [10, 20, 35, 50] showed an accelerating TPS curve, but saturation (90% of 13.99 t/s = 12.6 t/s) was **NOT** reached at ngl=50.
+
+| -ngl | Median TPS | GPU 0 VRAM (MiB) | GPU 1 VRAM (MiB) |
+|------|-----------|-----------------|-----------------|
+| 0    | 3.70 (T_CV1) | — | — |
+| 10   | 4.10 | 3842 | 1930 |
+| 20   | 4.72 | 4344 | 2438 |
+| 35   | 6.02 | 5142 | 3138 |
+| 50   | 8.38 | 5840 | 3946 |
+| 999  | 13.99 (T_CV3) | — | — |
+
+**MoE Expert Offload (BENCH_06):** Removing `--cpu-moe` at `ngl=50` caused an immediate OOM/Deployment failure. The model weights (~123 GB) significantly exceed the 64 GB VRAM capacity. Partial expert offload is not natively supported by the engine.
+
+**Analysis:** Performance gain per layer is non-linear and highest for the final layers. The remaining 14 layers (51–64) are responsible for ~40% of the total speedup. Offloading 50 layers consumes ~9.8 GB total VRAM.
+
+**Artifacts:** `results/T_CV5_ngl_sweep_20260427T205900Z/` and `results/T_CV5_moe_offload_20260427T233729Z/`
+

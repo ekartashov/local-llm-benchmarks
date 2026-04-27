@@ -1,6 +1,6 @@
 # BENCH_05 — T_CV5: Convergence -ngl Value Sweep (--cpu-moe fixed)
 
-**Status: READY**
+**Status: DONE**
 **Blocks: BENCH_06**
 **Blocked by: nothing**
 
