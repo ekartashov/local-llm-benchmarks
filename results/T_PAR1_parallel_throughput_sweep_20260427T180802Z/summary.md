@@ -2,12 +2,12 @@
 
 ## Raw numbers
 
-| N (concurrent clients) | Aggregate TPS |
-|------------------------|---------------|
-| 1 | 240.9 |
-| 2 | 370.1 |
-| 4 | 709.8 |
-| 8 | 1204.9 |
+| N (concurrent clients) | Aggregate TPS | TTFT (median) |
+|------------------------|---------------|---------------|
+| 1 | 240.9 | 40 ms |
+| 2 | 370.1 | 75 ms |
+| 4 | 709.8 | 76 ms |
+| 8 | 1204.9 | 90 ms |
 
 ## VRAM at peak N
 GPU 0: 29756 MiB
