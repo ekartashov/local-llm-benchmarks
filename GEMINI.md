@@ -1,6 +1,10 @@
 # Host adapter for Antigravity
 
-Before work, read `./CLAUDE.md` and treat it as the authoritative project brief.
+Before work, read `./CLAUDE.md` and then `./docs/INDEX.md`. Both are required:
+- `CLAUDE.md` — project brief, operating model, behavioral rules
+- `docs/INDEX.md` — current production config, key gotchas, open queue summary, and chapter map
+
+For any non-trivial task, load `docs/INDEX.md` first. It is ~150 lines and replaces the need to read RESEARCH_STATE.md, DECISIONS.md, ARCHITECTURE.md, and TESTING_QUEUE.md (all of which are now stubs pointing to `docs/`).
 
 Do not apply `./CLAUDE.local.md` automatically. That file is specific to Claude Code running inside a rootless Podman container and does not describe the default Antigravity environment.
 

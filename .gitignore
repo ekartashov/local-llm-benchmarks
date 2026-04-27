@@ -26,4 +26,8 @@ config/hardware.env
 .DS_Store
 Thumbs.db
 CLAUDE.local.md
-llama.log
+
+# Transient logs and diagnostic dumps
+*.log
+vllm_help.txt
+scratch/
