@@ -112,7 +112,7 @@ case "${ENGINE}-${PLACEMENT}" in
         GPU_IDS=("${GPU_0_ID}")
         ;;
     ikllamacpp-convergence)
-        IMAGE="${IK_LLAMA_IMAGE:-local-ik-llama:runtime}"
+        IMAGE="${IK_LLAMA_IMAGE:-localhost/container_llama-server:latest}"
         PORT="${PORT_CONVERGENCE}"
         GPU_IDS=()  # CPU-only: no GPU device passthrough; runs in parallel with Arclight
         CTX_LEN="${CTX_LEN:-16384}"
@@ -265,6 +265,7 @@ case "${ENGINE}" in
             "${COMMON[@]}"
             -v "${_IK_BUILD}:/app/build:ro,z"
             -v "${MODEL_CACHE}:/models:ro,z"
+            -e "LD_LIBRARY_PATH=/app/build/src:/app/build/examples/mtmd"
             --entrypoint "/app/build/bin/llama-server"
             "${IMAGE}"
             --model "/models/${_IK_MODEL}"
