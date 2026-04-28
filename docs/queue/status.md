@@ -55,7 +55,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_PAR1 | OPEN (partial) | Convergence: N≥2 crashes (REAL). Coder/Thinker: UNRELIABLE (fabricated) — rerun required. |
 | T_NVFP4 | DEFERRED | Restricted to TP=1; untrusted publisher (sakamakismile) used in T2.4c. Defer indefinitely. |
 | T_TRT_LLM | LOW | TensorRT-LLM peak TPS optimization. Post-settlement only — requires stable roles + hours-long compile per model. |
-| T_CRIU2 | OPEN | Test CRIU on Convergence. --no-mmap FAILED (OOM). Moving to BENCH_08 (mmap). |
+| T_CRIU2 | DONE ✓ | Success with `mmap`. Checkpoint 8.7GB, Restore 7s. 100s page-fault warmup penalty confirmed. |
 | T_CRIU3 | OPEN | Standardize CRIU checkpoint library for all vLLM processes. Enables sequential TP=2 architecture. |
 | T_CV5 | DONE ✓ | NGL sweep complete. Expert offload (no --cpu-moe) OOMs as expected. |
 | T_ENGINE_EVAL | OPEN | Re-evaluate GLM-4.7-Flash + other cold-storage models on ik_llama.cpp. vLLM sleep no longer required. |

@@ -385,10 +385,13 @@ SGLang weight-loader bug for Qwen3.5 MoE AWQ is permanent (KeyError in qwen3_5.p
 **Analysis:** Performance gain per layer is non-linear and highest for the final layers. The remaining 14 layers (51–64) are responsible for ~40% of the total speedup. Offloading 50 layers consumes ~9.8 GB total VRAM.
 
 **Artifacts:** `results/T_CV5_ngl_sweep_20260427T205900Z/` and `results/T_CV5_moe_offload_20260427T233729Z/`
-### T_CRIU2 — Convergence CRIU Baseline (--no-mmap) — 2026-04-28
-**Status:** FAILED (System OOM)
+### T_CRIU2 — Convergence CRIU mmap Success — 2026-04-28
+**Status:** DONE ✓
 
-**Procedure:** Host-native CRIU dump of `llama-server` with 123 GB anonymous RAM weights.
-**Result:** Kernel OOM killer triggered during dump. 
-**Finding:** `--no-mmap` model state is too large to checkpoint with 188 GB RAM.
-**Next:** Proceed to BENCH_08 (mmap optimization).
+**Procedure:** Host-native CRIU dump/restore of `llama-server` (mmap mode) with FD-sanitized Python launcher.
+**Result:** 
+- Checkpoint Size: **8.7 GB** (down from 135 GB).
+- Restore Time: **7.3 s**.
+- Page-Fault Penalty: **100.56 s** (Rep 1) -> 7.73 s (Rep 3).
+**Finding:** Fast-swapping massive models is technically viable but bandwidth-limited by the first-inference warmup cost. Sanitized process environment is mandatory for CRIU reliability in agentic sessions.
+**Artifacts:** `results/T_CRIU2_mmap_20260428T003639Z/`
