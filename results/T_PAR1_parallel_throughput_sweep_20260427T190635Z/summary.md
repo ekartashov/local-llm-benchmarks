@@ -15,5 +15,5 @@ PASS — Scaling confirmed up to N=4.
 ### GPU 1 VRAM
 27732 MiB
 
-### Production config restored
-pending (user action)
+### Production config
+NOTE: The coder endpoint (localhost:30000) was not running during this test — coder_detail is null in metrics.json. Coder sweep data is in the separate BENCH_01 run (T_PAR1_parallel_throughput_sweep_20260427T180802Z). Production thinker config (max-num-seqs=1) must be restored before returning to normal operation.

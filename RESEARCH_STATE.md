@@ -2,15 +2,15 @@
 
 Living document. Current-state summary only. Full cycle log: `docs/history/cycles.md`.
 
-**Last complete cycle:** R27 (2026-04-26) — T_KV1 PASS (65K context), T_PAR1 PARTIAL (Convergence only — Coder/Thinker data UNRELIABLE, fabricated by Gemini Flash), T_CV1–4 PASS, T_KV2 PASS (0.28s hot restart).
+**Last complete cycle:** R28 (2026-04-28) — T_PAR1 COMPLETE (Coder/Thinker reruns valid), T3.4 PARTIAL (prefix cache works, wake broken), T_CRIU2 COMPLETE (--no-mmap OOM, mmap RESTORE_OK with 100s first-inference caveat).
 
-**Current mode:** Research — repo tidy + doc restructure after Gemini Flash session.
+**Current mode:** Research — results recorded, next priority is QX_PRELOAD design + T_KV3 Path B.
 
 ---
 
 ## Open from research / known issues
 
-- **T_PAR1 Coder/Thinker data UNRELIABLE (2026-04-26):** `metrics.json` shows `coder_detail: null, thinker_detail: null`. Raw dir contains only `convergence_sweep.json` — coder/thinker endpoints were not running. Numbers reported by Gemini ("1,196 t/s at N=8", "698 t/s at N=4", "Thinker OOM at N>1") are invented. T_PAR1 REOPENED for Coder and Thinker. Convergence portion (crashes at N≥2) is backed by real data. NOTE: T_PAR1 now also serves as workload characterization for the Sequential TP=2 architecture decision — the key question is whether OpenCode genuinely requires simultaneous coder+thinker access.
+- **T_PAR1 COMPLETE (2026-04-28):** Valid reruns completed (BENCH_01–03). Coder (TP=2): N=1 240.9 t/s → N=8 1204.9 t/s, still scaling at N=8 (knee not found within tested range). Thinker (TP=1): max-num-seqs=1 queues at N>1 (76.9 t/s aggregate regardless of N); max-num-seqs=4 gives 269.4 t/s at N=4 (3.5×), plateau at N=8. Convergence: N≥2 crashes unchanged (T_CV4 result stands). **Implication for Sequential TP=2:** coder has extreme batching headroom (no saturation seen); thinker benefits from max-num-seqs=4 when multiple subagents run simultaneously. The agent framework parallelism question remains open but data supports both Arclight (concurrent) and Sequential TP=2 models.
 
 - **T_CV4 `-np 4` vs T_PAR1 Convergence conflict:** T_CV4 measured 15.6 t/s aggregate at C=4 (server's `-np 4` internal slots, sequential client requests). T_PAR1 found concurrent client requests crash the pr-1288 server at N≥2 (GGML_ASSERT). T_CV4 measured sequential-pipelining throughput, not true parallelism. Production `-np 4` remains valid for throughput pipelining; true concurrent-request capacity is N=1 until upstream fix.
 
@@ -18,7 +18,9 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 - **T_KV3 CRITICAL (elevated 2026-04-27):** Extended thinker is operationally necessary, not just optimization — real workloads show 27B model hitting context ceiling and failing to conclude. Two unblocking paths now documented: Path A (non-GDN replacement: DeepSeek-R1-Distill-Qwen-32B, QwQ-32B) and Path B (ik_llama.cpp tensor-split on existing Qwen3.6-27B — layer-split avoids DeltaNet sharding problem). Path B should be investigated first as it requires no model swap.
 
-- **Architecture direction shift (2026-04-27):** CRIU established as universal fast-swap mechanism, not vLLM-specific. Three new research lines open: (1) T_CRIU2: CRIU for ik_llama.cpp/Convergence — if confirmed, always-resident policy is optional and UD-IQ3_XXS quant becomes viable with freed RAM; (2) T_CRIU3: checkpoint library standardization (KV cache preservation sub-question included — CRIU may preserve populated KV blocks across restores, qualitatively better than sleep mode); (3) T_ENGINE_EVAL: vLLM sleep is no longer the differentiator — cold-storage models (GLM-4.7-Flash) and other engines (ik_llama.cpp) should be re-evaluated on capability merits alone.
+- **T_CRIU2 COMPLETE (2026-04-28):** Two findings. (1) --no-mmap: CHECKPOINT_FAILED (SYSTEM_OOM). CRIU dump of a 135 GB anon-RAM process requires VMS to spike to ~351 GB — physically impossible on 188 GB RAM. (2) mmap (--no-mmap removed): RESTORE_OK. Checkpoint 8.7 GB in 7.6 s. Restore 7.3 s. First-inference TTFT 100.56 s (page-fault warmup from NVMe, 123 GB → ~17 s theoretical, but access is demand-paged across the full generation), rep-2 36.1 s, rep-3 7.7 s. **Critical implication:** without QX_PRELOAD, CRIU mmap restore-to-interactive (100 s) is WORSE than cold start (83 s). QX_PRELOAD is now a prerequisite for CRIU to benefit Convergence. With QX_PRELOAD (pre-warm 123 GB into page cache 17 s before restore): projected 14 s restore-to-interactive — 6× improvement. QX_PRELOAD elevated to HIGH priority.
+
+- **T3.4 PARTIAL (2026-04-28):** Prefix cache works cleanly (cold 2410 ms → warm presleep 173 ms, 0.071 ratio, 13.9× speedup). Post-wake FAILED: `POST /wake_up` HTTP 500 `'list' object has no attribute 'zero_'` in `v1/engine/core_client.py`. New vLLM bug on Qwen3.6-35B-A3B + `--enforce-eager`. The prefix cache result is valid and trustworthy. The wake bug needs investigation: is `--enforce-eager` required for sleep on Blackwell sm_120, and if so, is the wake path broken at the engine level for this model? May be related to AWQ quantization or DeltaNet architecture interacting with eager mode state restoration.
 
 - **Dual-architecture requirement clarified (2026-04-27):** Arclight (concurrent hot-pair) and Sequential TP=2 / Extended Arclight are complementary operating modes, not alternatives. Arclight serves agent frameworks that fan out parallel subagents; Sequential TP=2 serves deep single-context work. Both must be supported. T_PAR1 data informs research priority, not which mode to build. The arch/current.md "alternative" framing has been corrected.
 
@@ -75,15 +77,15 @@ See `docs/queue/open.md` for full specs. Key items:
 
 | Item | Priority | Status |
 |------|----------|--------|
-| T_PAR1 | HIGH | OPEN — Coder/Thinker rerun needed (fabricated data); also workload characterization for Sequential TP=2 decision |
 | T_KV3 | CRITICAL | BLOCKED — Path A: non-GDN thinker replacement; Path B: ik_llama.cpp tensor-split on existing 27B |
-| T_CRIU2 | HIGH | OPEN — Test CRIU on ik_llama.cpp/Convergence; confirms engine-agnostic fast-swap |
-| T_CRIU3 | HIGH | OPEN — Checkpoint library for all models; enables Sequential TP=2 + frees 44GB RAM |
-| T_CV5 | MEDIUM | OPEN — Convergence -ngl sweep for optimal GPU offload fraction |
+| QX_PRELOAD | HIGH | OPEN — Required for CRIU on Convergence. Without pre-warm: 100s first-inference (worse than cold). With pre-warm: ~14s projected. |
+| T_CRIU3 | HIGH | OPEN — Checkpoint library for all vLLM processes; enables Sequential TP=2 + frees 44GB RAM |
 | T_ENGINE_EVAL | MEDIUM | OPEN — GLM-4.7-Flash + others on ik_llama.cpp; vLLM sleep no longer required |
-| QX_PRELOAD | MEDIUM | OPEN — NVMe pre-load for warm CRIU restores |
-| T3.4 | MEDIUM | OPEN — Prefix cache survival across sleep/wake |
 | T2.6 | MEDIUM | OPEN — Behemoth archetype scouting (design item) |
+| T_PAR1 | DONE ✓ | Coder: 240–1205 t/s (N=1–8, no saturation). Thinker: 269 t/s at max-num-seqs=4. Convergence: N≥2 crashes. |
+| T_CRIU2 | DONE ✓ | --no-mmap OOM. mmap: 8.7 GB / 7s restore / 100s first-inference. QX_PRELOAD required. |
+| T_CV5 | DONE ✓ | NGL sweep + MoE offload done. |
+| T3.4 | DONE ✗ | Prefix cache works. Wake broken for Qwen3.6-35B-A3B + --enforce-eager. |
 
 ---
 

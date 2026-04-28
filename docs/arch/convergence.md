@@ -21,7 +21,13 @@
 
 **Policy:** Always-resident (current). Never on-demand in this mode. The 83s cold start is too high for transparent routing. Convergence must be running before any request that might escalate to it.
 
-**Policy may change (T_CRIU2):** CRIU bypasses the CPU-bound model construction phase (the source of the 83s). If `--no-mmap` is removed, model weights stay file-backed and the checkpoint captures only ~12GB of CUDA state. Estimated restore: sub-second. If confirmed, Convergence becomes on-demand with CRIU pre-load — freeing 12GB GPU VRAM when idle and enabling higher-quant (UD-IQ3_XXS) with the 44GB RAM freed from Arclight sleep weights. See T_CRIU2 in queue.
+**T_CRIU2 results (2026-04-28):**
+- `--no-mmap` (current): CRIU dump **impossible** on this hardware. CRIU's parasite injection causes VMS to spike to ~351 GB during dump; OOM killer fires. 188 GB RAM is not enough to hold 135 GB anon-RAM model + CRIU dump overhead simultaneously.
+- mmap (`--no-mmap` removed): RESTORE_OK. Checkpoint 8.7 GB in 7.6 s. Restore 7.3 s. First-inference TTFT **100.56 s** (page-fault warmup — kernel reloads 123 GB of model weights on demand from NVMe). Rep-2: 36.1 s. Rep-3: 7.7 s (fully warm).
+
+**Critical finding:** Without QX_PRELOAD, CRIU mmap is **slower** than cold start (100 s vs 83 s restore-to-interactive). Always-resident policy remains correct until QX_PRELOAD is implemented.
+
+**With QX_PRELOAD:** `posix_fadvise(POSIX_FADV_WILLNEED)` warms 123 GB into page cache ~17 s before restore. Projected restore-to-interactive: ~14 s (6× improvement over cold start). QX_PRELOAD is now HIGH priority — it is the prerequisite for making CRIU viable for Convergence.
 
 ---
 
@@ -113,8 +119,8 @@ DDR5 bandwidth is the bottleneck: ~83 GB/s actual. Per-token read ≈ 2.3GB of e
 
 **This rationale becomes obsolete with CRIU (T_CRIU3):** Once CRIU replaces vLLM sleep mode, Arclight sleep weights (~44GB) no longer reside in RAM. Available headroom becomes 192 − 4 = 188GB → UD-IQ3_XXS (~140GB) fits comfortably. Quality upgrade from IQ2→IQ3 is meaningful for orchestration tasks. Revisit quant selection after T_CRIU2 + T_CRIU3 settle.
 
-**`--no-mmap` vs mmap trade-off for CRIU:**
-- Current `--no-mmap`: all 123GB copied to anonymous RAM at startup. CRIU checkpoint = ~135GB. Dump: ~20s. Cold-SSD restore: ~18s (vs 83s cold start — 4.5× speedup even without pre-warm).
-- With mmap (remove `--no-mmap`): weights stay file-backed. CRIU checkpoint = ~12GB (GPU state only). Restore: sub-second. Trade-off: first-inference page-fault latency may increase. Test: run T_CRIU2 with both variants and compare inference latency.
+**`--no-mmap` vs mmap trade-off for CRIU (measured 2026-04-28):**
+- `--no-mmap` (current): CRIU checkpoint impossible — OOM during dump (see T_CRIU2 above). No path forward with current hardware.
+- mmap (remove `--no-mmap`): Checkpoint 8.7 GB, restore 7.3 s. First-inference 100 s (page-fault warmup, worse than 83 s cold start). With QX_PRELOAD pre-warming page cache: projected ~14 s restore-to-interactive. `--no-mmap` must be removed to enable any CRIU path for Convergence. Switch is safe for inference correctness (text output identical pre/post restore at temperature=0.0).
 
 **Why 397B over 122B:** TAU2 gap +14.7 points (86.7 vs ~72) in multi-step agentic orchestration — exactly what Convergence is invoked for.

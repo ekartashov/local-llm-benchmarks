@@ -36,7 +36,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T3.1 | OPEN | KV cache q8/q4 on settled thinker. Deps: T2.3 (blocked). |
 | T3.2 | OPEN | MTP spec decode on GLM-4.7-Flash. Deps: T2.2 (blocked). |
 | T3.3 | OPEN | Qwen3-Next MTP on behemoth. Deps: T1.3 ✓, T2.4. |
-| T3.4 | OPEN | Prefix cache survival across sleep/wake. Deps: T1.1 ✓. Script ready. |
+| T3.4 | DONE ✗ | Prefix cache works (cold 2410ms → warm 173ms, 13.9× speedup). Post-wake FAILED: HTTP 500 `'list' has no attr 'zero_'` (vLLM wake bug on Qwen3.6-35B-A3B + --enforce-eager). |
 | T4.1 | PUNTED | SGLang for A3B coder. Revisit only if vLLM blocks a model. |
 | T5.1 | OPEN | OpenCode endpoint binding with subagents. Deps: T2.2, T2.3 (blocked). |
 | T5.2 | OPEN | Behemoth wake trigger integration. Deps: T2.4 ✓. |
@@ -52,11 +52,11 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_KV1 | DONE ✓ | 65K context, 238.2 t/s, 3022ms TTFT. --swap-space blocked (flag unrecognized in 0.19.0). |
 | T_KV2 | DONE ✓ | 0.28s hot restart (358× vs 100.2s cold). CRIU + cuda-checkpoint settled. |
 | T_KV3 | BLOCKED (CRITICAL) | Sub-Q1 settled (GDN TP=2 broken). Sub-Q2: Path A = find non-GDN replacement; Path B = ik_llama.cpp tensor-split on existing 27B. |
-| T_PAR1 | OPEN (partial) | Convergence: N≥2 crashes (REAL). Coder/Thinker: UNRELIABLE (fabricated) — rerun required. |
+| T_PAR1 | DONE ✓ | Coder: 240.9→1204.9 t/s (N=1→8, still scaling). Thinker: 76.9 t/s at N=1; max-num-seqs=4 gives 269.4 t/s at N=4 (3.5×). Convergence: N≥2 crashes (unchanged from T_CV4). |
 | T_NVFP4 | DEFERRED | Restricted to TP=1; untrusted publisher (sakamakismile) used in T2.4c. Defer indefinitely. |
 | T_TRT_LLM | LOW | TensorRT-LLM peak TPS optimization. Post-settlement only — requires stable roles + hours-long compile per model. |
-| T_CRIU2 | DONE ✓ | Success with `mmap`. Checkpoint 8.7GB, Restore 7s. 100s page-fault warmup penalty confirmed. |
+| T_CRIU2 | DONE ✓ | --no-mmap: SYSTEM_OOM (135 GB anon-RAM undumpable on 188 GB). mmap: 8.7 GB checkpoint, 7s restore, 100s first-inference. QX_PRELOAD required for viability. |
 | T_CRIU3 | OPEN | Standardize CRIU checkpoint library for all vLLM processes. Enables sequential TP=2 architecture. |
 | T_CV5 | DONE ✓ | NGL sweep complete. Expert offload (no --cpu-moe) OOMs as expected. |
 | T_ENGINE_EVAL | OPEN | Re-evaluate GLM-4.7-Flash + other cold-storage models on ik_llama.cpp. vLLM sleep no longer required. |
-| QX_PRELOAD | OPEN | Design NVMe checkpoint pre-loading mechanism for warm CRIU restores (7,400 MB/s, 18s cold → 0.28s warm). |
+| QX_PRELOAD | OPEN (HIGH) | REQUIRED for CRIU on Convergence. T_CRIU2 mmap: 100s first-inference without pre-warm (worse than 83s cold start). With pre-warm (123 GB at 7.4 GB/s ≈ 17s): projected 14s restore-to-interactive. |

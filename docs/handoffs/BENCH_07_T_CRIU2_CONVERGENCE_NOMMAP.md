@@ -1,8 +1,11 @@
 # BENCH_07 — T_CRIU2: CRIU Checkpoint/Restore for Convergence (--no-mmap, current config)
 
-**Status: READY**
+**Status: DONE ✗**
 **Blocks: BENCH_08**
 **Blocked by: nothing**
+
+> [!NOTE]
+> CHECKPOINT_FAILED (SYSTEM_OOM). CRIU dump of a ~135 GB anonymous-RAM process on 188 GB RAM is physically impossible — VMS spiked to ~351 GB during parasite injection. Pre-checkpoint inference was healthy (8.74 t/s). Proceed to BENCH_08 (mmap variant).
 
 ---
 

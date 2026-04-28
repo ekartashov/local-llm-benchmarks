@@ -1,8 +1,11 @@
 # BENCH_08 — T_CRIU2: CRIU Checkpoint/Restore for Convergence (mmap, --no-mmap removed)
 
-**Status: BLOCKED on BENCH_07**
+**Status: DONE ✓**
 **Blocks: nothing**
-**Blocked by: BENCH_07** (must confirm CRIU works with ik_llama.cpp before testing the mmap variant)
+**Blocked by: nothing**
+
+> [!NOTE]
+> RESTORE_OK. Checkpoint 8.7 GB in 7.6 s. Restore 7.3 s. First-inference TTFT 100.56 s (page-fault warmup from NVMe), rep-2 36.13 s, rep-3 7.73 s. Text match: identical. **Key finding:** without QX_PRELOAD, CRIU mmap restore-to-interactive (108 s) is slower than cold start (83 s). QX_PRELOAD is a prerequisite for CRIU to benefit Convergence.
 
 ---
 

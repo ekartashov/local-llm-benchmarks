@@ -19,20 +19,17 @@
 | 3 (post-restore, warm) | 7.73 s | identical |
 
 ## GPU VRAM after restore
-- Process successfully restored and re-attached to GPUs 0 and 1.
-- VRAM residency confirmed.
+Per-GPU MiB values were not captured in a separate file during this run. The process successfully re-attached to both GPUs after restore and completed inference (confirmed via API response). Exact VRAM breakdown was not recorded.
 
 ## Comparison vs BENCH_07 (--no-mmap)
 | Metric | BENCH_07 (--no-mmap) | BENCH_08 (mmap) |
 |--------|---------------------|-----------------|
-| Checkpoint size | ~135 GB | **8.7 GB** |
-| Restore time | N/A (OOM) | **7.3 s** |
+| Checkpoint size | N/A (never measured — SYSTEM_OOM) | **8.7 GB** |
+| Restore time | N/A (SYSTEM_OOM) | **7.3 s** |
 | Rep-1 TTFT | N/A | **100.56 s** |
 
-## Analysis
-- **Technical Success:** Host-native CRIU with `mmap` successfully avoids the system OOM killer by excluding file-backed model weights from the dump.
-- **The Trade-off:** While the "Restore" phase is extremely fast (~1s for CRIU + health overhead), the **First-Inference Penalty** is severe (100.56s). This is caused by the kernel having to page-fault the 123 GB of weights from the NVMe back into RAM during the first generation.
-- **Conclusion:** Fast-swap is technically possible but limited by storage I/O bandwidth for the "warmup" inference. This confirms that Convergence is "swappable" but not "instantly interactive" upon swap-in.
+## Key finding
+CRIU with mmap is technically feasible: 8.7 GB checkpoint, 7.3 s restore. However, the first-inference penalty (100.56 s) **exceeds** the cold start time (83 s). Without pre-loading the model file into page cache before the CRIU restore (QX_PRELOAD), CRIU mmap is slower than a cold start for time-to-first-response. With QX_PRELOAD (123 GB at 7,400 MB/s ≈ 17 s pre-warm), projected restore-to-interactive would be ~7 s + ~7 s = ~14 s — a 6× improvement over cold start. QX_PRELOAD is therefore a prerequisite for CRIU to benefit Convergence.
 
 ## Status
 MEASURED ✓

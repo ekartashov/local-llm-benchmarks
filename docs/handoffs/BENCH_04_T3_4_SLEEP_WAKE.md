@@ -1,8 +1,11 @@
 # BENCH_04 — T3.4: Prefix Cache Survival Across Sleep/Wake
 
-**Status: READY**
+**Status: DONE ✗**
 **Blocks: nothing**
 **Blocked by: nothing**
+
+> [!NOTE]
+> Prefix cache confirmed working (cold 2410 ms → warm 173 ms, 0.071 ratio). Post-wake FAILED: `POST /wake_up` returns HTTP 500, `'list' object has no attribute 'zero_'` in `v1/engine/core_client.py`. Sleep/wake broken for Qwen3.6-35B-A3B with `--enforce-eager`. See `## Open from testing` in results summary.
 
 ---
 
