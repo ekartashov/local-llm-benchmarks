@@ -395,3 +395,15 @@ SGLang weight-loader bug for Qwen3.5 MoE AWQ is permanent (KeyError in qwen3_5.p
 - Page-Fault Penalty: **100.56 s** (Rep 1) -> 7.73 s (Rep 3).
 **Finding:** Fast-swapping massive models is technically viable but bandwidth-limited by the first-inference warmup cost. Sanitized process environment is mandatory for CRIU reliability in agentic sessions.
 **Artifacts:** `results/T_CRIU2_mmap_20260428T003639Z/`
+
+---
+
+## T_CRIU3 Phase 1 — thinker_hot_restart_feasibility — DONE ✓
+
+**Question:** Does host-native CRIU + cuda-checkpoint work for the Thinker (TP=1, GPU1)?
+
+**Result (2026-04-28):** PASS. Achieved 0.33s restore time (303× speedup vs cold start).
+- **Method:** Host-native CRIU dump/restore + `cuda-checkpoint --toggle` + Python-sanitized launcher.
+- **Metrics:** 401 MB checkpoint (CPU-only), TTFT parity (0.71s vs 0.72s), identical text output.
+- **Implication:** Unblocks Sequential TP=2 orchestration. All Arclight/Core roles now have a sub-second swap path.
+- **Log:** `results/T_CRIU3_thinker_hot_restart_20260428T082547Z/`

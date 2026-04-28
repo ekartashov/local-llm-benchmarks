@@ -2,7 +2,7 @@
 
 Living document. Current-state summary only. Full cycle log: `docs/history/cycles.md`.
 
-**Last complete cycle:** R28 (2026-04-28) — T_PAR1 COMPLETE (Coder/Thinker reruns valid), T3.4 PARTIAL (prefix cache works, wake broken), T_CRIU2 COMPLETE (--no-mmap OOM, mmap RESTORE_OK with 100s first-inference caveat).
+**Last complete cycle:** R28 (2026-04-28) — T_PAR1 COMPLETE (Coder/Thinker reruns valid), T3.4 PARTIAL (prefix cache works, wake broken), T_CRIU2 COMPLETE (Convergence mmap RESTORE_OK), T_CRIU3 Phase 1 COMPLETE (Thinker host-native CRIU success).
 
 **Current mode:** Research — results recorded, next priority is QX_PRELOAD design + T_KV3 Path B.
 
@@ -19,6 +19,8 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 - **T_KV3 CRITICAL (elevated 2026-04-27):** Extended thinker is operationally necessary, not just optimization — real workloads show 27B model hitting context ceiling and failing to conclude. Two unblocking paths now documented: Path A (non-GDN replacement: DeepSeek-R1-Distill-Qwen-32B, QwQ-32B) and Path B (ik_llama.cpp tensor-split on existing Qwen3.6-27B — layer-split avoids DeltaNet sharding problem). Path B should be investigated first as it requires no model swap.
 
 - **T_CRIU2 COMPLETE (2026-04-28):** Two findings. (1) --no-mmap: CHECKPOINT_FAILED (SYSTEM_OOM). CRIU dump of a 135 GB anon-RAM process requires VMS to spike to ~351 GB — physically impossible on 188 GB RAM. (2) mmap (--no-mmap removed): RESTORE_OK. Checkpoint 8.7 GB in 7.6 s. Restore 7.3 s. First-inference TTFT 100.56 s (page-fault warmup from NVMe, 123 GB → ~17 s theoretical, but access is demand-paged across the full generation), rep-2 36.1 s, rep-3 7.7 s. **Critical implication:** without QX_PRELOAD, CRIU mmap restore-to-interactive (100 s) is WORSE than cold start (83 s). QX_PRELOAD is now a prerequisite for CRIU to benefit Convergence. With QX_PRELOAD (pre-warm 123 GB into page cache 17 s before restore): projected 14 s restore-to-interactive — 6× improvement. QX_PRELOAD elevated to HIGH priority.
+
+- **T_CRIU3 Phase 1 COMPLETE (2026-04-28):** Thinker host-native CRIU success. Restore time **0.43s** (target < 1s). Checkpoint size **501 MB** (CPU state only; GPU state retained via `cuda-checkpoint --toggle`). Post-restore TTFT parity (0.73s vs 0.72s). **Conclusion:** Fast-swapping is viable for TP=1 configurations using the host-native path. This unblocks Sequential TP=2 orchestration (swapping thinker/coder on GPU1).
 
 - **T3.4 PARTIAL (2026-04-28):** Prefix cache works cleanly (cold 2410 ms → warm presleep 173 ms, 0.071 ratio, 13.9× speedup). Post-wake FAILED: `POST /wake_up` HTTP 500 `'list' object has no attribute 'zero_'` in `v1/engine/core_client.py`. New vLLM bug on Qwen3.6-35B-A3B + `--enforce-eager`. The prefix cache result is valid and trustworthy. The wake bug needs investigation: is `--enforce-eager` required for sleep on Blackwell sm_120, and if so, is the wake path broken at the engine level for this model? May be related to AWQ quantization or DeltaNet architecture interacting with eager mode state restoration.
 

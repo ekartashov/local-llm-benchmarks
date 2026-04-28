@@ -56,7 +56,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_NVFP4 | DEFERRED | Restricted to TP=1; untrusted publisher (sakamakismile) used in T2.4c. Defer indefinitely. |
 | T_TRT_LLM | LOW | TensorRT-LLM peak TPS optimization. Post-settlement only — requires stable roles + hours-long compile per model. |
 | T_CRIU2 | DONE ✓ | --no-mmap: SYSTEM_OOM (135 GB anon-RAM undumpable on 188 GB). mmap: 8.7 GB checkpoint, 7s restore, 100s first-inference. QX_PRELOAD required for viability. |
-| T_CRIU3 | OPEN | Standardize CRIU checkpoint library for all vLLM processes. Enables sequential TP=2 architecture. |
+| T_CRIU3 | DONE ✓ | Thinker host-native CRIU success: 0.33s restore time. Enables Sequential TP=2 swaps. |
 | T_CV5 | DONE ✓ | NGL sweep complete. Expert offload (no --cpu-moe) OOMs as expected. |
 | T_ENGINE_EVAL | OPEN | Re-evaluate GLM-4.7-Flash + other cold-storage models on ik_llama.cpp. vLLM sleep no longer required. |
 | QX_PRELOAD | OPEN (HIGH) | REQUIRED for CRIU on Convergence. T_CRIU2 mmap: 100s first-inference without pre-warm (worse than 83s cold start). With pre-warm (123 GB at 7.4 GB/s ≈ 17s): projected 14s restore-to-interactive. |

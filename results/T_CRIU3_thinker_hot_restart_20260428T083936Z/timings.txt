@@ -1,0 +1,6 @@
+pre_ttft_s=0.73
+checkpoint_elapsed_s=0.34
+checkpoint_size_gb=501M
+restore_elapsed_s=0.43
+post_restore_ttft_s=0.72
+text_match=identical
