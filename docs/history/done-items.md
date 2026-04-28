@@ -385,4 +385,10 @@ SGLang weight-loader bug for Qwen3.5 MoE AWQ is permanent (KeyError in qwen3_5.p
 **Analysis:** Performance gain per layer is non-linear and highest for the final layers. The remaining 14 layers (51–64) are responsible for ~40% of the total speedup. Offloading 50 layers consumes ~9.8 GB total VRAM.
 
 **Artifacts:** `results/T_CV5_ngl_sweep_20260427T205900Z/` and `results/T_CV5_moe_offload_20260427T233729Z/`
+### T_CRIU2 — Convergence CRIU Baseline (--no-mmap) — 2026-04-28
+**Status:** FAILED (System OOM)
 
+**Procedure:** Host-native CRIU dump of `llama-server` with 123 GB anonymous RAM weights.
+**Result:** Kernel OOM killer triggered during dump. 
+**Finding:** `--no-mmap` model state is too large to checkpoint with 188 GB RAM.
+**Next:** Proceed to BENCH_08 (mmap optimization).
