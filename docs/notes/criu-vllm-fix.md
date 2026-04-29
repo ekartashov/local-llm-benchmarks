@@ -111,10 +111,31 @@ On April 29, 2026, we achieved the first stable CRIU hot-restart for vLLM TP=2:
 - **Restore Time**: 14.46s
 - **Status**: Process tree fully restored and healthy.
 
-## Summary of Fixes in T_CRIU3
-| Fix | Purpose |
-|-----|---------|
-| `runpy` Injection | Forces standard `asyncio` loop, blocking `io_uring`. |
-| `pkill -u $USER` | Silently clears ghost processes without breaking terminal layout. |
-| Persistence Recovery | Recreates `/run/nvidia-persistenced/socket` to prevent OCI errors. |
-| Redirected Toggling | Silences expected "initialization errors" on non-CUDA API processes. |
+### 6. The "EngineDead" Fix: IPC Stabilization
+Even after successful restoration, the vLLM V1 engine would frequently hang or timeout (`EngineDeadError`) due to brittle inter-process communication (IPC) state in ZMQ and Shared Memory spinlocks.
+
+**The Solution: Nuclear IPC Stabilization**
+
+#### A. SHM Busy-Wait Patch
+We patched `vllm/distributed/device_communicators/shm_broadcast.py` to bypass the ZMQ-based `poll()` synchronization, which often deadlocks post-restore.
+- **Change**: Replaced `SpinCondition.wait()` with a 100% CRIU-safe busy-wait using `sched_yield()`.
+- **Change**: Patched `MessageQueue.recv()` to use a retry loop with `zmq.NOBLOCK` instead of `socket.poll()`.
+
+#### B. ZMQ Poller Patch
+We patched the core `zmq` library (`zmq/sugar/poll.py`) to handle restored file descriptors.
+- **Change**: Updated `zmq.Poller` to detect PID changes (indicating a restore) and automatically re-register all sockets to the internal ZMQ poller.
+
+#### C. Environment Synchronization
+We synchronized the benchmark script and wrapper to enforce a consistent V1 environment:
+- `VLLM_MQ_MAX_CHUNK_BYTES_MB=999999`: Forces nearly all communication into the now-stabilized Shared Memory path.
+- `VLLM_WORKER_MULTIPROC_METHOD=spawn`: Ensures worker processes start from a clean state.
+- `VLLM_RPC_TIMEOUT=600000`: Provides 10 minutes of breathing room for the engine to synchronize after restoration.
+
+### Updated Checklist (Phase 2)
+- [x] Neutralize `io_uring` via `LD_PRELOAD` shim.
+- [x] Standardize `asyncio` loop policy to `DefaultEventLoopPolicy`.
+- [x] **New**: Busy-wait patch for `shm_broadcast.py` to avoid post-restore deadlocks.
+- [x] **New**: PID-aware ZMQ poller patch for library-level stability.
+- [x] **New**: Force V1 engine with massive SHM buffers (`VLLM_MQ_MAX_CHUNK_BYTES_MB=999999`).
+- [x] **New**: Extended RPC/Iteration timeouts (10 minutes) for recovery grace periods.
+- [x] **New**: Enforce Eager Mode to avoid brittle CUDA Graph restoration.
