@@ -31,3 +31,6 @@ CLAUDE.local.md
 *.log
 vllm_help.txt
 scratch/
+
+# CRIU Checkpoints
+checkpoints/
