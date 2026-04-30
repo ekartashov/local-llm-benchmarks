@@ -87,7 +87,7 @@ THINKER_CONTAINER=$(podman ps --format "{{.Names}}" | grep -i "thinker" | head -
 echo "Stopping: ${THINKER_CONTAINER}"
 podman stop "${THINKER_CONTAINER}" 2>/dev/null; podman rm "${THINKER_CONTAINER}" 2>/dev/null
 
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
 ./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
   --gpu-mem-util 0.90 \
   --ctx 32768 \
@@ -146,7 +146,7 @@ echo "checkpoint_size_gb=${CKPT_SIZE_GB}" >> "${RESULTS_DIR}/timings.txt"
 if [ "${CKPT_EXIT}" -ne 0 ]; then
   echo "CHECKPOINT_FAILED" > "${RESULTS_DIR}/status.txt"
   echo "Checkpoint failed. Redeploying production thinker."
-  VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
+  VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
   ./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
     --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
     --enable-chunked-prefill --max-num-seqs 1 \
@@ -185,7 +185,7 @@ if ! curl -sf http://localhost:30001/health 2>/dev/null; then
   echo "RESTORE_FAILED" > "${RESULTS_DIR}/status.txt"
   nvidia-smi --query-gpu=index,memory.used --format=csv,noheader >> "${RESULTS_DIR}/vram_at_failure.txt"
   # If ghost VRAM suspected, run: sudo nvidia-smi --gpu-reset -i 1
-  VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
+  VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
   ./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
     --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
     --enable-chunked-prefill --max-num-seqs 1 \

@@ -25,7 +25,7 @@ mkdir -p "${CHECKPOINT_DIR}"
 export HF_HOME="/srv/ai/models"
 export UV_USE_IO_URING=0
 export UVLOOP_NO_IO_URING=1
-export VLLM_V1_ENABLED=1
+export VLLM_USE_V1=1
 export VLLM_USE_V1=1
 export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
 

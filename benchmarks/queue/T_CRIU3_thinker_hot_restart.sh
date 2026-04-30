@@ -49,7 +49,7 @@ sleep 2
 # --- Step 1: Start vLLM on Host (Python Sanitized) ---
 echo "[T_CRIU3] Starting vLLM on Host (Python Sanitized)..."
 export UV_USE_IO_URING=0
-export VLLM_V1_ENABLED=0
+export VLLM_USE_V1=0
 export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
 
 # Use Python to launch the process with a clean session and closed FDs
@@ -248,7 +248,7 @@ sleep 2
 
 # Redeploy production container
 echo "[T_CRIU3] Redeploying production container..."
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
 "${REPO_ROOT}/infra/scripts/deploy.sh" vllm gpu1 "${MODEL}" \
   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
   --enable-chunked-prefill --max-num-seqs 1 \

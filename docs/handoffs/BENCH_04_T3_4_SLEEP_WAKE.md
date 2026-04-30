@@ -38,7 +38,7 @@ nvidia-smi --query-gpu=index,memory.used,memory.free --format=csv,noheader | gre
 
 The production coder deploy command (to restore after this test):
 ```bash
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ./infra/scripts/deploy.sh vllm tp2a cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
@@ -100,7 +100,7 @@ EOF
 # Step 4 — MANDATORY: restore production coder if it was running before this test
 # (Only do this if BENCH_01 or BENCH_02 is still in progress on this machine
 #  and the production coder is needed)
-# VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+# VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 # ./infra/scripts/deploy.sh vllm tp2a cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
 #   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
 #   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice

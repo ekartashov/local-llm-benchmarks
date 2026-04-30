@@ -19,7 +19,7 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
   --kv-cache-dtype fp8
   --ctx 32768 (65536 in Extended mode)
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
-  VLLM_V1_ENABLED=0
+  VLLM_USE_V1=0
   VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
   ```
 - **Why TP=2 mandatory:** TP=1 on vLLM 0.19.0 triggers Reasoning Collapse (hallucination loops, Triton/FLA kernel shape mismatch in eager mode). TP=1 regresses to ~20 t/s. Not worth debugging.

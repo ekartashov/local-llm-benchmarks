@@ -74,7 +74,7 @@ export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1   # model supports 65536; we use 32768 he
 
 # vLLM V1 engine is currently unstable on this model/HW and crashes during tool sanity.
 # Force V0 engine (stable) for this benchmark using all known flags for recent nightlies.
-export VLLM_V1_ENABLED=0
+export VLLM_USE_V1=0
 export VLLM_USE_V1=0
 export VLLM_V1=0
 export VLLM_USE_V1_ENGINE=0

@@ -77,7 +77,7 @@ echo "Stopping: ${THINKER_CONTAINER}"
 podman stop "${THINKER_CONTAINER}" && podman rm "${THINKER_CONTAINER}"
 
 # Step 2 — Redeploy thinker with max-num-seqs=4
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
   --enable-chunked-prefill --max-num-seqs 4 \
@@ -117,7 +117,7 @@ EOF
 THINKER_CONTAINER=$(podman ps --format "{{.Names}}" | grep -i "thinker\|gpu1\|27b" | head -1)
 podman stop "${THINKER_CONTAINER}" && podman rm "${THINKER_CONTAINER}"
 
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
   --enable-chunked-prefill --max-num-seqs 1 \

@@ -37,6 +37,22 @@ CRIU cannot checkpoint processes with `io_uring` file descriptors. vLLM uses `uv
 Error: Unknown shit 600 (anon_inode:[io_uring])
 ```
 
+## Required runtime patches (python_hijack)
+
+Launch vLLM via `benchmarks/queue/vllm_criu_wrapper.py` with
+`PYTHONPATH=benchmarks/queue/python_hijack:$PYTHONPATH`. This loads
+`python_hijack/sitecustomize.py` before vLLM starts, applying:
+
+| Patch | What it fixes |
+|-------|--------------|
+| `CriuSafePoller` (ZMQ Poller subclass) | Workers resume inside `poller.poll()` after CRIU; re-registers sockets on PID change, caps timeout at 1s so workers escape within 1s instead of blocking 60s |
+| `SpinCondition.wait()` → `sched_yield()` | Replaces poll on dead `inproc://` ZMQ sockets with a CPU yield; `acquire_read()` loop then finds the SHM slot on next iteration |
+| `SpinCondition.notify()` exception guard | Suppresses errors when PUB socket is broken post-restore |
+| `asyncio.DefaultEventLoopPolicy()` | Prevents uvloop re-initialization in sub-processes |
+
+The `LD_PRELOAD=benchmarks/queue/io_uring_shim.so` shim additionally blocks io_uring syscalls
+at the C level as a belt-and-suspenders defense for any code path that bypasses the Python env.
+
 ---
 
 ## Required environment
@@ -102,13 +118,17 @@ Without this, the next vLLM deploy may OOM even though nvidia-smi shows capacity
 
 ## Expected timing
 
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Cold start (TP=2 coder, 32K ctx) | ~100s | Full weight load + CUDA graph capture |
-| Checkpoint dump | ~0.07s | GPU + CPU state |
-| Hot restore | **~0.28s** | GPU weights already in VRAM |
-| Post-restore inference startup | ~2s | First request warmup |
-| Total Extended Arclight round-trip | ~5–10s | sleep thinker + CRIU restore + wake |
+| Config | Operation | Time | Checkpoint size |
+|--------|-----------|------|----------------|
+| TP=1 thinker | Cold start | ~80s | — |
+| TP=1 thinker | Checkpoint dump | ~1s | **501 MB** |
+| TP=1 thinker | Hot restore | **~0.43s** | — |
+| TP=2 coder | Cold start | ~100s | — |
+| TP=2 coder | Checkpoint dump | ~29s | **67 GB** |
+| TP=2 coder | Hot restore | ~24–26s | — |
+
+**TP=1 only.** TP=2 restore has a 4× speedup over cold start but fails at post-restore inference
+due to SHM IPC incompatibility (see Failure modes). Do not attempt CRIU for TP=2.
 
 ---
 
@@ -133,8 +153,9 @@ Error toggling CUDA in process ID <PID>: "OS call failed or operation not suppor
 
 | Symptom | Likely cause | Action |
 |---------|-------------|--------|
-| `Unknown shit 600 (anon_inode:[io_uring])` | uvloop patch not applied | Verify api_server.py and v1/utils.py patches |
+| `Unknown shit 600 (anon_inode:[io_uring])` | uvloop patch not applied | Verify api_server.py and v1/utils.py patches; ensure `UV_USE_IO_URING=0` |
 | Restore succeeds but inference is wrong | Checkpoint corrupted or CUDA state mismatch | Do NOT use; report to vLLM issue tracker |
 | OOM after restore | Ghost VRAM from previous failed restore | `sudo nvidia-smi --gpu-reset -i 1` then retry |
 | Checkpoint CDI mount errors | Running inside container instead of host | Run CRIU operations on host only |
 | CRIU fails in rootless Podman | CDI/namespace conflicts | Confirmed: host-native is the only working path |
+| `TimeoutError: RPC call to execute_model timed out` (TP=2 only) | SHM broadcast IPC broken post-restore — workers cannot see EngineCore writes to `ShmRingBuffer`. Blackwell forces V1 engine (SHM path) regardless of `VLLM_USE_V1=0`. | **Do not use CRIU for TP=2.** This is a settled architectural incompatibility (T_CRIU3 Phase 2, 2026-04-30). Use prefix cache prefill for KV continuity instead. |

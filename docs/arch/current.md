@@ -128,7 +128,7 @@ curl -X POST http://localhost:30001/sleep?level=1           # ~4s
 
 # Restart coder at TP=2 (CRIU hot-restart ~0.28s; cold ~100s)
 # See docs/procedures/criu-ops.md for CRIU procedure
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
 ./infra/scripts/deploy.sh vllm tp2a cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
     --gpu-mem-util 0.90 --ctx 65536 \
     --tool-call-parser qwen3_coder --reasoning-parser qwen3
@@ -160,7 +160,7 @@ curl -X POST http://localhost:30001/wake_up
 ### vLLM (Arclight)
 - Container: rootless podman via `infra/compose/`, version 0.19.x
 - Deploy: `infra/scripts/deploy.sh`
-- V1 engine: **disabled** (`VLLM_V1_ENABLED=0`) — stability fix for Blackwell sm_120
+- V1 engine: **disabled** (`VLLM_USE_V1=0`) — stability fix for Blackwell sm_120
 
 ### ik_llama.cpp (Convergence)
 - Repo: `/srv/ai/projects/ik_llama.cpp`, branch `pr-1288`

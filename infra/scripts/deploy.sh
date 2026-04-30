@@ -172,14 +172,14 @@ if [[ -n "${NVIDIA_VISIBLE_STR}" ]]; then
 fi
 
 # Forward credentials and well-known vLLM env vars if set by caller.
-# V1 engine is disabled by default (VLLM_V1_ENABLED=0) due to stability issues on Blackwell.
+# V1 engine is disabled by default (VLLM_USE_V1=0) due to stability issues on Blackwell.
 [[ -n "${HF_TOKEN:-}" ]]                        && COMMON+=(-e "HF_TOKEN=${HF_TOKEN}")
 [[ -n "${HUGGING_FACE_HUB_TOKEN:-}" ]]          && COMMON+=(-e "HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}")
 [[ -n "${VLLM_SERVER_DEV_MODE:-}" ]]            && COMMON+=(-e "VLLM_SERVER_DEV_MODE=${VLLM_SERVER_DEV_MODE}")
 [[ -n "${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-}" ]]   && COMMON+=(-e "VLLM_ALLOW_LONG_MAX_MODEL_LEN=${VLLM_ALLOW_LONG_MAX_MODEL_LEN}")
 [[ -n "${VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS:-}" ]] && COMMON+=(-e "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=${VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS}")
 [[ -n "${UV_USE_IO_URING:-}" ]]                 && COMMON+=(-e "UV_USE_IO_URING=${UV_USE_IO_URING}")
-COMMON+=(-e "VLLM_V1_ENABLED=${VLLM_V1_ENABLED:-0}")
+COMMON+=(-e "VLLM_USE_V1=${VLLM_USE_V1:-0}")
 COMMON+=(-e "VLLM_USE_V1=${VLLM_USE_V1:-0}")
 COMMON+=(-e "VLLM_V1=${VLLM_V1:-0}")
 COMMON+=(-e "VLLM_USE_V1_ENGINE=${VLLM_USE_V1_ENGINE:-0}")

@@ -91,7 +91,7 @@ sleep 3
 # --- Deploy with new -ngl ---
 # NOTE: pass NGL via CONVERGENCE_EXTRA_FLAGS env var or edit deploy.sh call below
 # Check deploy.sh for how to pass extra ik_llama.cpp flags; if uncertain, use:
-VLLM_V1_ENABLED=0 \
+VLLM_USE_V1=0 \
 ./infra/scripts/deploy.sh ikllamacpp convergence \
   -- -ngl ${NGL} --cpu-moe -t 32 -np 1 -c 4096
 

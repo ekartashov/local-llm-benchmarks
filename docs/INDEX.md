@@ -13,7 +13,7 @@
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
 | Convergence | Qwen3.5-397B UD-IQ2_M | ik_llama.cpp -ngl 999 --cpu-moe -t 32 -np 4 | 8002 | 13.99 t/s | SETTLED |
 
-**Open questions:** T_PAR1 Coder/Thinker max-num-seqs UNKNOWN (rerun needed; also gates Sequential TP=2 architecture decision). T_KV3 CRITICAL — extended thinker blocked (Path A: non-GDN replacement; Path B: ik_llama.cpp tensor-split on existing 27B). T_CRIU2/T_CRIU3 — CRIU universalization queued. T_KV1 swap blocked (vLLM 0.19 flag issue). NVMe 4TB / 7,400 MB/s added to hardware table.
+**Open questions:** T_KV3 CRITICAL — extended thinker blocked (Path A: non-GDN replacement; Path B: ik_llama.cpp tensor-split on existing 27B). QX_PRELOAD HIGH — required for CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). CRIU settled: TP=1 ✓ (0.43s), TP=2 ✗ (SHM IPC incompatible on Blackwell).
 
 ---
 
@@ -64,7 +64,7 @@
 ### Procedures (load when executing an operation)
 - **[docs/procedures/vllm-deploy.md](procedures/vllm-deploy.md)** — vLLM deployment patterns, env vars, container flags
   - *Load when:* deploying or scripting any vLLM endpoint change
-  - *Grep for:* env var names, flag names, VLLM_V1_ENABLED, CUDA graph flags, port assignments
+  - *Grep for:* env var names, flag names, VLLM_USE_V1, CUDA graph flags, port assignments
 - **[docs/procedures/criu-ops.md](procedures/criu-ops.md)** — CRIU + cuda-checkpoint operational procedure
   - *Load when:* running Extended Arclight mode switches, checkpointing, debugging restore failures
   - *Grep for:* uvloop patch, checkpoint command, ghost VRAM cleanup, restore time expectations
@@ -80,11 +80,12 @@
 5. **`--reasoning-parser` must NOT be combined with tool-call parser for models that skip thinking** — causes all-`no_call` on Gemma4, Core/80B, and any model that emits tool calls directly. Use `--tool-call-parser X` alone.
 6. **T_CV4 15.6 t/s is sequential pipelining, not true concurrency** — concurrent HTTP to Convergence crashes at N≥2 (T_PAR1). Do not quote T_CV4 as "parallel" capacity.
 7. **Convergence always-resident** — 83s cold start; never on-demand. Always start before Arclight if doing a full system restart.
-8. **VLLM_V1_ENABLED=0 is required** — V1 engine causes 10× TPS regression in eager mode and CUDA graph instability on Blackwell.
+8. **VLLM_USE_V1=0 is required** — V1 engine causes 10× TPS regression in eager mode and CUDA graph instability on Blackwell.
 9. **VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 required for coder TP=2** — prevents OOM during CUDA graph capture.
 10. **After a failed CRIU restore: `sudo nvidia-smi --gpu-reset -i 1`** — clears ghost VRAM leaks.
 11. **Convergence model path uses split GGUF** — reference only `00001-of-00004.gguf`; loader finds the rest. All 4 files must be in the same directory.
 12. **`--max-num-seqs 1` mandatory for thinker** — CUDA graph stability constraint on single GPU. Do not raise without testing.
+13. **CRIU is TP=1 only** — TP=2 CRIU restore succeeds but post-restore inference fails (SHM IPC broken; Blackwell forces V1 engine). 26s restore is also only 4× vs cold start. Do not attempt for coder. See `docs/decisions/settled.md` and `docs/procedures/criu-ops.md`.
 
 ---
 
@@ -108,7 +109,7 @@ TP=2 allreduce over PCIe x8: fine for MoE A3B (~60 MB/s at 150 t/s). Catastrophi
 
 ```bash
 # Find where a specific model/flag/decision is documented:
-rg "VLLM_V1_ENABLED" docs/
+rg "VLLM_USE_V1" docs/
 rg "qwen3_coder" docs/decisions/models.md
 rg "T_PAR1" docs/queue/
 rg "GDN" docs/decisions/

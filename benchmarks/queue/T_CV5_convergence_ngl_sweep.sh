@@ -28,7 +28,7 @@ for NGL in 10 20 35 50; do
 
     # Deploy with new -ngl
     echo "[T_CV5] Loading model at NGL=${NGL} (this will take 1-2 minutes)..."
-    VLLM_V1_ENABLED=0 \
+    VLLM_USE_V1=0 \
     "${REPO_ROOT}/infra/scripts/deploy.sh" ikllamacpp convergence "${CONVERGENCE_MODEL}" \
       -ngl ${NGL} --cpu-moe -t 32 -np 1 -c 4096
 

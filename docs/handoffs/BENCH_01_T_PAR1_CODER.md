@@ -37,7 +37,7 @@ mkdir -p results && echo "RESULTS DIR OK"
 
 If the coder is down, deploy it:
 ```bash
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ./infra/scripts/deploy.sh vllm tp2a cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice

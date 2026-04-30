@@ -85,13 +85,13 @@ import subprocess, os
 log = open('${RESULTS_DIR}/vllm_host.log', 'w')
 env = os.environ.copy()
 env['UV_USE_IO_URING'] = '0'
-env['VLLM_USE_V1'] = '1'
-env['VLLM_V1'] = '1'
+env['VLLM_USE_V1'] = '0'
 env['VLLM_LOGGING_LEVEL'] = 'DEBUG'
 env['VLLM_ENGINE_ITERATION_TIMEOUT_S'] = '600'
 env['VLLM_RPC_TIMEOUT'] = '600000'
 env['CUDA_VISIBLE_DEVICES'] = '0,1'
 env['LD_PRELOAD'] = '${REPO_ROOT}/benchmarks/queue/io_uring_shim.so'
+env['PYTHONPATH'] = '${REPO_ROOT}/benchmarks/queue/python_hijack:' + env.get('PYTHONPATH', '')
 subprocess.Popen(
     ['python3', '${WRAPPER}',
      '--model', '${MODEL}',
@@ -106,8 +106,7 @@ subprocess.Popen(
      '--max-num-batched-tokens', '4096',
      '--reasoning-parser', 'qwen3',
      '--tool-call-parser', 'qwen3_coder',
-     '--enable-auto-tool-choice',
-     '--no-async-scheduling'],
+     '--enable-auto-tool-choice'],
     stdout=log, stderr=log, stdin=subprocess.DEVNULL,
     env=env, close_fds=True, start_new_session=True
 )
@@ -219,6 +218,18 @@ if sudo "${CRIU}" dump \
     CKPT_SIZE_GB=$(sudo du -sh "${CHECKPOINT_DIR}" 2>/dev/null | awk '{print $1}')
     echo "[T_CRIU3]   Checkpoint OK: ${CKPT_ELAPSED_S}s, ${CKPT_SIZE_GB}"
     sudo chown -R $(id -u):$(id -g) "${RESULTS_DIR}" "${CHECKPOINT_DIR}"
+
+    # QX_PRELOAD: warm checkpoint into page cache before restore.
+    # 67 GB checkpoint → NVMe page faults post-restore would consume the
+    # engine iteration timeout budget (execute_model takes 200+s), leaving
+    # no budget for sample_tokens.  Pre-warming reads all images sequentially
+    # at 7.4 GB/s (~9s) so post-restore access hits page cache, not NVMe.
+    echo "[T_CRIU3]   QX_PRELOAD: warming checkpoint into page cache..."
+    QX_START_MS=$(date +%s%3N)
+    find "${CHECKPOINT_DIR}" -type f -exec cat {} + > /dev/null
+    QX_END_MS=$(date +%s%3N)
+    QX_ELAPSED_S=$(python3 -c "print(round(($QX_END_MS - $QX_START_MS) / 1000.0, 2))")
+    echo "[T_CRIU3]   QX_PRELOAD done: ${QX_ELAPSED_S}s"
 else
     echo "[T_CRIU3] ERROR: CRIU dump failed. See ${RESULTS_DIR}/criu_dump.log"
     sudo chown -R $(id -u):$(id -g) "${RESULTS_DIR}" "${CHECKPOINT_DIR}" 2>/dev/null || true
@@ -257,15 +268,18 @@ fi
 
 echo "[T_CRIU3]   Resuming GPU state..."
 for pid in ${ALL_TARGET_PIDS}; do
+    echo "[T_CRIU3]     cuda-checkpoint --toggle --pid ${pid}"
     sudo "${CUDA_CHECKPOINT}" --toggle --pid "${pid}" >/dev/null 2>&1 || true
 done
+echo "[T_CRIU3]   Processes after restore:"
+ps aux | grep -E "vllm_criu_wrapper|vllm\.entrypoints|EngineCore|Worker_TP" | grep -v grep || true
 echo "[T_CRIU3]   Waiting 10s for GPU VRAM migration to settle..."
 sleep 10
 sudo chown $(id -u):$(id -g) "${RESULTS_DIR}/criu_restore.log" 2>/dev/null || true
 
 # Wait for health
 RESTORE_READY=0
-for i in $(seq 1 60); do
+for i in $(seq 1 300); do
     if curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; then
         echo "[T_CRIU3]   HEALTH OK after restore"
         RESTORE_READY=1
@@ -309,6 +323,7 @@ print('KV_CACHE_PRESERVED' if r < 0.30 else ('KV_CACHE_LOST' if r > 0.70 else 'K
 echo "[T_CRIU3]   KV verdict: ${KV_VERDICT}"
 
 # ── Step 9: Write summary ─────────────────────────────────────────────────────
+WARM_COLD_RATIO=$(python3 -c "print(round(${WARM_TTFT_S} / ${COLD_TTFT_S}, 3))" 2>/dev/null || echo "0")
 cat > "${RESULTS_DIR}/summary.md" <<EOMD
 # T_CRIU3 Phase 2 — CRIU KV Cache Preservation — ${TIMESTAMP}
 ## Result
@@ -317,7 +332,12 @@ RESTORE_OK
 |--------|-------|
 | Cold TTFT | ${COLD_TTFT_S}s |
 | Warm TTFT | ${WARM_TTFT_S}s |
+| Warm/cold ratio | ${WARM_COLD_RATIO} |
+| Checkpoint time | ${CKPT_ELAPSED_S}s |
+| Checkpoint size | ${CKPT_SIZE_GB} |
+| Restore time | ${RESTORE_ELAPSED_S}s |
 | Post-restore TTFT | ${POST_TTFT_S}s |
+| Post-restore/cold ratio | ${POST_COLD_RATIO} |
 | KV verdict | ${KV_VERDICT} |
 EOMD
 

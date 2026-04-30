@@ -35,7 +35,7 @@ Everything committed on `main`. No test runs were performed.
 **Critical operational requirements (do not forget):**
 - vLLM containers must have `uvloop` patched out (`api_server.py` + `v1/utils.py` use `asyncio.run()`).
 - Export `UV_USE_IO_URING=0` before any CRIU checkpoint/restore operation.
-- `VLLM_V1_ENABLED=0` must be set for all vLLM deployments.
+- `VLLM_USE_V1=0` must be set for all vLLM deployments.
 - `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1` required for coder TP=2 (prevents OOM during graph capture).
 - For TP=2 coder: `--gpu-memory-utilization 0.90`.
 - After a failed CRIU restore: `sudo nvidia-smi --gpu-reset -i 1` to clear ghost VRAM leaks.

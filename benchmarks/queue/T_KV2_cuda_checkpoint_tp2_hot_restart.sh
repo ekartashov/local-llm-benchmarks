@@ -257,7 +257,7 @@ if [[ "${SKIP_COLD}" -eq 0 ]]; then
         VLLM_SERVER_DEV_MODE=1 \
         VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-        VLLM_V1_ENABLED=0 VLLM_USE_V1=0 VLLM_V1=0 VLLM_USE_V1_ENGINE=0 \
+        VLLM_USE_V1=0 VLLM_USE_V1=0 VLLM_V1=0 VLLM_USE_V1_ENGINE=0 \
         "${REPO_ROOT}/infra/scripts/deploy.sh" vllm tp2a "${MODEL}" \
             --gpu-mem-util "${GPU_MEM_UTIL}" \
             --ctx "${CTX_LEN}" \

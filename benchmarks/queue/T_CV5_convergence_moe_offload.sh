@@ -45,7 +45,7 @@ if [ -n "${CONV_CONTAINER}" ]; then
     sleep 3
 fi
 
-VLLM_V1_ENABLED=0 \
+VLLM_USE_V1=0 \
 "${REPO_ROOT}/infra/scripts/deploy.sh" ikllamacpp convergence "${CONVERGENCE_MODEL}" \
   -ngl ${SAT_NGL} --cpu-moe -t 32 -np 1 -c 4096
 
@@ -75,7 +75,7 @@ if [ -n "${CONV_CONTAINER}" ]; then
 fi
 
 echo "Deploying Config B (no --cpu-moe). Expecting possible OOM..."
-VLLM_V1_ENABLED=0 \
+VLLM_USE_V1=0 \
 "${REPO_ROOT}/infra/scripts/deploy.sh" ikllamacpp convergence "${CONVERGENCE_MODEL}" \
   -ngl ${SAT_NGL} -t 32 -np 1 -c 4096 || {
     echo "B,${SAT_NGL},no,FAILED,0,0,0" >> "${RESULTS_DIR}/raw.csv"

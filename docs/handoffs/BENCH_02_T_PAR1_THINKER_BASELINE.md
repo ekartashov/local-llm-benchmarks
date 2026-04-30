@@ -34,7 +34,7 @@ test -f benchmarks/queue/T_PAR1_parallel_throughput_sweep.sh && echo "SCRIPT OK"
 
 If the thinker is down, deploy it:
 ```bash
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
   --enable-chunked-prefill --max-num-seqs 1 \

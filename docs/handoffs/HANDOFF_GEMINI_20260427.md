@@ -52,13 +52,13 @@ If either endpoint is down, deploy it (see deploy commands below) and re-verify 
 
 ```bash
 # Coder (TP=2, both GPUs, production config)
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ./infra/scripts/deploy.sh vllm tp2a cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
 
 # Thinker (TP=1, GPU1, production config — max-num-seqs 1 for baseline)
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
   --enable-chunked-prefill --max-num-seqs 1 \
@@ -90,7 +90,7 @@ This requires redeploying the thinker with a higher slot count:
 ./infra/scripts/teardown.sh thinker   # or equivalent stop command
 
 # Redeploy with max-num-seqs 4
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
   --enable-chunked-prefill --max-num-seqs 4 \

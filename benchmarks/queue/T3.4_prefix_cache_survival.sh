@@ -71,7 +71,7 @@ if [[ "${DRY_RUN}" -eq 0 ]]; then
     # 1. Start coder with prefix caching
     echo "[T3.4] Starting coder with prefix caching..."
     VLLM_SERVER_DEV_MODE=1 \
-    VLLM_V1_ENABLED=0 \
+    VLLM_USE_V1=0 \
     VLLM_USE_V1=0 \
     VLLM_USE_V1_ENGINE=0 \
     VLLM_V1=0 \

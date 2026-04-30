@@ -2,9 +2,13 @@
 
 Living document. Current-state summary only. Full cycle log: `docs/history/cycles.md`.
 
-**Last complete cycle:** R28 (2026-04-28) — T_PAR1 COMPLETE (Coder/Thinker reruns valid), T3.4 PARTIAL (prefix cache works, wake broken), T_CRIU2 COMPLETE (Convergence mmap RESTORE_OK), T_CRIU3 Phase 1 COMPLETE (Thinker host-native CRIU success).
+**Last complete cycle:** R29 (2026-04-30) — T_CRIU3 Phase 2 FAILED. KV cache IS preserved in VRAM post-restore, but post-restore inference unreachable due to SHM IPC incompatibility in vLLM TP=2 on Blackwell.
 
-**Current mode:** Research — results recorded, next priority is QX_PRELOAD design + T_KV3 Path B.
+**Current mode:** Research
+
+## Open from testing
+
+*(none — BENCH_10 closed)*
 
 ---
 
@@ -21,6 +25,8 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 - **T_CRIU2 COMPLETE (2026-04-28):** Two findings. (1) --no-mmap: CHECKPOINT_FAILED (SYSTEM_OOM). CRIU dump of a 135 GB anon-RAM process requires VMS to spike to ~351 GB — physically impossible on 188 GB RAM. (2) mmap (--no-mmap removed): RESTORE_OK. Checkpoint 8.7 GB in 7.6 s. Restore 7.3 s. First-inference TTFT 100.56 s (page-fault warmup from NVMe, 123 GB → ~17 s theoretical, but access is demand-paged across the full generation), rep-2 36.1 s, rep-3 7.7 s. **Critical implication:** without QX_PRELOAD, CRIU mmap restore-to-interactive (100 s) is WORSE than cold start (83 s). QX_PRELOAD is now a prerequisite for CRIU to benefit Convergence. With QX_PRELOAD (pre-warm 123 GB into page cache 17 s before restore): projected 14 s restore-to-interactive — 6× improvement. QX_PRELOAD elevated to HIGH priority.
 
 - **T_CRIU3 Phase 1 COMPLETE (2026-04-28):** Thinker host-native CRIU success. Restore time **0.43s** (target < 1s). Checkpoint size **501 MB** (CPU state only; GPU state retained via `cuda-checkpoint --toggle`). Post-restore TTFT parity (0.73s vs 0.72s). **Conclusion:** Fast-swapping is viable for TP=1 configurations using the host-native path. This unblocks Sequential TP=2 orchestration (swapping thinker/coder on GPU1).
+
+- **T_CRIU3 Phase 2 FAILED (2026-04-30, BENCH_10):** CRIU dump/restore succeeds for Coder TP=2 (29s dump, 67 GB; 24–26s restore). KV cache IS physically preserved (SchedulerOutput hits=2096/queries=3009 post-restore). But first inference fails: `TimeoutError: RPC call to execute_model timed out`. Root cause: SHM broadcast IPC (`ShmRingBuffer`) broken after CRIU restore for multi-process TP=2. Workers resume inside `poller.poll()` on dead `inproc://` ZMQ sockets and can never see EngineCore's `written_flag=1` writes to the SHM slot. Patches (CriuSafePoller 1000ms cap, SpinCondition.wait→sched_yield) are necessary but not sufficient for TP=2 — the underlying SHM cache coherency failure persists. VLLM_USE_V1=0 cannot help because Blackwell sm_120 forces V1 regardless. **Conclusion: CRIU KV-cache preservation for TP=2 is not feasible with vLLM 0.19.0 on Blackwell. Mechanism also undesirable: 26s restore time provides only ~4× speedup over cold start (vs 358× for TP=1). Prefix cache prefill (13.9× speedup, T3.4) is the correct KV continuity mechanism after a swap.** See BENCH_10 handoff doc for full root cause analysis.
 
 - **T3.4 PARTIAL (2026-04-28):** Prefix cache works cleanly (cold 2410 ms → warm presleep 173 ms, 0.071 ratio, 13.9× speedup). Post-wake FAILED: `POST /wake_up` HTTP 500 `'list' object has no attribute 'zero_'` in `v1/engine/core_client.py`. New vLLM bug on Qwen3.6-35B-A3B + `--enforce-eager`. The prefix cache result is valid and trustworthy. The wake bug needs investigation: is `--enforce-eager` required for sleep on Blackwell sm_120, and if so, is the wake path broken at the engine level for this model? May be related to AWQ quantization or DeltaNet architecture interacting with eager mode state restoration.
 
@@ -57,7 +63,7 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 - **TP=1-per-GPU isolation:** Perfect 1.0× concurrent isolation. Coder=237 t/s (T2.5), Thinker=77.4 t/s (T2.4d).
 - **GDN TP=2 broken (H-TP2 confirmed T2.4g):** Gated DeltaNet recurrent state does NOT commute across TP shards. TP=2 is semantically incorrect for Qwen3.6-27B regardless of chunked-prefill. TP=1 + fp8 KV + cp-ON is the only viable thinker config.
 - **CRIU hot restart:** 0.28s vs 100.2s cold. Host-native only (Podman CDI conflicts). vLLM uvloop must be patched to asyncio. `UV_USE_IO_URING=0` required.
-- **VLLM_V1_ENABLED=0 mandatory:** V1 engine unstable on Blackwell sm_120 for our models. Always set in deploy.sh.
+- **VLLM_USE_V1=0 mandatory:** V1 engine unstable on Blackwell sm_120 for our models. Always set in deploy.sh.
 - **VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 mandatory for TP=2:** Prevents OOM during CUDA graph capture.
 - **--swap-space blocked:** Flag unrecognized in vLLM 0.19.0 (R-V0 engine path). 65K is the hard context ceiling for Extended Arclight.
 - **Convergence always-resident:** 83s cold start is too high for on-demand routing. Keep as always-resident service. Context ceiling 128k tokens. True concurrency = N=1 per client (pr-1288 crashes at N≥2).
@@ -70,6 +76,7 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 - Dense 70B TP=2: ~20–35 t/s, settled FAIL. Not worth testing again.
 - kvcached T1.5 Phase B: GDN/DeltaNet unsupported in v0.1.5. Deferred indefinitely.
 - SGLang for AWQ MoE: KeyError in qwen3_5.py:1662 (per-expert vs fused tensor format). Permanent incompatibility. Punted.
+- **CRIU KV-cache preservation for vLLM TP=2 (T_CRIU3 Phase 2):** SHM broadcast IPC (`ShmRingBuffer`) is broken after CRIU restore for multi-process configurations. Workers cannot see EngineCore writes to SHM slots. Blackwell sm_120 forces V1 engine regardless of `VLLM_USE_V1=0`, making the SHM path unavoidable. Additionally, TP=2 checkpoint is 67 GB (26s restore) — only ~4× faster than cold start. Not worth fixing. TP=1 CRIU (Phase 1) is unaffected.
 
 ---
 
@@ -81,7 +88,8 @@ See `docs/queue/open.md` for full specs. Key items:
 |------|----------|--------|
 | T_KV3 | CRITICAL | BLOCKED — Path A: non-GDN thinker replacement; Path B: ik_llama.cpp tensor-split on existing 27B |
 | QX_PRELOAD | HIGH | OPEN — Required for CRIU on Convergence. Without pre-warm: 100s first-inference (worse than cold). With pre-warm: ~14s projected. |
-| T_CRIU3 | HIGH | OPEN — Checkpoint library for all vLLM processes; enables Sequential TP=2 + frees 44GB RAM |
+| T_CRIU3 Ph.1 | DONE ✓ | Thinker TP=1: 0.43s restore, 501 MB, TTFT parity. Sequential TP=2 swaps unblocked. |
+| T_CRIU3 Ph.2 | DONE ✗ | Coder TP=2: dump/restore OK (29s/67GB), KV preserved, inference FAIL (SHM IPC broken post-restore). |
 | T_ENGINE_EVAL | MEDIUM | OPEN — GLM-4.7-Flash + others on ik_llama.cpp; vLLM sleep no longer required |
 | T2.6 | MEDIUM | OPEN — Behemoth archetype scouting (design item) |
 | T_PAR1 | DONE ✓ | Coder: 240–1205 t/s (N=1–8, no saturation). Thinker: 269 t/s at max-num-seqs=4. Convergence: N≥2 crashes. |

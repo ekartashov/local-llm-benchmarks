@@ -3,7 +3,7 @@
 ## Critical environment variables (all required, set in deploy.sh or exported)
 
 ```bash
-VLLM_V1_ENABLED=0                          # Disable V1 engine — stability fix for Blackwell sm_120
+VLLM_USE_V1=0                          # Disable V1 engine — stability fix for Blackwell sm_120
 VLLM_SERVER_DEV_MODE=1                     # Exposes /sleep, /wake_up, /is_sleeping routes
 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 # Required for TP=2 -- prevents OOM during graph capture
 UV_USE_IO_URING=0                          # Required if CRIU checkpointing is planned
@@ -22,7 +22,7 @@ UV_USE_IO_URING=0                          # Required if CRIU checkpointing is p
 
 ### Arclight Coder (TP=2, production)
 ```bash
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ./infra/scripts/deploy.sh vllm tp2a cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
   --gpu-mem-util 0.90 \
   --ctx 32768 \
@@ -34,7 +34,7 @@ VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ### Arclight Thinker (TP=1 GPU1, production)
 ```bash
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 ./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
   --gpu-mem-util 0.90 \
   --ctx 32768 \
@@ -48,7 +48,7 @@ VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ### Extended Arclight Coder (TP=2, 65K context)
 ```bash
-VLLM_V1_ENABLED=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
 ./infra/scripts/deploy.sh vllm tp2a cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
   --gpu-mem-util 0.90 \
   --ctx 65536 \
@@ -95,7 +95,7 @@ All engines run as rootless podman containers. Scripts use `podman compose`, not
 - If still failing, reduce `--gpu-memory-utilization` (try 0.85 → 0.80)
 
 ### TP=1 gives ~20 t/s instead of ~230 t/s
-- Check if V1 engine is active (`VLLM_V1_ENABLED=0` may not be set)
+- Check if V1 engine is active (`VLLM_USE_V1=0` may not be set)
 - V1 forces eager mode on Blackwell in some configs → 10× penalty
 
 ### Tool calls returning no_call or format_error

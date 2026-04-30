@@ -61,17 +61,40 @@ SETTLED. A3B decode allreduce is ~60 MB/s at 150 t/s — ~0.2% of x8 PCIe bandwi
 
 ---
 
-## CRIU checkpoint/restore (T_KV2, 2026-04-26)
+## CRIU checkpoint/restore (T_KV2, T_CRIU3, 2026-04-26 – 2026-04-30)
 
-SETTLED. Host-native CRIU + NVIDIA cuda-checkpoint (driver 570+) enables full CUDA process snapshots. **0.28s hot restart vs 100.2s cold start (358× speedup).**
+### TP=1 (thinker): SETTLED PASS
+Host-native CRIU + NVIDIA cuda-checkpoint (driver 570+) enables full CUDA process snapshots.
+**0.43s hot restart, 501 MB checkpoint, TTFT parity.** KV cache is physically preserved
+post-restore (SchedulerOutput prefix hit ratio identical before/after checkpoint).
 
 Requirements:
 1. **Host-native execution** (Podman CDI conflicts break CRIU)
 2. **uvloop patch**: `api_server.py` + `v1/utils.py` use `asyncio.run()` not `uvloop.run()`
 3. **`UV_USE_IO_URING=0`** exported before any CRIU operation
 4. **`sudo nvidia-smi --gpu-reset -i 1`** after failed restore (ghost VRAM)
+5. **Runtime patches** in `benchmarks/queue/python_hijack/sitecustomize.py`:
+   - `CriuSafePoller` — ZMQ Poller re-registers sockets after PID change, caps poll() at 1000ms
+   - `SpinCondition.wait()` → `sched_yield()` — avoids broken inproc:// sockets post-restore
 
 See docs/procedures/criu-ops.md for full procedure.
+
+### TP=2 (coder): SETTLED FAIL
+CRIU restore of vLLM TP=2 on Blackwell (sm_120) is broken at the SHM broadcast layer.
+
+- Dump/restore itself succeeds: 29s dump, 67 GB checkpoint, 24–26s restore (~4× vs cold start)
+- KV cache IS physically preserved in VRAM (confirmed by SchedulerOutput prefix hit ratio)
+- Post-restore inference FAILS: `TimeoutError: RPC call to execute_model timed out`
+- Root cause: `ShmRingBuffer` (used by V1 EngineCore→Worker broadcast) relies on shared memory
+  writes becoming visible across processes. After CRIU restore, workers cannot see EngineCore's
+  `written_flag=1` writes — likely a CPU cache coherency failure at the cross-process SHM level.
+- `VLLM_USE_V1=0` cannot help: Blackwell sm_120 forces V1 engine regardless of the env var.
+- Patches (CriuSafePoller, SpinCondition→sched_yield) are necessary but not sufficient.
+- Even if fixed: 26s restore time vs ~100s cold start is only 4× — not worth the complexity.
+  vLLM preallocates all KV blocks at startup, so a "clean" checkpoint is still ~67 GB.
+
+**Do not attempt CRIU for vLLM TP=2. Use prefix cache prefill (13.9× speedup, T3.4) for KV
+continuity after a coder context switch.**
 
 ---
 
@@ -99,7 +122,7 @@ SETTLED (R5, 2026-04-17). `VLLM_SERVER_DEV_MODE=1` exposes HTTP routes; `--enabl
 ### Sleep Mode level=1 only
 SETTLED. Level=2 produces gibberish on wake (bug #29341). Level=1 frees ~92% VRAM, retains ~4 GiB residual (CUDA graphs — intentional for <1s wake). This residual cannot be reduced at level=1.
 
-### VLLM_V1_ENABLED=0 mandatory on Blackwell
+### VLLM_USE_V1=0 mandatory on Blackwell
 SETTLED. V1 engine causes 10× TPS regression in eager mode and EngineDeadError on TRITON_MLA PIECEWISE path for some architectures. Disable globally.
 
 ### VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 required for TP=2

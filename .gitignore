@@ -32,5 +32,11 @@ CLAUDE.local.md
 vllm_help.txt
 scratch/
 
+# Python venvs (project-local)
+.vllm-bench_venv/
+
+# Compiled C shim binaries
+benchmarks/queue/*.so
+
 # CRIU Checkpoints
 checkpoints/

@@ -20,7 +20,7 @@ mkdir -p "${RESULTS_DIR}"
 
 # --- Configuration ---
 export BENCH_IMAGE="vllm/vllm-openai:latest"
-export VLLM_V1_ENABLED=0
+export VLLM_USE_V1=0
 export VLLM_USE_V1=0
 export VLLM_V1=0
 export VLLM_USE_V1_ENGINE=0
