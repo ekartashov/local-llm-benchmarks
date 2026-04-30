@@ -407,3 +407,17 @@ SGLang weight-loader bug for Qwen3.5 MoE AWQ is permanent (KeyError in qwen3_5.p
 - **Metrics:** 401 MB checkpoint (CPU-only), TTFT parity (0.71s vs 0.72s), identical text output.
 - **Implication:** Unblocks Sequential TP=2 orchestration. All Arclight/Core roles now have a sub-second swap path.
 - **Log:** `results/T_CRIU3_thinker_hot_restart_20260428T082547Z/`
+
+---
+
+## BENCH_11 — T3.1 Phase 1 — thinker_50k_vram_feasibility — DONE ✓
+
+**Question:** Can the Thinker (Qwen3.6-27B-AWQ, TP=1) run at 50K context on a 32GB GPU?
+
+**Result (2026-04-30):** PASS.
+- **Finding:** Zero VRAM delta (+0 MiB) between 32K and 51,200 tokens.
+- **Architecture:** DeltaNet's fixed-size recurrent state implementation in vLLM makes context length virtually "free" in terms of VRAM (unlike paged attention for Transformers).
+- **Performance:** TTFT parity at 50K (2.32s). Correctness confirmed identical to 32K baseline.
+- **Headroom:** ~4.3 GB VRAM remains free on the 32GB RTX 5090.
+- **Implication:** Unblocks T_KV3 Path B. We can extend context via the existing model without a swap.
+- **Artifacts:** `results/T3.1_thinker_50k_vram_20260430T093241Z/`

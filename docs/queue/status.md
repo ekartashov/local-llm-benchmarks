@@ -33,7 +33,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T2.4h | DONE ✓ | --enforce-eager restores semantic correctness at TP=2. TPS ~16 t/s (10× penalty). Not production viable. |
 | T2.5 | DONE ✓ | Qwen3.6-35B-A3B-AWQ: 96.7% tool, 100% quality, 237.1 t/s. New coder baseline. |
 | T2.6 | OPEN | Behemoth archetype scouting (design item). No script needed. |
-| T3.1 | OPEN | KV cache q8/q4 on settled thinker. Deps: T2.3 (blocked). |
+| T3.1 | PARTIAL ✓ | Phase 1 (50K VRAM) DONE. 0 MiB delta (DeltaNet). Path B unblocked. |
 | T3.2 | OPEN | MTP spec decode on GLM-4.7-Flash. Deps: T2.2 (blocked). |
 | T3.3 | OPEN | Qwen3-Next MTP on behemoth. Deps: T1.3 ✓, T2.4. |
 | T3.4 | DONE ✗ | Prefix cache works (cold 2410ms → warm 173ms, 13.9× speedup). Post-wake FAILED: HTTP 500 `'list' has no attr 'zero_'` (vLLM wake bug on Qwen3.6-35B-A3B + --enforce-eager). |
@@ -51,7 +51,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CV4 | DONE ✓ | 15.6 t/s sequential pipelining at -np 4 (1.12× scaling). Concurrent HTTP: crashes at N≥2 (T_PAR1). |
 | T_KV1 | DONE ✓ | 65K context, 238.2 t/s, 3022ms TTFT. --swap-space blocked (flag unrecognized in 0.19.0). |
 | T_KV2 | DONE ✓ | 0.28s hot restart (358× vs 100.2s cold). CRIU + cuda-checkpoint settled. |
-| T_KV3 | BLOCKED (CRITICAL) | Sub-Q1 settled (GDN TP=2 broken). Sub-Q2: Path A = find non-GDN replacement; Path B = ik_llama.cpp tensor-split on existing 27B. |
+| T_KV3 | UNBLOCKED | Path B (ik_llama.cpp or vLLM-50K) verified. 0 MiB VRAM delta at 50K. |
 | T_PAR1 | DONE ✓ | Coder: 240.9→1204.9 t/s (N=1→8, still scaling). Thinker: 76.9 t/s at N=1; max-num-seqs=4 gives 269.4 t/s at N=4 (3.5×). Convergence: N≥2 crashes (unchanged from T_CV4). |
 | T_NVFP4 | DEFERRED | Restricted to TP=1; untrusted publisher (sakamakismile) used in T2.4c. Defer indefinitely. |
 | T_TRT_LLM | LOW | TensorRT-LLM peak TPS optimization. Post-settlement only — requires stable roles + hours-long compile per model. |

@@ -20,7 +20,7 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 - **T_KV1 swap-space blocked:** `--swap-space 32` flag unrecognized in vLLM 0.19.0. 131K context test skipped. 65K is the current ceiling.
 
-- **T_KV3 CRITICAL (elevated 2026-04-27):** Extended thinker is operationally necessary, not just optimization — real workloads show 27B model hitting context ceiling and failing to conclude. Two unblocking paths now documented: Path A (non-GDN replacement: DeepSeek-R1-Distill-Qwen-32B, QwQ-32B) and Path B (ik_llama.cpp tensor-split on existing Qwen3.6-27B — layer-split avoids DeltaNet sharding problem). Path B should be investigated first as it requires no model swap.
+- **T_KV3 UNBLOCKED (2026-04-30, BENCH_11):** 50K context feasibility gate PASSED. QuantTrio/Qwen3.6-27B-AWQ (DeltaNet) showed **0 MiB VRAM delta** when moving from 32K to 50K context (TP=1). This confirms the architecture's fixed-size recurrent state. Path B (extended context on existing model) is now the preferred route.
 
 - **T_CRIU2 COMPLETE (2026-04-28):** Two findings. (1) --no-mmap: CHECKPOINT_FAILED (SYSTEM_OOM). CRIU dump of a 135 GB anon-RAM process requires VMS to spike to ~351 GB — physically impossible on 188 GB RAM. (2) mmap (--no-mmap removed): RESTORE_OK. Checkpoint 8.7 GB in 7.6 s. Restore 7.3 s. First-inference TTFT 100.56 s (page-fault warmup from NVMe, 123 GB → ~17 s theoretical, but access is demand-paged across the full generation), rep-2 36.1 s, rep-3 7.7 s. **Critical implication:** without QX_PRELOAD, CRIU mmap restore-to-interactive (100 s) is WORSE than cold start (83 s). QX_PRELOAD is now a prerequisite for CRIU to benefit Convergence. With QX_PRELOAD (pre-warm 123 GB into page cache 17 s before restore): projected 14 s restore-to-interactive — 6× improvement. QX_PRELOAD elevated to HIGH priority.
 
@@ -86,7 +86,7 @@ See `docs/queue/open.md` for full specs. Key items:
 
 | Item | Priority | Status |
 |------|----------|--------|
-| T_KV3 | CRITICAL | BLOCKED — Path A: non-GDN thinker replacement; Path B: ik_llama.cpp tensor-split on existing 27B |
+| T_KV3 | HIGH | UNBLOCKED — 50K feasibility PASSED (0 MiB delta). Path B preferred. |
 | QX_PRELOAD | HIGH | OPEN — Required for CRIU on Convergence. Without pre-warm: 100s first-inference (worse than cold). With pre-warm: ~14s projected. |
 | T_CRIU3 Ph.1 | DONE ✓ | Thinker TP=1: 0.43s restore, 501 MB, TTFT parity. Sequential TP=2 swaps unblocked. |
 | T_CRIU3 Ph.2 | DONE ✗ | Coder TP=2: dump/restore OK (29s/67GB), KV preserved, inference FAIL (SHM IPC broken post-restore). |
