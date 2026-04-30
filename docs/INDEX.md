@@ -9,11 +9,11 @@
 | Role | Model | Config | Port | TPS | Status |
 |------|-------|--------|------|-----|--------|
 | Arclight Coder | Qwen3.6-35B-A3B-AWQ | vLLM TP=2 GPU0+1, fp8 KV, ctx=32768 | 30000 | 232 t/s | SETTLED |
-| Arclight Thinker | Qwen3.6-27B-AWQ | vLLM TP=1 GPU1, fp8 KV, cp-ON, max-num-seqs 1 | 30001 | 77 t/s | SETTLED |
+| Arclight Thinker | Qwen3.6-27B-AWQ | vLLM TP=1 GPU1, fp8 KV, cp-ON, max-num-seqs 4 | 30001 | 77 t/s seq=1 / 269 t/s N=4 | SETTLED |
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
 | Convergence | Qwen3.5-397B UD-IQ2_M | ik_llama.cpp -ngl 999 --cpu-moe -t 32 -np 4 | 8002 | 13.99 t/s | SETTLED |
 
-**Open questions:** T_KV3 CRITICAL — extended thinker blocked (Path A: non-GDN replacement; Path B: ik_llama.cpp tensor-split on existing 27B). QX_PRELOAD HIGH — required for CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). CRIU settled: TP=1 ✓ (0.43s), TP=2 ✗ (SHM IPC incompatible on Blackwell).
+**Open questions:** T_MTP1/T_MTP2 HIGH — MTP n=1 on AWQ thinker/coder (+27% TPS potential, verify vLLM #40756 fix first). T_KV3 UNBLOCKED — 128K context target (0 MiB VRAM delta confirmed; Path B ik_llama.cpp tensor-split ready). T_PQ1 MEDIUM — PrismaQuant thinker (CUDA 13.0 rebuild). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue).
 
 ---
 
@@ -84,7 +84,7 @@
 9. **VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 required for coder TP=2** — prevents OOM during CUDA graph capture.
 10. **After a failed CRIU restore: `sudo nvidia-smi --gpu-reset -i 1`** — clears ghost VRAM leaks.
 11. **Convergence model path uses split GGUF** — reference only `00001-of-00004.gguf`; loader finds the rest. All 4 files must be in the same directory.
-12. **`--max-num-seqs 1` mandatory for thinker** — CUDA graph stability constraint on single GPU. Do not raise without testing.
+12. **`--max-num-seqs 4` for thinker** — upgraded from 1 (T_PAR1 R30). 3.5× parallel throughput (269 t/s at N=4), 4 MiB VRAM delta. The seqs=1 constraint was empirically unnecessary.
 13. **CRIU is TP=1 only** — TP=2 CRIU restore succeeds but post-restore inference fails (SHM IPC broken; Blackwell forces V1 engine). 26s restore is also only 4× vs cold start. Do not attempt for coder. See `docs/decisions/settled.md` and `docs/procedures/criu-ops.md`.
 
 ---

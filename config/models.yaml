@@ -95,6 +95,35 @@ models:
       (untested — T6.1 rerun pending). Hot-pair mode uses TP=1 (concurrent with thinker);
       Extended Arclight uses TP=2 (thinker sleeping, big context). See ARCHITECTURE.md.
 
+  # ── CANDIDATE coder: PrismaQuant (DEFERRED — SM120 MoE kernel not ready) ──
+  rdtand_qwen36_35b_prismaquant:
+    status: CANDIDATE
+    role: coder
+    hf_repo: rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm
+    quant: PrismaQuant-4.75bit
+    format: compressed-tensors
+    vram_gb: 24                  # estimated runtime across TP=2 (~12 GB/GPU); 22 GB disk
+    ctx_default: 32768
+    engines: [vllm]
+    flags:
+      vllm: "--trust-remote-code --tensor-parallel-size 2 --gpu-memory-utilization 0.90 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice --speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":3}'"
+      env: "VLLM_NVFP4_GEMM_BACKEND=flashinfer-cutlass"
+    quant_details:
+      nvfp4_linears: 192
+      mxfp8_linears: 45
+      bf16_entries: 274
+      calibration: "GPTQ-OBS + closed-form scale sweep, 0.33× RTN MSE"
+      mtp_optimal_n: 3
+    publisher_trust: HIGH
+    defer_reason: >
+      SM120 desktop Blackwell: NVFP4 MoE grouped GEMM (CUTLASS) = 39 t/s vs AWQ Marlin = 46-49 t/s.
+      Root cause: compute_120a vs compute_120f issue requiring CUDA 13.0.
+      Revisit when SM120 compute_120f kernel ships in a stable vLLM/FlashInfer release.
+    test_items: [T_PQ2]
+    notes: >
+      Preferred over cyburn/4.9bit (same author, more aggressive NVFP4 allocation, visual
+      encoder quantized). Do not test until SM120 MoE kernel reaches parity with Marlin.
+
   # ── SUPERSEDED: old Qwen3.5-35B-A3B (kept as historical record only) ────
   qwen35_35b_a3b_awq:
     status: ELIMINATED
@@ -150,6 +179,39 @@ models:
       after 19.78 GiB load). On TP=2 with more headroom, higher --max-num-seqs
       may be viable — flag for T1.2 / T2.3.
 
+  # ── CANDIDATE thinker: PrismaQuant (queued T_PQ1) ──────────────────────
+  rdtand_qwen36_27b_prismaquant:
+    status: CANDIDATE
+    role: thinker
+    hf_repo: rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm
+    quant: PrismaQuant-5.5bit
+    format: compressed-tensors   # NVFP4/MXFP8/BF16 mixed via vLLM compressed-tensors
+    vram_gb: 22                  # estimated runtime; 19 GB disk
+    ctx_default: 32768
+    engines: [vllm]              # vLLM 0.11+ with compressed-tensors only; no transformers runtime
+    flags:
+      vllm: "--trust-remote-code --kv-cache-dtype fp8 --enable-chunked-prefill --max-num-seqs 4 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice --speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":3}'"
+      env: "VLLM_NVFP4_GEMM_BACKEND=flashinfer-cutlass"
+    quant_details:
+      nvfp4_linears: 349
+      mxfp8_linears: 35
+      bf16_entries: 112
+      calibration: "GPTQ-OBS + closed-form scale sweep, 0.33× RTN MSE"
+      mtp_optimal_n: 3           # n=2 leaves ~10% TPS; n=4 regresses
+    publisher_trust: HIGH        # Rob Tand = original PrismaQuant author
+    architecture_note: "DeltaNet layers explicitly handled in per-linear allocation"
+    requires:
+      vllm: ">=0.11.0 with compressed-tensors"
+      cuda: ">=13.0 for full NVFP4 kernel path (compute_120f)"
+      flashinfer: "0.6.5 with SM120 patches for optimal NVFP4 GEMM"
+    test_items: [T_PQ1]
+    notes: >
+      Dense NVFP4 safe on SM120 (not affected by MoE grouped GEMM bug).
+      Requires CUDA 13.0 container rebuild for full FP4 path.
+      Without CUDA 13.0, falls back to marlin/cutlass — still useful for
+      quality-per-bit improvement from GPTQ calibration over AWQ.
+      MTP n=3 gives additional TPS on top of format gains (verify #40756 fix first).
+
   # ── CANDIDATE thinker ──────────────────────────────────────────────────
   glm45_air_awq:
     status: CANDIDATE
@@ -186,10 +248,10 @@ models:
     ctx_default: 32768     # native 262144; limited for KV budget on single GPU
     engines: [vllm]
     flags:
-      vllm: "--kv-cache-dtype fp8 --enable-chunked-prefill --max-num-seqs 1 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice"
+      vllm: "--kv-cache-dtype fp8 --enable-chunked-prefill --max-num-seqs 4 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice"
       # --enable-chunked-prefill: REQUIRED — disabling causes Triton OOM at TP=1 (confirmed T2.4f)
       # --kv-cache-dtype fp8: verified correct in T2.4d (3/3 th02 correct)
-      # --max-num-seqs 1: required for CUDA graph stability on single GPU
+      # --max-num-seqs 4: upgraded from 1 (T_PAR1 R30: 269 t/s at N=4, 4 MiB VRAM delta, no OOM)
     placement:
       tp: 1
       gpu: 1    # GPU1 (isolated, concurrent with coder on GPU0)
@@ -214,8 +276,8 @@ models:
       swe_bench_verified: 0.772
     test_items: [T2.4, T2.4d]
     known_bugs:
-      - "vLLM #40621 batch inference: affects multi-concurrent-request scenarios. Thinker role is seq=1 — low risk."
-      - "vLLM #40756 MTP crash: only with --speculative-config. Do NOT enable MTP."
+      - "vLLM #40621 batch inference: affects multi-concurrent-request scenarios. Thinker now max-num-seqs=4 — monitor."
+      - "vLLM #40756 MTP crash: does NOT apply to our config. Crash conditions: FP8 quant + TP=4 + n=5 + 25K+ tokens. We use AWQ + TP=1 + n=1. T_MTP1 unblocked on vLLM 0.19.0."
       - "vLLM #40725 TP=4 non-English corruption: TP=1 only — not applicable."
     notes: >
       27B dense, GDN hybrid. SETTLED as production thinker 2026-04-25.

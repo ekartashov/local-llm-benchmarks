@@ -27,7 +27,9 @@ Core RETIRED (2026-04-25, R19): Extended Arclight fills the escalation role with
 SETTLED (T2.5, 2026-04-18). 96.7% tool-call reliability, 100% quality completion, 237.1 t/s. Parser: `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. TP=2 mandatory on vLLM 0.19.0 (TP=1 → Reasoning Collapse in eager mode).
 
 ### Arclight Thinker: Qwen3.6-27B-AWQ
-SETTLED (T2.4d, R17, 2026-04-25). 4.875/5 quality, 77.4 t/s. Config: TP=1 GPU1, fp8 KV, `--enable-chunked-prefill --max-num-seqs 1 --tool-call-parser qwen3_coder --reasoning-parser qwen3`. Requires `transformers>=5.5.4`.
+SETTLED (T2.4d, R17, 2026-04-25). 4.875/5 quality, 77.4 t/s. Config: TP=1 GPU1, fp8 KV, `--enable-chunked-prefill --max-num-seqs 4 --tool-call-parser qwen3_coder --reasoning-parser qwen3`. Requires `transformers>=5.5.4`.
+
+**max-num-seqs upgraded 1→4 (T_PAR1, R30, 2026-04-30):** BENCH_02/03 confirmed max-num-seqs=4 is safe: 269.4 t/s aggregate at N=4 (3.5× vs seqs=1), VRAM delta 4 MiB. The seqs=1 constraint was conservative and empirically unnecessary. At seqs=4, TTFT for N=1 requests is unchanged (73 ms). Production deploy should use `--max-num-seqs 4`.
 
 ### Convergence: Qwen3.5-397B-A17B UD-IQ2_M
 SETTLED (R12, 2026-04-20). ~123GB, always-resident. Engine: ik_llama.cpp pr-1288.

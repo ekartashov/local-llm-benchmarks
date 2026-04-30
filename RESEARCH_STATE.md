@@ -2,7 +2,7 @@
 
 Living document. Current-state summary only. Full cycle log: `docs/history/cycles.md`.
 
-**Last complete cycle:** R29 (2026-04-30) — T_CRIU3 Phase 2 FAILED. KV cache IS preserved in VRAM post-restore, but post-restore inference unreachable due to SHM IPC incompatibility in vLLM TP=2 on Blackwell.
+**Last complete cycle:** R30 (2026-04-30) — Research round: PrismaQuant model survey, MTP speculative decoding discovery, SM120 NVFP4 MoE status confirmed, thinker max-num-seqs=4 production upgrade validated from T_PAR1 data.
 
 **Current mode:** Research
 
@@ -20,7 +20,18 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 - **T_KV1 swap-space blocked:** `--swap-space 32` flag unrecognized in vLLM 0.19.0. 131K context test skipped. 65K is the current ceiling.
 
-- **T_KV3 UNBLOCKED (2026-04-30, BENCH_11):** 50K context feasibility gate PASSED. QuantTrio/Qwen3.6-27B-AWQ (DeltaNet) showed **0 MiB VRAM delta** when moving from 32K to 50K context (TP=1). This confirms the architecture's fixed-size recurrent state. Path B (extended context on existing model) is now the preferred route.
+- **T_KV3 UNBLOCKED (2026-04-30, BENCH_11):** 50K context feasibility gate PASSED. QuantTrio/Qwen3.6-27B-AWQ (DeltaNet) showed **0 MiB VRAM delta** when moving from 32K to 50K context (TP=1). This confirms the architecture's fixed-size recurrent state. Path B (extended context on existing model) is now the preferred route. **Extended implication (R30):** The 0 MiB delta should hold all the way to the model's native limit. Qwen3.6-27B native context = 128K tokens. T_KV3 Path B target is 128K, not just 50K — the whole range is achievable with zero VRAM cost.
+
+- **Thinker max-num-seqs upgrade: 1→4 (R30, 2026-04-30):** T_PAR1 data (BENCH_02/03) proves max-num-seqs=4 is safe: 269.4 t/s at N=4 (3.5× gain), VRAM delta 4 MiB (27,736→27,732 MiB). The max-num-seqs=1 constraint was set conservatively for CUDA graph stability but is empirically unnecessary. **Action:** production thinker config should be updated to max-num-seqs=4. Updated in docs/decisions/models.md and config/models.yaml.
+
+- **SM120 NVFP4 MoE — Marlin faster (R30, 2026-04-30):** Desktop Blackwell SM120 (RTX 5090) cannot run NVFP4 MoE grouped GEMM efficiently. Root cause: CUTLASS needs compute_120f (CUDA 13.0) for correct TMA WS grouped GEMM tactics; FlashInfer auto-detection produces compute_120a which forces slower fallback. Result: NVFP4 FlashInfer-CUTLASS = 39 t/s vs Marlin (AWQ) = 46–49 t/s on MoE. **Dense NVFP4 GEMM is NOT affected** — only the MoE grouped path has this bug. PrismaQuant coder (35B A3B MoE) DEFERRED. PrismaQuant thinker (27B dense) feasible after CUDA 13.0 container rebuild.
+
+- **MTP speculative decoding (R30, 2026-04-30):** Qwen3.6 models have native MTP heads. vLLM supports `--speculative-config '{"method":"mtp","num_speculative_tokens":1}'`. Measured on RTX 3090, vLLM 0.19.1: −21.6% TPOT ≡ **+27.5% faster decode rate** at n=1. For thinker at max-num-seqs=1 (no concurrency to hurt), this is a near-zero-cost gain — one flag, no model swap, no rebuild. **#40756 does NOT apply (R30 verified):** Bug conditions are FP8+TP4+n=5+25K tokens — none match our AWQ+TP1+n=1 config. vLLM 0.19.1 was Gemma4-only; no MTP changes. T_MTP1/T_MTP2 unblocked on current vLLM 0.19.0.
+
+- **PrismaQuant model registry (R30, 2026-04-30):** Three candidates researched. All use rdtand/Rob Tand's PrismaQuant method (GPTQ+scale_sweep, 0.33× RTN MSE, per-linear sensitivity-driven allocation). Publisher trust: rdtand = original PrismaQuant author; cyburn = third-party using same method.
+  - `rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm` — thinker CANDIDATE. 349 NVFP4 + 35 MXFP8 + 112 BF16. DeltaNet layers explicitly handled. ~19 GB disk / ~22–24 GB runtime. MTP n=3 optimal per author. Dense → SM120 safe.
+  - `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` — coder CANDIDATE, DEFERRED. 192 NVFP4 + 45 MXFP8 + 274 BF16. MoE → SM120 MoE kernel not ready. Preferred over cyburn 4.9bit when SM120 kernel matures.
+  - `cyburn/35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-PrismaQuant-4.75bit-vllm` — wrong slot. Coder base (35B A3B MoE) with Claude reasoning distillation. Not a thinker replacement. Quality on thinker task suite unknown. Keep as quality research candidate only.
 
 - **T_CRIU2 COMPLETE (2026-04-28):** Two findings. (1) --no-mmap: CHECKPOINT_FAILED (SYSTEM_OOM). CRIU dump of a 135 GB anon-RAM process requires VMS to spike to ~351 GB — physically impossible on 188 GB RAM. (2) mmap (--no-mmap removed): RESTORE_OK. Checkpoint 8.7 GB in 7.6 s. Restore 7.3 s. First-inference TTFT 100.56 s (page-fault warmup from NVMe, 123 GB → ~17 s theoretical, but access is demand-paged across the full generation), rep-2 36.1 s, rep-3 7.7 s. **Critical implication:** without QX_PRELOAD, CRIU mmap restore-to-interactive (100 s) is WORSE than cold start (83 s). QX_PRELOAD is now a prerequisite for CRIU to benefit Convergence. With QX_PRELOAD (pre-warm 123 GB into page cache 17 s before restore): projected 14 s restore-to-interactive — 6× improvement. QX_PRELOAD elevated to HIGH priority.
 

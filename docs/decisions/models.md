@@ -27,7 +27,7 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
 
 ### Arclight Thinker: Qwen3.6-27B-AWQ (QuantTrio)
 **SETTLED (T2.4d + R17 scoring, 2026-04-25).** Supersedes Qwen3.5-27B.
-- **Performance:** 77.4 t/s seq=1 (T2.4d)
+- **Performance:** 77.4 t/s seq=1; 269.4 t/s aggregate at N=4 with max-num-seqs=4 (T_PAR1, R30)
 - **Quality:** 4.875/5 on 8-task thinker suite. th02 correct 3/3 (reproducible). th08=4 (forward-ref bug in eager-init example); all others 5.
 - **Production config:**
   ```
@@ -36,7 +36,7 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
   --gpu-memory-utilization 0.90
   --kv-cache-dtype fp8
   --enable-chunked-prefill
-  --max-num-seqs 1
+  --max-num-seqs 4   # upgraded from 1 (T_PAR1 R30: 3.5× parallel gain, 4 MiB VRAM delta)
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
   requires transformers>=5.5.4
   ```
@@ -107,8 +107,18 @@ SUPERSEDED by Qwen3.6-35B-A3B (better quality, similar TPS). Baseline performanc
 
 ---
 
-## NVFP4 (Blackwell-native FP4) — deferred
+## NVFP4 / PrismaQuant (Blackwell-native FP4) — split status
 
-**T_NVFP4 DEFERRED indefinitely.** T2.4c used `sakamakismile/Qwen3.6-27B-NVFP4` (untrusted publisher). Full 8-task run showed mean ~3.94/5 and th02 semantic error. Cannot distinguish format benefit from publisher calibration quality. Additionally, if ever reconsidered: TP=1 only (TP=2 broken for GDN). Use `nvidia/` or `bartowski/` publishers only; never `sakamakismile`.
+### MoE models on SM120: DEFERRED — Marlin is faster
+SETTLED (R30, 2026-04-30). CUTLASS grouped FP4 GEMM on SM120 desktop Blackwell produces suboptimal results: FlashInfer emits `compute_120a` instead of `compute_120f`, blocking native TMA WS tactics. Measured: **NVFP4 FlashInfer-CUTLASS = 39 t/s vs AWQ Marlin = 46–49 t/s.** Fix requires CUDA 13.0. Do not test PrismaQuant coder (35B A3B MoE) until this matures upstream.
 
-AWQ-Marlin is already excellent for A3B MoE on RTX 5090. NVFP4 kernels in vLLM/CUTLASS are still maturing. Re-evaluate if: dense model added where VRAM is tight; TRT-LLM FP4 path accessible; vLLM major version bump with native Blackwell FP4 support.
+### Dense models on SM120: T_PQ1 QUEUED
+Dense NVFP4 GEMM is unaffected by the grouped GEMM bug. PrismaQuant thinker (rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm) queued as T_PQ1 after CUDA 13.0 container rebuild.
+
+### PrismaQuant candidates (R30, 2026-04-30)
+- **rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm** — thinker CANDIDATE. 349 NVFP4 + 35 MXFP8 + 112 BF16. Original PrismaQuant author. DeltaNet layers explicitly handled. ~19 GB disk / ~22–24 GB runtime. GPTQ+scale_sweep: 0.33× RTN MSE. MTP n=3 optimal per author. Requires vLLM 0.11+ compressed-tensors + CUDA 13.0 for full NVFP4 path.
+- **rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm** — coder CANDIDATE, DEFERRED. 192 NVFP4 + 45 MXFP8 + 274 BF16. Preferred over cyburn 4.9bit (same author, more aggressive allocation). Revisit when SM120 compute_120f kernel is in a stable vLLM release.
+- **cyburn/35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-PrismaQuant-4.75bit-vllm** — wrong slot. Coder base (A3B MoE) with Claude 4.7 Opus reasoning distillation. Not a thinker replacement (different architecture, different VRAM). Quality on thinker suite unknown. Keep as quality-only research candidate.
+
+### Historical note (T2.4c)
+T2.4c used `sakamakismile/Qwen3.6-27B-NVFP4` (untrusted publisher). Mean ~3.94/5, th02 semantic error. Cannot distinguish format benefit from calibration quality. Results discarded. Use `rdtand/` exclusively for future NVFP4/PrismaQuant tests.

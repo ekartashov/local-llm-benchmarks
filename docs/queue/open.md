@@ -8,43 +8,63 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ## HIGH priority
 
-### T_PAR1 — parallel_throughput_sweep — OPEN (Coder + Thinker rerun)
+### T_MTP1 — mtp_speculative_thinker — OPEN
 
-**Convergence portion DONE** (N≥2 crashes pr-1288 — real data). Coder and Thinker portions NOT MEASURED — prior run found no endpoints running; fabricated numbers were written to docs. **Rerun required.**
+**Question:** Does MTP n=1 give measurable TPS improvement on the production thinker (AWQ, no model swap)?
 
-**Question:** What is the optimal `--max-num-seqs` for coder and thinker to maximize aggregate TPS for parallel OpenCode subagent workloads?
+**Why HIGH priority:** No container changes, no new model download. One flag addition to an existing endpoint. Community benchmark (RTX 3090, vLLM 0.19.1) shows −21.6% TPOT ≡ **+27.5% decode TPS** at n=1. For max-num-seqs=4, thinker at single-request load is the best-case scenario for MTP acceptance rates.
 
-**Script:** `benchmarks/queue/T_PAR1_parallel_throughput_sweep.sh`
+**No prerequisite blockers.** vLLM #40756 (MTP crash) does not apply to our config: bug conditions are FP8+TP4+n=5+25K tokens; we use AWQ+TP1+n=1. vLLM 0.19.1 was a Gemma4-only patch — no difference from 0.19.0 for this test. Ready to run.
 
-**Prerequisites:**
-- Coder running on port 30000 (TP=2, production config)
-- Thinker running on port 30001 (TP=1 GPU1, production config)
-- Convergence already settled (skip with `--skip-convergence`)
-
-**Run:**
+**Deploy command:**
 ```bash
-bash benchmarks/queue/T_PAR1_parallel_throughput_sweep.sh --skip-convergence --reps 3
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
+  --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
+  --enable-chunked-prefill --max-num-seqs 4 \
+  --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice \
+  --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
 ```
 
-For thinker: run once at production `--max-num-seqs 1` (baseline behavior), then once at `--max-num-seqs 4` (reveals true parallel ceiling). Both results are useful.
+**Metrics to collect:**
+- TPS at N=1 with MTP vs baseline (N=1 without MTP, same max-num-seqs=4 config)
+- TTFT at N=1 with MTP vs baseline
+- TPS at N=4 with MTP (does MTP hurt throughput under load?)
+- Quality smoke check: th02 correct? (MTP acceptance rate can affect output quality)
 
-**What to watch for:**
-- Coder aggregate TPS vs N: knee at N=4 or N=2? A3B MoE should batch efficiently.
-- Thinker: can it even handle N>1 without OOM on 32GB card? (Prior claim of OOM was fabricated — verify empirically.)
-- If thinker OOMs at N>1: record VRAM usage from nvidia-smi to understand the actual limit.
+**Pass:** TPS at N=1 improves ≥10% vs baseline with th02 still correct.
+**Fail / rollback:** MTP causes CUDA error, crash, or th02 regression → revert to no `--speculative-config`.
 
-**Pass:** optimal N identified for each tier. N=1 everywhere is a valid result.
-
-**What failure means:**
-- Coder OOM at N>1 → record VRAM; note CUDA graph pre-allocation may be the blocker.
-- Thinker OOM → confirms serial-only constraint; update status table.
-- Aggregate TPS flat across N → memory bandwidth bottleneck; keep N=1.
-
-**Hand-back trigger:** None expected — this is a parameter sweep. If coder crashes with CUDA error (not OOM), hand back to research.
+**Hand-back trigger:** vLLM crash (not rejection/fallback), or th02 semantic regression → research.
 
 ---
 
-### T_KV3 — thinker_extended_context — BLOCKED on research (Sub-Q2)
+### T_MTP2 — mtp_speculative_coder — OPEN (run after T_MTP1)
+
+**Question:** Does vLLM native MTP give TPS gain on the A3B MoE coder, where llama.cpp spec-decode gives no gain?
+
+**Why this differs from llama.cpp:** llama.cpp speculative decoding uses a separate draft model → different expert routing per speculative token → overhead kills the gain. vLLM MTP uses the model's own MTP head in the same forward pass → expert routing happens once → no extra expert loading.
+
+**Prerequisite:** T_MTP1 complete (confirm approach is stable before touching coder).
+
+**Deploy command:**
+```bash
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+./infra/scripts/deploy.sh vllm gpu0gpu1 cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
+  --tensor-parallel-size 2 --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
+  --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice \
+  --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
+```
+
+**Pass:** Aggregate TPS improves ≥5% vs current 232–237 t/s baseline.
+
+---
+
+### T_KV3 — thinker_extended_context — UNBLOCKED (Path B ready)
+
+**Target: 128K context** — Qwen3.6-27B native limit. T3.1 Phase 1 (50K) showed 0 MiB VRAM delta; the same should hold all the way to 128K (DeltaNet fixed-size recurrent state, zero KV cache growth). This is now a functional ceiling test, not a VRAM feasibility test.
+
+**Why this is CRITICAL:** Real thinker workloads hit 32K ceiling. 128K context with zero VRAM cost changes the use case entirely.
 
 **Why this is CRITICAL (not just high-priority):** The thinker is the model most in need of large context — reasoning over long chains, large codebases, multi-document synthesis. Real workloads already show the 27B thinker hitting context ceiling and failing to conclude. Coder extended context (65K, SETTLED) is useful but less urgent. Extended thinker is operationally necessary.
 
@@ -65,29 +85,6 @@ ik_llama.cpp pr-1288 already has DeltaNet support (used by 397B MoE). llama.cpp'
 Test: run Qwen3.6-27B GGUF with `--tensor-split 0.5,0.5` on ik_llama.cpp, verify inference correctness on the thinker task suite (specifically th02 which catches GDN recurrent state errors). If correct: VRAM splits ~16GB per GPU, enabling larger KV cache. This path is lower-risk and doesn't require finding a new model.
 
 **No script yet.** Research mode required first. Return here after research provides a model slug + deploy config.
-
----
-
-### T_CRIU2 — criu_for_ikllamacpp_convergence — OPEN
-
-**Question:** Does CRIU + cuda-checkpoint work for ik_llama.cpp serving Convergence (397B MoE hybrid)?
-
-**Why this matters:** If CRIU works for ik_llama.cpp, the 83s always-resident policy is optional rather than mandatory. Convergence could be CRIU-checkpointed when idle, freeing 12GB GPU VRAM for Extended Arclight modes. Also proves CRIU is engine-agnostic — enabling the same fast-swap capability for any engine (vLLM, ik_llama.cpp, future alternatives).
-
-**Procedure:**
-1. Start Convergence with `--no-mmap` (current config). Run a test inference. Checkpoint via CRIU + cuda-checkpoint.
-2. Stop server. Restore from checkpoint. Verify inference produces correct output.
-3. Repeat with mmap (remove `--no-mmap`). Compare checkpoint size, restore time, and inference latency for first request (page-fault warmup).
-
-**What to watch for:**
-- CRIU failure modes: exotic fd types, shared memory, or cuda-checkpoint conflicts with ik_llama.cpp's CUDA allocations
-- Checkpoint size with `--no-mmap`: expected ~135GB (all model weights in anon RAM). Dump time ~20s.
-- Checkpoint size with mmap: expected ~12GB (GPU state only). Restore expected sub-second.
-- Post-restore inference quality: run th02 equivalent to check no state corruption
-
-**Pass:** Restore completes and produces correct inference. Any restore time < 83s is a win.
-
-**Hand-back trigger:** If CRIU fails with an unfamiliar fd type or CUDA error not covered in criu-ops.md.
 
 ---
 
@@ -113,11 +110,38 @@ Test: run Qwen3.6-27B GGUF with `--tensor-split 0.5,0.5` on ik_llama.cpp, verify
 - Checkpoint size delta: how much does a populated KV cache (e.g., 16K tokens at fp8) add to the checkpoint file size?
 - SSD wear policy: frequent CRIU dumps with full KV cache vs. checkpoint only at idle (minimal cache). The NM790 has 3,000 TBW; at 37GB checkpoint + 20 dumps/day = 740 GB/day = ~11 years. Generous, but establish the write-cost model before designing an aggressive dump policy.
 
-**Deps:** T_KV2 ✓ (CRIU mechanism settled for vLLM). T_CRIU2 (for ik_llama.cpp, can run independently).
+**Deps:** T_KV2 ✓ (CRIU mechanism settled for vLLM). T_CRIU2 ✓ DONE.
 
 ---
 
 ## MEDIUM priority
+
+### T_PQ1 — prismaquant_thinker — OPEN (requires CUDA 13.0 container rebuild)
+
+**Question:** Does rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm give better TPS and/or quality than the current AWQ thinker?
+
+**Why MEDIUM (not HIGH):** Requires a non-trivial container rebuild (CUDA 13.0 + FlashInfer 0.6.5 SM120 patches). Without the rebuild, the model may still load via compressed-tensors with a cutlass fallback — worth attempting without rebuild first.
+
+**Two-phase approach:**
+1. **Phase 1 (no rebuild):** Deploy as-is, `VLLM_USE_V1=0`, measure TPS vs AWQ. If compressed-tensors loads and falls back to non-FP4 kernels, quality improvement from GPTQ calibration (0.33× RTN MSE) is still real.
+2. **Phase 2 (after CUDA 13.0 rebuild):** Confirm FlashInfer NVFP4 kernels activate. Compare TPS Phase 1 vs Phase 2.
+
+**Deploy command (Phase 1):**
+```bash
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+./infra/scripts/deploy.sh vllm gpu1 rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm \
+  --trust-remote-code --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
+  --enable-chunked-prefill --max-num-seqs 4 \
+  --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
+```
+
+**Metrics:** TPS at N=1, TPS at N=4, quality on th02 (semantic correctness test), VRAM. Compare all vs AWQ baseline.
+
+**Pass:** Quality ≥ 4.875/5 on thinker suite AND TPS within 10% of AWQ (quality win alone is sufficient — PrismaQuant at 5.5bit > AWQ 4bit per-bit quality).
+
+**Deps:** T_MTP1 complete (confirm MTP is stable before stacking with a new model).
+
+---
 
 ### T3.4 — prefix_cache_survival_across_sleep — OPEN (scope updated)
 
