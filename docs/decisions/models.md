@@ -25,23 +25,28 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
 - **Why TP=2 mandatory:** TP=1 on vLLM 0.19.0 triggers Reasoning Collapse (hallucination loops, Triton/FLA kernel shape mismatch in eager mode). TP=1 regresses to ~20 t/s. Not worth debugging.
 - **Why coder wins:** SWE-bench Verified 73.4%, Terminal-Bench 51.5%, MCPMark 37.0%, WideSearch 60.1% — dominates every agentic benchmark relevant to this workload. Gemma4-31B ties on pure coding (LiveCodeBench 80.0 vs 80.4) but loses on all agentic tasks.
 
-### Arclight Thinker: Qwen3.6-27B-AWQ (QuantTrio)
-**SETTLED (T2.4d + R17 scoring, 2026-04-25).** Supersedes Qwen3.5-27B.
-- **Performance:** 77.4 t/s seq=1; 269.4 t/s aggregate at N=4 with max-num-seqs=4 (T_PAR1, R30)
-- **Quality:** 4.875/5 on 8-task thinker suite. th02 correct 3/3 (reproducible). th08=4 (forward-ref bug in eager-init example); all others 5.
+### Arclight Thinker: Qwen3.6-27B-PrismaQuant-5.5bit (rdtand)
+**SETTLED (BENCH_12, 2026-05-01).** Supersedes Qwen3.6-27B-AWQ.
+- **Performance:** 51.3 t/s seq=1; 198.9 t/s aggregate at N=4 (BENCH_12, V0 engine / marlin fallback — no CUDA 13.0 yet)
+- **Quality:** 7/8 tasks evaluated vs AWQ baseline, full parity. th02 correct. No regressions. Quality rationale for promotion: GPTQ calibration over AWQ yields sharper algorithmic reasoning; TPS regression (-26 to -33%) accepted.
 - **Production config:**
   ```
-  Model: QuantTrio/Qwen3.6-27B-AWQ
+  Model: rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm
   TP=1, GPU1
   --gpu-memory-utilization 0.90
   --kv-cache-dtype fp8
   --enable-chunked-prefill
-  --max-num-seqs 4   # upgraded from 1 (T_PAR1 R30: 3.5× parallel gain, 4 MiB VRAM delta)
+  --max-num-seqs 4
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
-  requires transformers>=5.5.4
+  --hf-overrides '{"architectures":["Qwen3_5ForCausalLM"]}'   # REQUIRED: model config declares VL arch
+  env: VLLM_USE_V1=0 VLLM_ENGINE_ITERATOR_SOURCE=LEGACY       # V0 engine required (compressed-tensors)
   ```
-- **Why TP=1 only:** GDN (Gated DeltaNet) hybrid architecture — TP=2 breaks recurrent state sync across GPU shards (H-TP2 confirmed T2.4g). Do not attempt TP=2 until T_KV3 provides a non-GDN replacement.
-- **Why this wins over Qwen3.5-27B:** AIME 2026 94.1% (+4.9pp vs Gemma4), GPQA 87.8%. Quality 4.875 vs 4.0. No th03 reasoning budget exhaustion (which was a Qwen3.5-27B defect).
+- **Why TP=1 only:** Same GDN constraint as AWQ — recurrent state sync broken across TP shards (T2.4g). Not a PrismaQuant issue.
+- **Why this wins over AWQ:** Quality parity at sharper reasoning (GPTQ calibration). Current TPS is V0/marlin-fallback — full NVFP4 path (CUDA 13.0) expected to recover TPS gap.
+- **T_MTP1 next:** MTP n=1 to n=3 sweep on this model. Author reports n=3 optimal; verify on SM120.
+
+### Arclight Thinker (previous): Qwen3.6-27B-AWQ (QuantTrio) — SUPERSEDED 2026-05-01
+- Quality 4.875/5, th02 correct 3/3, 77.4 t/s seq=1. Retain as fallback. See history for full profile.
 
 ### Convergence: Qwen3.5-397B-A17B UD-IQ2_M (unsloth)
 **SETTLED (R12, 2026-04-20).** See docs/arch/convergence.md for full guide.

@@ -26,7 +26,9 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 - **SM120 NVFP4 MoE — Marlin faster (R30, 2026-04-30):** Desktop Blackwell SM120 (RTX 5090) cannot run NVFP4 MoE grouped GEMM efficiently. Root cause: CUTLASS needs compute_120f (CUDA 13.0) for correct TMA WS grouped GEMM tactics; FlashInfer auto-detection produces compute_120a which forces slower fallback. Result: NVFP4 FlashInfer-CUTLASS = 39 t/s vs Marlin (AWQ) = 46–49 t/s on MoE. **Dense NVFP4 GEMM is NOT affected** — only the MoE grouped path has this bug. PrismaQuant coder (35B A3B MoE) DEFERRED. PrismaQuant thinker (27B dense) feasible after CUDA 13.0 container rebuild.
 
-- **MTP speculative decoding (R30, 2026-04-30):** Qwen3.6 models have native MTP heads. vLLM supports `--speculative-config '{"method":"mtp","num_speculative_tokens":1}'`. Measured on RTX 3090, vLLM 0.19.1: −21.6% TPOT ≡ **+27.5% faster decode rate** at n=1. For thinker at max-num-seqs=1 (no concurrency to hurt), this is a near-zero-cost gain — one flag, no model swap, no rebuild. **#40756 does NOT apply (R30 verified):** Bug conditions are FP8+TP4+n=5+25K tokens — none match our AWQ+TP1+n=1 config. vLLM 0.19.1 was Gemma4-only; no MTP changes. T_MTP1/T_MTP2 unblocked on current vLLM 0.19.0.
+- **BENCH_12 COMPLETE (2026-05-01):** PrismaQuant 5.5bit promoted to production thinker. Quality parity confirmed on 7/8 tasks vs AWQ baseline (th08 truncated in both files). th02 EDF algorithm: PrismaQuant correct, DeltaNet not corrupted. TPS: 51.3 t/s seq=1 / 198.9 t/s seq=4 — 26–33% regression vs AWQ (76.9 / 269.4 t/s from T_PAR1). Quality rationale accepted over TPS. Currently running V0 engine + marlin/cutlass fallback (no CUDA 13.0 yet); full NVFP4 path expected to recover TPS gap. **T_MTP1 updated:** now targets PrismaQuant (not AWQ). Author reports n=3 optimal for PrismaQuant — sweep n=1,2,3 in T_MTP1.
+
+- **MTP speculative decoding (R30, 2026-04-30):** Qwen3.6 models have native MTP heads. vLLM supports `--speculative-config '{"method":"mtp","num_speculative_tokens":1}'`. Measured on RTX 3090, vLLM 0.19.1: −21.6% TPOT ≡ **+27.5% faster decode rate** at n=1. For thinker at max-num-seqs=1 (no concurrency to hurt), this is a near-zero-cost gain — one flag, no model swap, no rebuild. **#40756 does NOT apply (R30 verified):** Bug conditions are FP8+TP4+n=5+25K tokens — none match our PrismaQuant+TP1+n=1 config. T_MTP1/T_MTP2 unblocked on current vLLM 0.19.0.
 
 - **PrismaQuant model registry (R30, 2026-04-30):** Three candidates researched. All use rdtand/Rob Tand's PrismaQuant method (GPTQ+scale_sweep, 0.33× RTN MSE, per-linear sensitivity-driven allocation). Publisher trust: rdtand = original PrismaQuant author; cyburn = third-party using same method.
   - `rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm` — thinker CANDIDATE. 349 NVFP4 + 35 MXFP8 + 112 BF16. DeltaNet layers explicitly handled. ~19 GB disk / ~22–24 GB runtime. MTP n=3 optimal per author. Dense → SM120 safe.
@@ -62,7 +64,7 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 | Tier | Model | Config | TPS | Status |
 |------|-------|--------|-----|--------|
 | Arclight Coder | cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit | TP=2 GPU0+1, fp8 KV, ctx 32K | 237 t/s | SETTLED |
-| Arclight Thinker | QuantTrio/Qwen3.6-27B-AWQ | TP=1 GPU1, fp8 KV, cp-ON, --max-num-seqs 1 | 77 t/s | SETTLED |
+| Arclight Thinker | rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm | TP=1 GPU1, V0 engine, fp8 KV, cp-ON, --max-num-seqs 4 | 51 t/s | SETTLED (BENCH_12 2026-05-01) |
 | Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp pr-1288, -ngl 999 --cpu-moe, -np 4, -t 32 | 14 t/s | SETTLED |
 | Extended Arclight | same as Coder, 65K ctx | CRIU hot restore from checkpoint, 0.28s | 238 t/s | SETTLED |
 
