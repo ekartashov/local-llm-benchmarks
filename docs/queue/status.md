@@ -61,7 +61,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CV5 | DONE ✓ | NGL sweep complete. Expert offload (no --cpu-moe) OOMs as expected. |
 | T_ENGINE_EVAL | OPEN | Re-evaluate GLM-4.7-Flash + other cold-storage models on ik_llama.cpp. vLLM sleep no longer required. |
 | QX_PRELOAD | OPEN (HIGH) | REQUIRED for CRIU on Convergence. T_CRIU2 mmap: 100s first-inference without pre-warm (worse than 83s cold start). With pre-warm (123 GB at 7.4 GB/s ≈ 17s): projected 14s restore-to-interactive. |
-| T_MTP1 | OPEN (HIGH) | MTP n=1 on thinker (now PrismaQuant, not AWQ). RTX-3090 measured +27.5% decode TPS. Author reports n=3 optimal for PrismaQuant. Ready to test on vLLM 0.19.0. |
-| T_MTP2 | OPEN (HIGH) | MTP n=1 on coder (AWQ). llama.cpp spec-decode = no gain on A3B MoE; vLLM native MTP may differ (single forward pass). Run after T_MTP1 confirms approach. |
+| T_MTP1 | STALE ⚠ | BENCH_13 ran on AWQ (+31.8% at N=1, +51% at N=4) but AWQ is now superseded by PrismaQuant. Quality never scored. Re-run on PrismaQuant required. |
+| T_MTP2 | DONE ✗ | BENCH_14 2026-05-01. MTP breaks tool-call generation on A3B MoE coder (0/3 probes). TPS delta +4-7% irrelevant. Do not enable on coder. |
 | T_PQ1 | DONE ✓ | BENCH_12 2026-05-01. Quality parity confirmed (7/8 tasks; th02 correct). TPS -26 to -33% vs AWQ but quality accepted. Promoted to production thinker. |
 | T_PQ2 | DEFERRED | rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm. MoE NVFP4 grouped GEMM underperforms Marlin on SM120 (39 vs 46-49 t/s). Revisit when SM120 compute_120f kernel matures upstream. |

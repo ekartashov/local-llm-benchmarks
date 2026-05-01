@@ -105,22 +105,25 @@ async def one_request(client, slot_id, result_bag):
     count = 0
     try:
         async with client.stream("POST", f"{ENDPOINT}/chat/completions", json={
-            "model":       MODEL,
-            "messages":    [{"role": "user", "content": DECODE_PROMPT}],
-            "max_tokens":  512,
-            "temperature": 0.0,
-            "stream":      True,
+            "model":          MODEL,
+            "messages":       [{"role": "user", "content": DECODE_PROMPT}],
+            "max_tokens":     512,
+            "temperature":    0.0,
+            "stream":         True,
+            "stream_options": {"include_usage": True},
         }) as resp:
             resp.raise_for_status()
             async for raw in resp.aiter_lines():
                 if not raw.startswith("data: ") or "[DONE]" in raw:
                     continue
-                delta = json.loads(raw[6:])["choices"][0]["delta"]
-                tok = delta.get("content") or delta.get("reasoning") or ""
-                if tok:
-                    if fttt is None:
+                chunk = json.loads(raw[6:])
+                if chunk.get("usage"):
+                    count = chunk["usage"]["completion_tokens"]
+                elif fttt is None and chunk.get("choices") and chunk["choices"][0].get("delta"):
+                    delta = chunk["choices"][0]["delta"]
+                    tok = delta.get("content") or delta.get("reasoning") or ""
+                    if tok:
                         fttt = time.monotonic() - t0
-                    count += 1
         total = time.monotonic() - t0
         decode_s = total - (fttt or 0)
         result_bag[slot_id] = {

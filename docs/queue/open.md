@@ -8,55 +8,37 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ## HIGH priority
 
-### T_MTP1 — mtp_speculative_thinker — OPEN
+### T_MTP1 — mtp_speculative_thinker — OPEN (re-run on PrismaQuant)
 
-**Question:** Does MTP n=1 give measurable TPS improvement on the production thinker (AWQ, no model swap)?
+**Question:** Does MTP n=1 give measurable TPS improvement on the production thinker (PrismaQuant 5.5bit)?
 
-**Why HIGH priority:** No container changes, no new model download. One flag addition to an existing endpoint. Community benchmark (RTX 3090, vLLM 0.19.1) shows −21.6% TPOT ≡ **+27.5% decode TPS** at n=1. For max-num-seqs=4, thinker at single-request load is the best-case scenario for MTP acceptance rates.
+**Context:** BENCH_13 (2026-05-01) ran on AWQ and showed +31.8% at N=1 / +51% at N=4. But:
+1. Production thinker is now PrismaQuant (promoted BENCH_12). Result doesn't apply.
+2. th02 quality was never scored. Quality gate was incomplete.
+3. Author reports n=3 optimal for PrismaQuant (vs n=1 tested so far).
 
-**No prerequisite blockers.** vLLM #40756 (MTP crash) does not apply to our config: bug conditions are FP8+TP4+n=5+25K tokens; we use AWQ+TP1+n=1. vLLM 0.19.1 was a Gemma4-only patch — no difference from 0.19.0 for this test. Ready to run.
+**Scope:** Sweep n=1, 2, 3. Use `usage.completion_tokens` for token counting (T_PAR1 undercounts with MTP — confirmed in BENCH_13 analysis). Score th02 manually before recording PASS.
 
-**Deploy command:**
+**Deploy command (PrismaQuant + MTP n=1):**
 ```bash
-VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ \
+export VLLM_USE_V1=0; export VLLM_ENGINE_ITERATOR_SOURCE=LEGACY
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+./infra/scripts/deploy.sh vllm gpu1 rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm \
   --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
   --enable-chunked-prefill --max-num-seqs 4 \
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice \
+  --hf-overrides '{"architectures":["Qwen3_5ForCausalLM"]}' \
   --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
 ```
 
-**Metrics to collect:**
-- TPS at N=1 with MTP vs baseline (N=1 without MTP, same max-num-seqs=4 config)
-- TTFT at N=1 with MTP vs baseline
-- TPS at N=4 with MTP (does MTP hurt throughput under load?)
-- Quality smoke check: th02 correct? (MTP acceptance rate can affect output quality)
+Repeat with n=2 and n=3 to find the optimal setting.
 
-**Pass:** TPS at N=1 improves ≥10% vs baseline with th02 still correct.
-**Fail / rollback:** MTP causes CUDA error, crash, or th02 regression → revert to no `--speculative-config`.
+**Baseline (no MTP, PrismaQuant):** 51.3 t/s at N=1, 198.9 t/s at N=4 (BENCH_12).
 
-**Hand-back trigger:** vLLM crash (not rejection/fallback), or th02 semantic regression → research.
+**Pass:** TPS ≥10% vs PrismaQuant baseline AND th02 scored correct.
+**Fail:** CUDA error, crash, tool-call breakage, or th02 semantic regression.
 
----
-
-### T_MTP2 — mtp_speculative_coder — OPEN (run after T_MTP1)
-
-**Question:** Does vLLM native MTP give TPS gain on the A3B MoE coder, where llama.cpp spec-decode gives no gain?
-
-**Why this differs from llama.cpp:** llama.cpp speculative decoding uses a separate draft model → different expert routing per speculative token → overhead kills the gain. vLLM MTP uses the model's own MTP head in the same forward pass → expert routing happens once → no extra expert loading.
-
-**Prerequisite:** T_MTP1 complete (confirm approach is stable before touching coder).
-
-**Deploy command:**
-```bash
-VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-./infra/scripts/deploy.sh vllm gpu0gpu1 cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
-  --tensor-parallel-size 2 --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
-  --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice \
-  --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
-```
-
-**Pass:** Aggregate TPS improves ≥5% vs current 232–237 t/s baseline.
+**Note:** T_MTP2 (coder MTP) is CLOSED FAIL — MTP breaks tool calls on A3B MoE. No coder re-test planned.
 
 ---
 
