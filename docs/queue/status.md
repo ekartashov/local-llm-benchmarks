@@ -51,7 +51,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CV4 | DONE ✓ | 15.6 t/s sequential pipelining at -np 4 (1.12× scaling). Concurrent HTTP: crashes at N≥2 (T_PAR1). |
 | T_KV1 | DONE ✓ | 65K context, 238.2 t/s, 3022ms TTFT. --swap-space blocked (flag unrecognized in 0.19.0). |
 | T_KV2 | DONE ✓ | 0.28s hot restart (358× vs 100.2s cold). CRIU + cuda-checkpoint settled. |
-| T_KV3 | UNBLOCKED | Path B (ik_llama.cpp or vLLM-50K) verified. 0 MiB VRAM delta at 50K. |
+| T_KV3 | DONE ✓ | 128K context verified (1,892 t/s prefill, 49 t/s decode). Qwen3.6-27B (dense) fully supported via ik_llama.cpp main. |
 | T_PAR1 | DONE ✓ | Coder: 240.9→1204.9 t/s (N=1→8, still scaling). Thinker: 76.9 t/s at N=1; max-num-seqs=4 gives 269.4 t/s at N=4 (3.5×). Convergence: N≥2 crashes (unchanged from T_CV4). |
 | T_NVFP4 | DEFERRED | Restricted to TP=1; untrusted publisher (sakamakismile) used in T2.4c. Defer indefinitely. |
 | T_TRT_LLM | LOW | TensorRT-LLM peak TPS optimization. Post-settlement only — requires stable roles + hours-long compile per model. |

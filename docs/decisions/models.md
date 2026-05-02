@@ -41,6 +41,7 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
   --hf-overrides '{"architectures":["Qwen3_5ForCausalLM"]}'   # REQUIRED: model config declares VL arch
   env: VLLM_USE_V1=0 VLLM_ENGINE_ITERATOR_SOURCE=LEGACY       # V0 engine required (compressed-tensors)
   ```
+- **Extended Context Mode:** Verified at **128K context** (BENCH_15, 2026-05-02) using ik_llama.cpp `main` branch with `--tensor-split 0.5,0.5`. 1,892 t/s prefill.
 - **Why TP=1 only:** Same GDN constraint as AWQ — recurrent state sync broken across TP shards (T2.4g). Not a PrismaQuant issue.
 - **Why this wins over AWQ:** Quality parity at sharper reasoning (GPTQ calibration). Current TPS is V0/marlin-fallback — full NVFP4 path (CUDA 13.0) expected to recover TPS gap.
 - **T_MTP1 next:** MTP n=1 to n=3 sweep on this model. Author reports n=3 optimal; verify on SM120.

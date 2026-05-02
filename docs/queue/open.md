@@ -42,31 +42,6 @@ Repeat with n=2 and n=3 to find the optimal setting.
 
 ---
 
-### T_KV3 — thinker_extended_context — UNBLOCKED (Path B ready)
-
-**Target: 128K context** — Qwen3.6-27B native limit. T3.1 Phase 1 (50K) showed 0 MiB VRAM delta; the same should hold all the way to 128K (DeltaNet fixed-size recurrent state, zero KV cache growth). This is now a functional ceiling test, not a VRAM feasibility test.
-
-**Why this is CRITICAL:** Real thinker workloads hit 32K ceiling. 128K context with zero VRAM cost changes the use case entirely.
-
-**Why this is CRITICAL (not just high-priority):** The thinker is the model most in need of large context — reasoning over long chains, large codebases, multi-document synthesis. Real workloads already show the 27B thinker hitting context ceiling and failing to conclude. Coder extended context (65K, SETTLED) is useful but less urgent. Extended thinker is operationally necessary.
-
-**Sub-Q1 SETTLED (T2.4g):** GDN TP=2 broken regardless of chunked-prefill. Tensor-parallel sharding of DeltaNet state is mathematically incorrect.
-
-**Sub-Q2 BLOCKED — two unblocking paths (either one suffices):**
-
-**Path A: Non-GDN replacement (vLLM + AWQ)**
-Find a thinker candidate that:
-- Is NOT GDN-hybrid (pure Transformer or MLA) — TP=2 shard is mathematically safe
-- Quality ≥ Qwen3.6-27B (4.875/5) on the 8-task thinker suite
-- Fits ~21GB AWQ at TP=1 for normal hot-pair mode
-- First candidates to research: DeepSeek-R1-Distill-Qwen-32B, QwQ-32B (pure Transformer reasoning models with strong AIME/GPQA scores). Verify architecture in model card before testing.
-
-**Path B: ik_llama.cpp + tensor-split on existing Qwen3.6-27B (no model swap needed)**
-ik_llama.cpp pr-1288 already has DeltaNet support (used by 397B MoE). llama.cpp's `--tensor-split` is layer-split (pipeline parallelism), NOT tensor-parallel sharding. DeltaNet recurrent state lives entirely within a single layer and is never split across GPUs — the vLLM TP=2 failure mode does not apply.
-
-Test: run Qwen3.6-27B GGUF with `--tensor-split 0.5,0.5` on ik_llama.cpp, verify inference correctness on the thinker task suite (specifically th02 which catches GDN recurrent state errors). If correct: VRAM splits ~16GB per GPU, enabling larger KV cache. This path is lower-risk and doesn't require finding a new model.
-
-**No script yet.** Research mode required first. Return here after research provides a model slug + deploy config.
 
 ---
 

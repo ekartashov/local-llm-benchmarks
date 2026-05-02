@@ -421,3 +421,20 @@ SGLang weight-loader bug for Qwen3.5 MoE AWQ is permanent (KeyError in qwen3_5.p
 - **Headroom:** ~4.3 GB VRAM remains free on the 32GB RTX 5090.
 - **Implication:** Unblocks T_KV3 Path B. We can extend context via the existing model without a swap.
 - **Artifacts:** `results/T3.1_thinker_50k_vram_20260430T093241Z/`
+
+---
+
+## T_KV3 — thinker_extended_context — DONE ✓
+
+**Question:** Can the Thinker (Qwen3.6-27B-Q5_K_M) reach its 128K native context ceiling using ik_llama.cpp?
+
+**Result (2026-05-02, BENCH_15):** PASS.
+- **Engine:** ik_llama.cpp `main` branch (Commit `a8aecbf`, April 30, 2026). This branch natively supports `qwen35` (dense) architecture.
+- **Max Context:** Verified at **125,022 tokens** (128K ceiling).
+- **Prefill TPS:** **1,892.9 t/s** (125,022 tokens in 66.05s).
+- **Decode TPS:** **49.4 t/s**.
+- **VRAM Utilization:** ~28GB total across both 5090s using `--tensor-split 0.5,0.5`.
+- **Quality Verification:** Passed `th02` (Algorithm Logic: Consistent Hashing) with 100% semantic correctness.
+- **Implication:** The Arclight Thinker now has a verified 128K context window with high performance. vLLM TP=2 sharding issues are avoided by using ik_llama.cpp's pipeline-parallel layer splitting.
+
+**Artifacts:** `results/T_KV3_pathb_128k_context_20260502T123824Z/`

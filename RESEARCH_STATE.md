@@ -2,7 +2,7 @@
 
 Living document. Current-state summary only. Full cycle log: `docs/history/cycles.md`.
 
-**Last complete cycle:** R30 (2026-04-30) — Research round: PrismaQuant model survey, MTP speculative decoding discovery, SM120 NVFP4 MoE status confirmed, thinker max-num-seqs=4 production upgrade validated from T_PAR1 data.
+**Last complete cycle:** R31 (2026-05-02) — BENCH_15: T_KV3 (128K context) verified for Qwen3.6-27B via ik_llama.cpp main. 1.9K t/s prefill achieved.
 
 **Current mode:** Research
 
@@ -20,7 +20,7 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 - **T_KV1 swap-space blocked:** `--swap-space 32` flag unrecognized in vLLM 0.19.0. 131K context test skipped. 65K is the current ceiling.
 
-- **T_KV3 UNBLOCKED (2026-04-30, BENCH_11):** 50K context feasibility gate PASSED. QuantTrio/Qwen3.6-27B-AWQ (DeltaNet) showed **0 MiB VRAM delta** when moving from 32K to 50K context (TP=1). This confirms the architecture's fixed-size recurrent state. Path B (extended context on existing model) is now the preferred route. **Extended implication (R30):** The 0 MiB delta should hold all the way to the model's native limit. Qwen3.6-27B native context = 128K tokens. T_KV3 Path B target is 128K, not just 50K — the whole range is achievable with zero VRAM cost.
+- **T_KV3 (128K Context Viability):** [SETTLED] Qwen3.6-27B (dense) confirmed viable at 128K context using ik_llama.cpp `main` branch. 1,892 t/s prefill, 49.4 t/s decode. VRAM delta ~28GB total across TP=2 (Path B confirmed).
 
 - **Thinker max-num-seqs upgrade: 1→4 (R30, 2026-04-30):** T_PAR1 data (BENCH_02/03) proves max-num-seqs=4 is safe: 269.4 t/s at N=4 (3.5× gain), VRAM delta 4 MiB (27,736→27,732 MiB). The max-num-seqs=1 constraint was set conservatively for CUDA graph stability but is empirically unnecessary. **Action:** production thinker config should be updated to max-num-seqs=4. Updated in docs/decisions/models.md and config/models.yaml.
 
@@ -69,7 +69,7 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 |------|-------|--------|-----|--------|
 | Arclight Coder | cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit | TP=2 GPU0+1, fp8 KV, ctx 32K | 237 t/s | SETTLED |
 | Arclight Thinker | rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm | TP=1 GPU1, V0 engine, fp8 KV, cp-ON, --max-num-seqs 4 | 51 t/s | SETTLED (BENCH_12 2026-05-01) |
-| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp pr-1288, -ngl 999 --cpu-moe, -np 4, -t 32 | 14 t/s | SETTLED |
+| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main (merged pr-1288), -ngl 999 --cpu-moe, -np 4, -t 32 | 14 t/s | SETTLED |
 | Extended Arclight | same as Coder, 65K ctx | CRIU hot restore from checkpoint, 0.28s | 238 t/s | SETTLED |
 
 ---
@@ -83,7 +83,7 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 - **VLLM_USE_V1=0 mandatory:** V1 engine unstable on Blackwell sm_120 for our models. Always set in deploy.sh.
 - **VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 mandatory for TP=2:** Prevents OOM during CUDA graph capture.
 - **--swap-space blocked:** Flag unrecognized in vLLM 0.19.0 (R-V0 engine path). 65K is the hard context ceiling for Extended Arclight.
-- **Convergence always-resident:** 83s cold start is too high for on-demand routing. Keep as always-resident service. Context ceiling 128k tokens. True concurrency = N=1 per client (pr-1288 crashes at N≥2).
+- **Convergence always-resident:** 83s cold start is too high for on-demand routing. Keep as always-resident service. Context ceiling 128k tokens. True concurrency = N=1 per client (pr-1288 crashed at N≥2; investigating if `main` branch fix resolves this).
 
 ## Known bad / excluded
 
@@ -103,7 +103,6 @@ See `docs/queue/open.md` for full specs. Key items:
 
 | Item | Priority | Status |
 |------|----------|--------|
-| T_KV3 | HIGH | UNBLOCKED — 50K feasibility PASSED (0 MiB delta). Path B preferred. |
 | QX_PRELOAD | HIGH | OPEN — Required for CRIU on Convergence. Without pre-warm: 100s first-inference (worse than cold). With pre-warm: ~14s projected. |
 | T_CRIU3 Ph.1 | DONE ✓ | Thinker TP=1: 0.43s restore, 501 MB, TTFT parity. Sequential TP=2 swaps unblocked. |
 | T_CRIU3 Ph.2 | DONE ✗ | Coder TP=2: dump/restore OK (29s/67GB), KV preserved, inference FAIL (SHM IPC broken post-restore). |

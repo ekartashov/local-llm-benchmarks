@@ -1,6 +1,6 @@
 # Architecture: Current Deployment
 
-> **Status (R27, 2026-04-26):** Arclight hot-pair settled. Extended Arclight (65K ctx, 0.28s CRIU restart) settled. Convergence always-resident settled. Thinker TP=2 gated on T_KV3. Core RETIRED.
+> **Status (R31, 2026-05-02):** Arclight hot-pair settled. Extended Arclight (65K ctx, 0.28s CRIU restart) settled. Convergence always-resident settled. Thinker 128K context verified (SETTLED via ik_llama.cpp main). Core RETIRED.
 
 ---
 
@@ -63,7 +63,7 @@ Physical GPU isolation (coder GPU0, thinker GPU1) eliminates CUDA context time-s
 
 **Coder:** TP=2 is the production config at 232 t/s (T6.1 manual baseline, 2026-04-25). TP=1 suffers Reasoning Collapse (hallucination loops from Triton/FLA kernel shape mismatches in eager mode) and cannot serve as production without a non-eager path.
 
-**Thinker:** TP=1 only. TP=2 confirmed broken for GDN architecture (T2.4g). `--max-num-seqs 1` required for CUDA graph stability on single GPU. Do not change until T_KV3 resolves.
+**Thinker:** TP=1 only for vLLM (GDN broken at TP=2). For extended context (128K), use ik_llama.cpp on the `main` branch with `--tensor-split 0.5,0.5` (SETTLED BENCH_15).
 
 **Concurrency (max-num-seqs):** UNKNOWN for production. T_PAR1 Coder/Thinker rerun required. Prior Gemini Flash numbers (1,196 t/s coder at N=8) were fabricated — no measurement exists.
 
@@ -84,16 +84,16 @@ See [extended-arclight.md](extended-arclight.md) for full procedure.
 2. Restart the other model with `--tensor-parallel-size 2`
 3. CRIU hot-restart enables 0.28s mode switches (T_KV2 SETTLED)
 
-**Coder Extended mode (65K ctx, SETTLED T_KV1):** Sleep thinker → restart coder TP=2 at ctx=65536. KV budget ~37GB at fp8.
+**Coder Extended mode (65K ctx, SETTLED T_KV1):** Sleep thinker → restart coder TP=2 at ctx=65536. KV budget ~37GB at fp8
 
-**Thinker Extended mode:** GATED on T_KV3. See T_KV3 for current unblocking paths (non-GDN model replacement OR ik_llama.cpp tensor-split on existing GDN model).
+**Thinker Extended mode:** SETTLED (BENCH_15). Qwen3.6-27B (dense) fully supported at 128K context via ik_llama.cpp `main` branch using layer-split parallelism (`--tensor-split`).
 
 ### Convergence — ik_llama.cpp, always-resident (policy under review)
 See [convergence.md](convergence.md) for full guide.
 - Currently always-resident (83s cold start is CPU-bound, too high for on-demand). Never kill without planning restart time.
 - `-ngl 999 --cpu-moe`: attention/norm/embed on GPU, MoE experts in RAM. 13.99 t/s.
 - Context ceiling: **128k tokens** (T_CV1). Beyond this requires Singularity.
-- Concurrent clients: **N=1 only** (pr-1288 crashes at N≥2). `-np 4` is sequential pipelining only.
+- Concurrent clients: **N=1 currently** (prior `main` branch fix investigating if resolves N≥2). `-np 4` is sequential pipelining only.
 - **Always-resident policy may change** if T_CRIU2 confirms CRIU works for ik_llama.cpp. CRIU restore bypasses the CPU-bound 83s model construction phase; with mmap (removing `--no-mmap`), checkpoint is small and restore may be sub-second. This would free 12GB GPU VRAM when Convergence is idle.
 
 ---
@@ -163,11 +163,11 @@ curl -X POST http://localhost:30001/wake_up
 - V1 engine: **disabled** (`VLLM_USE_V1=0`) — stability fix for Blackwell sm_120
 
 ### ik_llama.cpp (Convergence)
-- Repo: `/srv/ai/projects/ik_llama.cpp`, branch `pr-1288`
+- Repo: `/srv/ai/projects/ik_llama.cpp`, branch `main`
 - Binary: `/srv/ai/projects/ik_llama.cpp/build/bin/llama-server`
-- Rebuild after pr-1288 pull:
+- Rebuild instructions:
   ```bash
-  cd /srv/ai/projects/ik_llama.cpp && git pull origin pull/1288/head
+  cd /srv/ai/projects/ik_llama.cpp && git checkout main && git pull origin main
   cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release
   cmake --build build --config Release -j$(nproc)
   ```

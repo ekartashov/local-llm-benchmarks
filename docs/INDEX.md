@@ -11,9 +11,9 @@
 | Arclight Coder | Qwen3.6-35B-A3B-AWQ | vLLM TP=2 GPU0+1, fp8 KV, ctx=32768 | 30000 | 232 t/s | SETTLED |
 | Arclight Thinker | Qwen3.6-27B-AWQ | vLLM TP=1 GPU1, fp8 KV, cp-ON, max-num-seqs 4 | 30001 | 77 t/s seq=1 / 269 t/s N=4 | SETTLED |
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
-| Convergence | Qwen3.5-397B UD-IQ2_M | ik_llama.cpp -ngl 999 --cpu-moe -t 32 -np 4 | 8002 | 13.99 t/s | SETTLED |
+| Convergence | Qwen3.5-397B UD-IQ2_M | ik_llama.cpp main (merged pr-1288), -ngl 999 --cpu-moe -t 32 -np 4 | 8002 | 13.99 t/s | SETTLED |
 
-**Open questions:** T_MTP1/T_MTP2 HIGH — MTP n=1 on AWQ thinker/coder (+27% TPS potential, verify vLLM #40756 fix first). T_KV3 UNBLOCKED — 128K context target (0 MiB VRAM delta confirmed; Path B ik_llama.cpp tensor-split ready). T_PQ1 MEDIUM — PrismaQuant thinker (CUDA 13.0 rebuild). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue).
+**Open questions:** T_MTP1/T_MTP2 HIGH — MTP n=1 on AWQ thinker/coder (+27% TPS potential, verify vLLM #40756 fix first). T_PQ1 MEDIUM — PrismaQuant thinker (CUDA 13.0 rebuild). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp).
 
 ---
 
@@ -27,7 +27,7 @@
   - *Summary:* Thinker sleeps → coder spans TP=2 at 65K ctx. Hot-restart via CRIU+cuda-checkpoint.
   - *Grep for:* CRIU procedure, uvloop patch, UV_USE_IO_URING, ghost VRAM, 65K context numbers
 - **[docs/arch/convergence.md](arch/convergence.md)** — Convergence + Singularity operational guide
-  - *Summary:* 397B always-resident at 13.99 t/s hybrid. 83s cold start → always-on policy. Concurrent-request crash at N≥2.
+  - *Summary:* 397B always-resident at 13.99 t/s hybrid. 83s cold start → always-on policy. Concurrent-request crash N≥2 (investigating `main` branch fix).
   - *Grep for:* launch command, -np caveat, pr-1288 crash, DDR5 bandwidth ceiling, model path
 
 ### Decisions
@@ -78,7 +78,7 @@
 3. **TP=2 is broken for GDN (Qwen3.6-27B) regardless of chunked-prefill setting** — H-TP2 confirmed T2.4g. Do not attempt thinker TP=2 without a non-GDN replacement.
 4. **vLLM uvloop patch is mandatory for CRIU** — do not revert `api_server.py` / `v1/utils.py` asyncio changes; always export `UV_USE_IO_URING=0`.
 5. **`--reasoning-parser` must NOT be combined with tool-call parser for models that skip thinking** — causes all-`no_call` on Gemma4, Core/80B, and any model that emits tool calls directly. Use `--tool-call-parser X` alone.
-6. **T_CV4 15.6 t/s is sequential pipelining, not true concurrency** — concurrent HTTP to Convergence crashes at N≥2 (T_PAR1). Do not quote T_CV4 as "parallel" capacity.
+6. **T_CV4 15.6 t/s is sequential pipelining, not true concurrency** — concurrent HTTP to Convergence previously crashed at N≥2 (T_PAR1 on pr-1288); investigating if `main` branch fix (merged pr-1288 update) resolves this.
 7. **Convergence always-resident** — 83s cold start; never on-demand. Always start before Arclight if doing a full system restart.
 8. **VLLM_USE_V1=0 is required** — V1 engine causes 10× TPS regression in eager mode and CUDA graph instability on Blackwell.
 9. **VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 required for coder TP=2** — prevents OOM during CUDA graph capture.

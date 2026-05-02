@@ -32,7 +32,7 @@ SETTLED (T2.4d, R17, 2026-04-25). 4.875/5 quality, 77.4 t/s. Config: TP=1 GPU1, 
 **max-num-seqs upgraded 1→4 (T_PAR1, R30, 2026-04-30):** BENCH_02/03 confirmed max-num-seqs=4 is safe: 269.4 t/s aggregate at N=4 (3.5× vs seqs=1), VRAM delta 4 MiB. The seqs=1 constraint was conservative and empirically unnecessary. At seqs=4, TTFT for N=1 requests is unchanged (73 ms). Production deploy should use `--max-num-seqs 4`.
 
 ### Convergence: Qwen3.5-397B-A17B UD-IQ2_M
-SETTLED (R12, 2026-04-20). ~123GB, always-resident. Engine: ik_llama.cpp pr-1288.
+SETTLED (R12, 2026-04-20). ~123GB, always-resident. Engine: ik_llama.cpp main (merged pr-1288).
 
 ### Core (80B): RETIRED
 SETTLED (R19, 2026-04-25). Extended Arclight fills the role. 80B model suspended. Re-evaluate only if Extended Arclight proves insufficient after T_KV1/T_KV3.
@@ -112,7 +112,7 @@ SETTLED. See docs/arch/convergence.md for numbers. Summary:
 - Always-resident (83s cold start → never on-demand)
 - Production config: `-ngl 999 --cpu-moe -t 32 -np 4` at 13.99 t/s
 - Context ceiling: 128k tokens
-- **-np 4 is sequential pipelining, NOT true concurrency** — concurrent HTTP crashes at N≥2 (T_PAR1)
+- **-np 4 is sequential pipelining, NOT true concurrency** — concurrent HTTP to Convergence previously crashed at N≥2 (T_PAR1 on pr-1288); investigating if `main` branch fix (merged pr-1288 update) resolves this.
 
 ---
 
@@ -165,8 +165,8 @@ Upstream: open feature request, no ETA. No workaround available.
 ### Engines are containerized (vLLM) or native binary (ik_llama.cpp)
 vLLM: rootless podman only. ik_llama.cpp: native host binary at `/srv/ai/projects/ik_llama.cpp/build/bin/llama-server`.
 
-### ik_llama.cpp pr-1288 required for Convergence
-SETTLED (R12). Mainline ik_llama.cpp HEAD (commit 07516cec) predates Qwen3.5 GDN support. PR #1288 adds `LLM_ARCH_QWEN35MOE` and `llama-delta-net.cpp` with `ssm_alpha`. Must checkout pr-1288 branch.
+### ik_llama.cpp main required for Convergence & Qwen3.6
+SETTLED (R12, updated 2026-05-02). Mainline ik_llama.cpp `main` branch now includes the DeltaNet support originally introduced in pr-1288, as well as `LLM_ARCH_QWEN35` support for dense models. The stale `pr-1288` branch is superseded.
 
 ### DDR5 bandwidth is the Convergence bottleneck
 SETTLED (R12). Per-token read: ~2.3GB expert weights. Actual bandwidth: ~83 GB/s. Theoretical ceiling: ~36 t/s. Measured: ~13 t/s (36% efficiency). Gap: NUMA, thread coordination, routing compute.
