@@ -102,7 +102,8 @@ Required: `--gpu-memory-utilization 0.95` (0.85 OOM'd during CUDA graph capture)
 
 **Result (2026-04-18):**
 - MLA confirmed active: all runs show `Using TRITON_MLA attention backend`. Actual MLA footprint ~129 KB/token.
-- Engine selection rationale obsolete: vLLM was chosen partly for sleep mode. With CRIU providing equivalent fast-pause on any engine, the engine decision should be based on TPS, architecture support, and tool-call reliability. ik_llama.cpp already has native DeltaNet support and may run models that fail on vLLM. Comprehensive re-evaluation queued as T_ENGINE_EVAL. TRT-LLM (T_TRT_LLM) queued as post-settlement peak-TPS optimization (compilation cost prohibitive during exploration phase).
+- V1 engine cannot be disabled: vLLM nightly forces V1 for this architecture. All six known env vars ignored.
+- Tool-calling broken under V1: EngineDeadError on Tasks 02 and 03 (complex schemas). Task 01 (simple) passes at ~44.7 t/s. Tool sanity locked at 33%.
 - Decision: GLM-4.7-Flash in cold storage until vLLM V1 stabilizes for TRITON_MLA on sm_120.
 
 ---
@@ -303,7 +304,7 @@ Skipped — T2.4d quality ≥ 4.0 AND th02/th05 pass. Dep condition met. Qwopus 
 
 **Result (2026-04-26):** PASS. Aggregate throughput 15.6 t/s at concurrency=4 (1.12x scaling over 13.9 t/s single-seq). Decision: Production config uses `-np 4` as default parallel capacity.
 
-**⚠ Caveat (added in R27/doc-tidy):** T_CV4 measured sequential pipelining into the server's 4 internal slots, NOT true concurrent client requests. T_PAR1 showed truly concurrent HTTP requests crashed older branches at N≥2 (GGML_ASSERT). The 15.6 t/s result is valid for sequential workloads. True concurrent capacity is N=1; investigating if the `main` branch fix resolves this.
+**⚠ Caveat (added in R27/doc-tidy):** T_CV4 measured sequential pipelining into the server's 4 internal slots, NOT true concurrent client requests. T_PAR1 showed truly concurrent HTTP requests crash pr-1288 at N≥2 (GGML_ASSERT). The 15.6 t/s result is valid for sequential workloads. True concurrent capacity is N=1 until pr-1288 bug is fixed upstream; investigating if the `main` branch fix resolves this.
 
 Script: `benchmarks/queue/T_CV4_convergence_parallel_tps.sh`.
 
@@ -367,8 +368,6 @@ SGLang weight-loader bug for Qwen3.5 MoE AWQ is permanent (KeyError in qwen3_5.p
 ## T_CV5 — convergence_ngl_sweep — DONE ✓
 
 **Question:** What is the optimal -ngl value for Convergence (Qwen3.5-397B) to reach its TPS ceiling with minimum VRAM?
-
-| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main (merged DeltaNet support), -ngl 999 --cpu-moe, -np 4, -t 32 | 14 t/s | SETTLED |
 
 **Result (2026-04-27):** MEASURED. Sweep of ngl [10, 20, 35, 50] showed an accelerating TPS curve, but saturation (90% of 13.99 t/s = 12.6 t/s) was **NOT** reached at ngl=50.
 

@@ -58,7 +58,7 @@ df -h /var/lib/containers/storage 2>/dev/null || df -h /tmp
 | Control | Value |
 |---------|-------|
 | Model | unsloth/Qwen3.5-397B-A17B UD-IQ2_M |
-| Engine | ik_llama.cpp older branches |
+| Engine | ik_llama.cpp pr-1288 |
 | --no-mmap | **OFF** (removed — this is the variable under test) |
 | -ngl | production default (999 --cpu-moe) |
 | -t (threads) | 32 |

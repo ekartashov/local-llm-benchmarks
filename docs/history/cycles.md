@@ -14,7 +14,7 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 **Decisions from real data:**
 - 65K context confirmed for Coder Extended mode.
-- Convergence concurrent requests: older branches crashed at N≥2. Production must use N=1 for client concurrency until `main` branch fix is verified.
+- Convergence concurrent requests: pr-1288 crashes at N≥2. Production must use N=1 for client concurrency until upstream fix.
 - Coder/Thinker max-num-seqs: UNKNOWN. T_PAR1 rerun required.
 
 ---
@@ -58,9 +58,9 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 - **Aggregate TPS**: 15.59 tokens/sec at concurrency=4.
 - **Scaling**: 1.12x scaling (vs 13.9 t/s single).
-- **Insight**: llama-server in the previous ik_llama.cpp build efficiently amortizes the DDR5 expert-fetch cost across the batch. The MoE architecture is multi-user viable on CPU.
+- **Insight**: llama-server in the pr-1288 build efficiently amortizes the DDR5 expert-fetch cost across the batch. The MoE architecture is multi-user viable on CPU.
 
-**NOTE (added in R27/doc-tidy):** T_CV4 measured sequential pipelining into server's `-np 4` internal slots (client requests sequential). T_PAR1 showed truly concurrent client requests crashed older branches at N≥2 (GGML_ASSERT). The 15.6 t/s result reflects pipelining throughput, NOT true parallelism. Production `-np 4` is valid for throughput; true concurrent capacity is N=1.
+**NOTE (added in R27/doc-tidy):** T_CV4 measured sequential pipelining into server's `-np 4` internal slots (client requests sequential). T_PAR1 showed truly concurrent client requests crash pr-1288 at N≥2 (GGML_ASSERT). The 15.6 t/s result reflects pipelining throughput, NOT true parallelism. Production `-np 4` is valid for throughput; true concurrent capacity is N=1.
 
 ---
 

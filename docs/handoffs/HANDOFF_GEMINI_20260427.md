@@ -18,7 +18,7 @@ To: Gemini Flash (testing — T_PAR1 Coder + Thinker parallelism sweep)
 
 **One item only: T_PAR1 — Coder + Thinker parallelism sweep.**
 
-Convergence is already settled (N≥2 crashes older branches — real data from the previous run). Skip it with `--skip-convergence`.
+Convergence is already settled (N≥2 crashes pr-1288 — real data from the previous run). Skip it with `--skip-convergence`.
 
 **The question:** What is the optimal `--max-num-seqs` for Coder (TP=2) and Thinker (TP=1) to maximize aggregate TPS for parallel OpenCode subagent workloads?
 
