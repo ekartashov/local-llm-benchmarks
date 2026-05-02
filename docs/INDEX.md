@@ -68,6 +68,9 @@
 - **[docs/procedures/criu-ops.md](docs/procedures/criu-ops.md)** — CRIU + cuda-checkpoint operational procedure
   - *Load when:* running Extended Arclight mode switches, checkpointing, debugging restore failures
   - *Grep for:* uvloop patch, checkpoint command, ghost VRAM cleanup, restore time expectations
+- **[docs/procedures/handoff-standard.md](docs/procedures/handoff-standard.md)** — Normative standard for writing BENCH_XX handoffs
+  - *Load when:* writing a new handoff document for a Gemini testing session
+  - *Grep for:* skip logic pattern, log streaming pattern, incidental findings rule, anti-patterns
 
 ---
 
