@@ -87,7 +87,8 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 ## Known bad / excluded
 
-- GLM-4.7-Flash (30B-A3B): TRITON_MLA PIECEWISE CUDA graph instability on Blackwell at longer decode lengths. Cold storage until vLLM upstream fix.
+- **BENCH_16 COMPLETE (2026-05-02):** GLM-4.7-Flash (30B-A3B) verified on `ik_llama.cpp`. 176.4 t/s achieved, 5/5 tool-calling pass. Resolved previous Triton/Blackwell MLA instability. Model is now a viable coder alternative (T2.2).
+
 - vLLM Sleep Mode level=2: known to produce gibberish outputs on wake (bug #29341). Use level=1 exclusively.
 - Gemma4-31B: REJECTED from both thinker and coder roles. See `docs/decisions/models.md`.
 - Dense 70B TP=2: ~20–35 t/s, settled FAIL. Not worth testing again.
@@ -106,7 +107,7 @@ See `docs/queue/open.md` for full specs. Key items:
 | QX_PRELOAD | HIGH | OPEN — Required for CRIU on Convergence. Without pre-warm: 100s first-inference (worse than cold). With pre-warm: ~14s projected. |
 | T_CRIU3 Ph.1 | DONE ✓ | Thinker TP=1: 0.43s restore, 501 MB, TTFT parity. Sequential TP=2 swaps unblocked. |
 | T_CRIU3 Ph.2 | DONE ✗ | Coder TP=2: dump/restore OK (29s/67GB), KV preserved, inference FAIL (SHM IPC broken post-restore). |
-| T_ENGINE_EVAL | MEDIUM | OPEN — GLM-4.7-Flash + others on ik_llama.cpp; vLLM sleep no longer required |
+| T_ENGINE_EVAL | DONE ✓ | GLM-4.7-Flash verified on ik_llama.cpp (BENCH_16). |
 | T2.6 | MEDIUM | OPEN — Behemoth archetype scouting (design item) |
 | T_PAR1 | DONE ✓ | Coder: 240–1205 t/s (N=1–8, no saturation). Thinker: 269 t/s at max-num-seqs=4. Convergence: N≥2 crashes. |
 | T_CRIU2 | DONE ✓ | --no-mmap OOM. mmap: 8.7 GB / 7s restore / 100s first-inference. QX_PRELOAD required. |

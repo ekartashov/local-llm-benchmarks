@@ -59,7 +59,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CRIU3 Ph.1 | DONE ✓ | Thinker TP=1: 0.43s restore, 501 MB. KV preserved. Enables Sequential TP=2 swaps. |
 | T_CRIU3 Ph.2 | DONE ✗ | Coder TP=2: dump/restore OK (29s/67GB), KV preserved in VRAM, inference FAIL — SHM IPC broken post-restore (Blackwell forces V1 engine, ShmRingBuffer cross-process writes invisible after CRIU). 26s restore = 4× cold start. Not viable. |
 | T_CV5 | DONE ✓ | NGL sweep complete. Expert offload (no --cpu-moe) OOMs as expected. |
-| T_ENGINE_EVAL | OPEN | Re-evaluate GLM-4.7-Flash + other cold-storage models on ik_llama.cpp. vLLM sleep no longer required. |
+| T_ENGINE_EVAL | DONE ✓ | GLM-4.7-Flash re-evaluation: SETTLED (2026-05-02) — ik_llama.cpp resolves MLA instability. 176 t/s. |
 | QX_PRELOAD | OPEN (HIGH) | REQUIRED for CRIU on Convergence. T_CRIU2 mmap: 100s first-inference without pre-warm (worse than 83s cold start). With pre-warm (123 GB at 7.4 GB/s ≈ 17s): projected 14s restore-to-interactive. |
 | T_MTP1 | STALE ⚠ | BENCH_13 ran on AWQ (+31.8% at N=1, +51% at N=4) but AWQ is now superseded by PrismaQuant. Quality never scored. Re-run on PrismaQuant required. |
 | T_MTP2 | DONE ✗ | BENCH_14 2026-05-01. MTP breaks tool-call generation on A3B MoE coder (0/3 probes). TPS delta +4-7% irrelevant. Do not enable on coder. |

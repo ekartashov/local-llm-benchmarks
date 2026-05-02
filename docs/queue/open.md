@@ -134,22 +134,6 @@ VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ---
 
-### T_ENGINE_EVAL — engine_comparison_for_arclight_roles — OPEN (research + test)
-
-**Context:** vLLM was originally chosen partly for its sleep mode. With CRIU providing engine-agnostic fast-swap, engine selection should now be based purely on capability: TPS, architecture support, tool-call reliability.
-
-**Models that failed on vLLM and should be re-evaluated on ik_llama.cpp:**
-- GLM-4.7-Flash (30B-A3B): `TRITON_MLA PIECEWISE CUDA graph instability on Blackwell`. This is a vLLM Triton kernel issue. ik_llama.cpp uses its own CUDA kernels (not Triton) for MLA — the same crash may not occur.
-- Any future model with CUDA graph / EngineCore conflicts on vLLM 0.19.0 + sm_120.
-
-**Scope of this item:**
-1. Test GLM-4.7-Flash on ik_llama.cpp: load GGUF, run tool-call suite, measure TPS. Compare to coder baseline (232 t/s).
-2. If GLM passes: re-open T2.2 with ik_llama.cpp as the engine instead of vLLM.
-3. Document cross-engine compatibility decisions in a new `docs/decisions/engines.md`.
-
-**Deps:** T_CRIU2 (confirms ik_llama.cpp is a viable engine for CRIU deployment). Can be researched in parallel.
-
----
 
 ### QX_PRELOAD — nvme_checkpoint_preload_mechanism — OPEN (design + implement)
 
