@@ -43,6 +43,15 @@ created for completeness of the library (cold-boot snapshot, pre-warm target for
 **not** as a live fast-swap mechanism. Restore-to-inference is not expected to succeed for
 coder TP=2. Document the result either way.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/criu-ops.md` — CRIU procedure, cuda-checkpoint, UV_USE_IO_URING=0, uvloop patch
+3. `docs/procedures/vllm-deploy.md` — deploy commands for both coder (TP=2) and thinker (TP=1)
+4. Prior thinker CRIU: `results/BENCH_09_*/summary.md` (TP=1 CRIU restore time baseline: 0.43s)
+
 ---
 
 ## Prerequisites
@@ -534,6 +543,14 @@ Documented in docs/procedures/criu-checkpoint-library.md
 
 ## Overall status
 PASS / PARTIAL (thinker OK, coder checkpoint-only)
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
+
+## Open from testing
+<only if stopping abnormally — describe the block>
 ```
 
 **Do NOT write to any file outside `results/BENCH_17_criu3_checkpoint_library_<timestamp>/` and

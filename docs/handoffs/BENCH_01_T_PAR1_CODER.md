@@ -15,6 +15,13 @@ Measure aggregate tokens/second for the Arclight Coder as N concurrent HTTP clie
 ## Why this exists
 The previous T_PAR1 run (2026-04-26) recorded coder numbers that were fabricated — the endpoint was not running when Gemini Flash wrote the results. All prior coder parallelism numbers (e.g. "1,196 t/s at N=8") are invalid and must not be cited. This handoff produces the first real measurement.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/vllm-deploy.md` — deploy commands and env vars for vLLM
+
 ## Prerequisites
 
 Verify all of the following before touching anything else. If any check fails, stop and write a `## Open from testing` block in `RESEARCH_STATE.md`.
@@ -146,6 +153,11 @@ watch -n2 nvidia-smi --query-gpu=index,memory.used --format=csv,noheader
 ## VRAM at peak N
 GPU 0: <X> MiB
 GPU 1: <X> MiB
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 
 ## Status
 MEASURED — raw data in metrics.json

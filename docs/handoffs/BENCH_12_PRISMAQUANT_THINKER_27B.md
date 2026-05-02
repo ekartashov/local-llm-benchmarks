@@ -22,6 +22,15 @@ rdtand is the original PrismaQuant author. The 27B model:
 - GPTQ + scale sweep achieves 0.33× RTN baseline MSE (vs naive quantization)
 - Dense architecture (no MoE) — avoids all SM120 Grouped GEMM bugs that affect the 35B coder
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/vllm-deploy.md` — deploy commands and env vars for vLLM
+3. Prior thinker baseline TPS: `results/BENCH_02_T_PAR1_THINKER_BASELINE_*/summary.md` and `results/BENCH_03_T_PAR1_THINKER_PARALLEL_*/summary.md`
+4. `docs/decisions/models.md` — AWQ quality scores to compare against (4.875/5 baseline)
+
 ## Research notes — SM120 NVFP4 compatibility
 
 **Key finding from BENCH_12 research (2026-04-30):**
@@ -340,6 +349,11 @@ STARTUP_OK / OOM_AT_STARTUP / ERROR (see startup_failure.txt)
 
 ## Verdict
 PASS / FAIL / INCONCLUSIVE
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 
 ## Notes
 <any NVFP4 kernel warnings, backend selection messages, unexpected errors>

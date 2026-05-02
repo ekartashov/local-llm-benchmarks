@@ -18,6 +18,14 @@ Verify that `podman container checkpoint` and `podman container restore` work co
 ## Why this exists
 T_KV2 proved CRIU works for vLLM (0.28s hot restart). Convergence runs on ik_llama.cpp, which is a different process model. With `--no-mmap` (current production), all 123 GB of model weights are loaded into anonymous RAM plus ~12 GB of CUDA state — producing a checkpoint of ~135 GB. This test confirms CRIU is compatible with ik_llama.cpp at all before BENCH_08 explores the smaller-checkpoint mmap variant. If CRIU works here, the always-resident policy (83s cold start) becomes optional.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/criu-ops.md` — CRIU procedure, checkpoint/restore commands, ghost VRAM cleanup
+3. `docs/arch/convergence.md` — Convergence deployment procedure and model path
+
 ## Prerequisites
 
 ```bash
@@ -239,6 +247,11 @@ RESTORE_OK / CHECKPOINT_FAILED / RESTORE_FAILED
 
 ## Inference correctness
 Text match (temperature=0.0): identical / differs
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 
 ## Status
 MEASURED / CHECKPOINT_FAILED / RESTORE_FAILED

@@ -18,6 +18,14 @@ Qwen3.6-27B uses a GDN (Gated DeltaNet) hybrid architecture. Its recurrent state
 
 T3.1 Phase 1 (BENCH_11) showed 0 MiB VRAM delta from 32K→50K context in vLLM. The same physics applies here: GDN layers have no KV cache growth. The 128K test exercises the full native context limit using ik_llama.cpp directly.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/arch/convergence.md` — ik_llama.cpp launch command pattern (Convergence uses same binary)
+3. Prior 50K VRAM feasibility: `results/T3.1_thinker_50k_vram_*/summary.md` (VRAM delta baseline)
+
 ---
 
 ## Prerequisites
@@ -408,6 +416,14 @@ PASS / FAIL / PARTIAL (e.g. loaded but OOM at 128K)
 
 ## Notes
 <any unexpected errors, kernel warnings, context levels where OOM occurred>
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
+
+## Open from testing
+<only if stopping abnormally — describe the block>
 ```
 
 **Do NOT write to any file outside `results/BENCH_15_tkv3_pathb_128k_<timestamp>/`.**

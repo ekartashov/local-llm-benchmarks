@@ -17,6 +17,16 @@ Community benchmark (RTX 3090, vLLM 0.19.1) measured −21.6% TPOT ≡ **+27.5% 
 
 vLLM #40756 (MTP crash) does NOT apply: that bug requires FP8+TP=4+n=5+25K tokens. Our config is AWQ+TP=1+n=1. Unblocked on vLLM 0.19.0.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/vllm-deploy.md` — deploy commands and speculative-config flag syntax
+3. Prior PrismaQuant TPS baseline: `results/BENCH_12_prismaquant_thinker_*/summary.md` (N=1 and N=4 TPS to compare MTP gain against)
+
+**IMPORTANT:** This benchmark requires the **PrismaQuant thinker** (`rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm`), NOT the AWQ thinker. Verify the model identity in the prerequisites step before proceeding.
+
 ## Prerequisites
 
 ```bash
@@ -262,6 +272,14 @@ th02: CORRECT / FAIL
 
 ## MTP startup
 SUCCESS / FAILED (see mtp_startup_failure.txt)
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
+
+## Open from testing
+<only if stopping abnormally — describe the block>
 
 ## Verdict
 PASS / FAIL / MARGINAL

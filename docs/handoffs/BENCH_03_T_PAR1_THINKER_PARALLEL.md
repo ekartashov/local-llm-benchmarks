@@ -15,6 +15,14 @@ Measure Thinker aggregate TPS when the server is configured for up to 4 parallel
 ## Why this exists
 BENCH_02 documents the production (max-num-seqs=1) queuing behaviour. This handoff tests whether raising max-num-seqs to 4 yields a real throughput gain or causes OOM. The thinker is deployed on a single 32 GB GPU and runs GDN architecture — the prior (fabricated) claim that it OOMs at N>1 has never been verified.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/vllm-deploy.md` — deploy commands and env vars for vLLM
+3. Prior thinker baseline results: `results/BENCH_02_T_PAR1_THINKER_BASELINE_*/summary.md` (baseline TPS to compare against)
+
 ## Prerequisites
 
 **BENCH_02 must be complete first.** Verify before proceeding:
@@ -174,6 +182,11 @@ Error: <paste first line of CUDA OOM>
 
 ### Production config restored
 yes / no
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 ```
 
 **Do NOT write to any file outside `results/T_PAR1_<timestamp>/`.**

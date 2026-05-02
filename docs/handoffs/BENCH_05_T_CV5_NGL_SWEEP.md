@@ -15,6 +15,13 @@ Measure Convergence decode TPS and GPU VRAM at -ngl values of 10, 20, 35, and 50
 ## Why this exists
 Only the two extremes have been measured: ngl=0 → 3.7 t/s and ngl=999 --cpu-moe → 13.99 t/s. The shape of the curve between them is unknown. Knowing the saturation point (the lowest ngl that reaches ~14 t/s) determines how much GPU VRAM can be reclaimed if Convergence is co-deployed alongside Extended Arclight modes.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/arch/convergence.md` — Convergence deployment procedure, launch command, -np caveat
+
 ## Prerequisites
 
 ```bash
@@ -232,6 +239,11 @@ Reference baselines (do not re-measure):
 | 35   | <tps> | <x> | <x> |
 | 50   | <tps> | <x> | <x> |
 | 999  | 13.99 (T_CV3 baseline) | — | — |
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 
 ## Status
 MEASURED

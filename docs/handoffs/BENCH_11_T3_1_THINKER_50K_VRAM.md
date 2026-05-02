@@ -17,6 +17,13 @@ Real thinker workloads hit the 32768-token ceiling — long reasoning chains, mu
 
 **Production config:** GPU1 used ~21 GB at 32K context (model weights + CUDA graphs + fp8 KV preallocate). GPU1 has 32 GB total — ~11 GB headroom. Extending from 32K to 50K adds 18432 tokens of KV cache capacity. The expected VRAM increase depends on model architecture; this test measures it empirically.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/vllm-deploy.md` — deploy commands for thinker with extended context
+
 ## Prerequisites
 
 ```bash
@@ -257,6 +264,11 @@ STARTUP_OK / OOM_AT_STARTUP
 | Baseline TTFT | <s> |
 | TTFT at 50K | <s> (or N/A) |
 | Text match | identical / differs / N/A |
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 
 ## Status
 STARTUP_OK / OOM_AT_STARTUP

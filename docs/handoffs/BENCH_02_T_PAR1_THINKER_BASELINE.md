@@ -15,6 +15,13 @@ Confirm the Thinker's single-request TPS under the production configuration (max
 ## Why this exists
 The thinker's known baseline is 77.4 t/s from T2.4d, measured in a different test context (quality evaluation, not throughput sweep). This measurement uses the same parallel-sweep harness as the coder sweep (BENCH_01), producing comparable numbers and documenting queuing behaviour at N>1 under production config before any config change is attempted.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/vllm-deploy.md` — deploy commands and env vars for vLLM
+
 ## Prerequisites
 
 Verify all of the following. If any fails, stop and write `## Open from testing` in `RESEARCH_STATE.md`.
@@ -139,6 +146,11 @@ nvidia-smi --query-gpu=index,memory.used --format=csv,noheader
 
 ## GPU 1 VRAM
 <X> MiB
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 
 ## Status
 MEASURED — raw data in metrics.json

@@ -16,6 +16,15 @@ Determine whether GLM-4.7-Flash (30B-A3B) is viable on ik_llama.cpp after failin
 
 GLM-4.7-Flash failed on vLLM 0.19.0 with `TRITON_MLA PIECEWISE CUDA graph instability on Blackwell` — a Triton kernel issue specific to sm_120 (RTX 5090). ik_llama.cpp uses its own CUDA kernels, not Triton. The same crash path does not exist. GLM-4.7-Flash is a 30B-A3B MoE model with Multi-head Latent Attention (MLA), sharing the A3B architecture with the current coder. If it is both functional and fast on ik_llama.cpp, it is a legitimate coder candidate and T2.2 must be re-run with the corrected engine.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/arch/convergence.md` — ik_llama.cpp launch command pattern (Convergence uses same binary at /srv/ai/projects/ik_llama.cpp/build/bin/llama-server)
+3. `docs/decisions/models.md` — GLM-4.7-Flash failure history on vLLM and coder role requirements
+4. `docs/decisions/scoring.md` — coder role evaluation criteria (tool-call reliability is primary gate)
+
 ---
 
 ## Prerequisites
@@ -90,6 +99,10 @@ nvidia-smi --query-gpu=index,memory.used,memory.free --format=csv,noheader
 
 ## Procedure
 
+Skip flags (set these to 1 to skip expensive steps on retry):
+- `SKIP_DOWNLOAD=1` — skip HF download if model file already exists
+- `SKIP_SERVER=1` — skip server launch if already up on port 8080
+
 ```bash
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 RESULTS_DIR="results/BENCH_16_tengine_eval_glm_${TIMESTAMP}"
@@ -98,6 +111,9 @@ mkdir -p "${RESULTS_DIR}"
 IK_BIN=$(which llama-server 2>/dev/null || \
          ls /srv/ai/projects/ik_llama.cpp/build/bin/llama-server 2>/dev/null)
 IK_BENCH=$(dirname "${IK_BIN}")/llama-bench
+
+SKIP_DOWNLOAD=${SKIP_DOWNLOAD:-0}
+SKIP_SERVER=${SKIP_SERVER:-0}
 ```
 
 ### Step 1 — Download GGUF
@@ -107,16 +123,20 @@ IK_BENCH=$(dirname "${IK_BIN}")/llama-bench
 GGUF_REPO="bartowski/GLM-4.7-Flash-GGUF"  # adjust if different repo found
 echo "gguf_repo=${GGUF_REPO}" >> "${RESULTS_DIR}/status.txt"
 
-pyenv activate hf
-# Prefer Q5_K_M for quality; accept Q4_K_M if Q5 not available
-HF_HOME=/srv/ai/models hf download "${GGUF_REPO}" --include "*Q5_K_M*" 2>/dev/null \
+if [ "${SKIP_DOWNLOAD}" = "0" ]; then
+  pyenv activate hf
+  # Prefer Q5_K_M for quality; accept Q4_K_M if Q5 not available
+  HF_HOME=/srv/ai/models hf download "${GGUF_REPO}" --include "*Q5_K_M*" 2>/dev/null \
   || HF_HOME=/srv/ai/models hf download "${GGUF_REPO}" --include "*Q4_K_M*"
+else
+  echo "[skip] SKIP_DOWNLOAD=1 — skipping HF download"
+fi
 
-# Locate downloaded file
+# Locate downloaded file (always run, even after skip)
 MODEL_PATH=$(ls /srv/ai/models/models--${GGUF_REPO//\//-}/snapshots/*/*.gguf 2>/dev/null \
              | grep -i "Q5_K_M\|Q4_K_M" | head -1)
 echo "Model path: ${MODEL_PATH}"
-[ -z "${MODEL_PATH}" ] && echo "STOP — model file not found after download" && exit 1
+[ -z "${MODEL_PATH}" ] && echo "STOP — model file not found" && exit 1
 echo "model_path=${MODEL_PATH}" >> "${RESULTS_DIR}/status.txt"
 ```
 
@@ -137,6 +157,13 @@ echo "model_path=${MODEL_PATH}" >> "${RESULTS_DIR}/status.txt"
 nvidia-smi --query-gpu=index,memory.used --format=csv,noheader \
   | tee "${RESULTS_DIR}/vram_before_load.txt"
 
+if [ "${SKIP_SERVER}" = "1" ]; then
+  echo "[skip] SKIP_SERVER=1 — skipping server launch; verifying port 8080"
+  curl -sf http://localhost:8080/health || { echo "FATAL: server not up after skip"; exit 1; }
+  HEALTH_OK=1
+  SERVER_PID=$(pgrep -f "llama-server.*8080" | head -1)
+else
+
 "${IK_BIN}" \
   -m "${MODEL_PATH}" \
   -ngl 999 \
@@ -149,14 +176,20 @@ nvidia-smi --query-gpu=index,memory.used --format=csv,noheader \
 SERVER_PID=$!
 echo "llama-server PID: ${SERVER_PID}"
 
+# Stream log to terminal while waiting (so operator can see startup errors in real time)
+tail -f "${RESULTS_DIR}/server.log" | stdbuf -oL sed 's/\r//g; s/^/[llama-server] /' &
+TAIL_PID=$!
+
 # Wait up to 120s
 for i in $(seq 1 120); do
   curl -sf http://localhost:8080/health 2>/dev/null && echo "SERVER READY" && break
   sleep 1
 done
+kill "${TAIL_PID}" 2>/dev/null
 
 HEALTH_OK=$(curl -sf http://localhost:8080/health 2>/dev/null && echo 1 || echo 0)
 echo "health_ok_single_gpu=${HEALTH_OK}" >> "${RESULTS_DIR}/status.txt"
+fi  # end SKIP_SERVER block
 ```
 
 **If single-GPU OOM:** retry with tensor-split across both GPUs.
@@ -180,10 +213,14 @@ if [ "${HEALTH_OK}" = "0" ]; then
     >> "${RESULTS_DIR}/server_tp2.log" 2>&1 &
   SERVER_PID=$!
 
+  tail -f "${RESULTS_DIR}/server_tp2.log" | stdbuf -oL sed 's/\r//g; s/^/[llama-server-ts] /' &
+  TAIL_PID=$!
+
   for i in $(seq 1 120); do
     curl -sf http://localhost:8080/health 2>/dev/null && echo "SERVER READY (tensor-split)" && break
     sleep 1
   done
+  kill "${TAIL_PID}" 2>/dev/null
 
   HEALTH_OK=$(curl -sf http://localhost:8080/health 2>/dev/null && echo 1 || echo 0)
   echo "health_ok_tensor_split=${HEALTH_OK}" >> "${RESULTS_DIR}/status.txt"
@@ -396,6 +433,14 @@ PASS (T2.2 re-opened) / FAIL (reason) / PREREQ_FAIL (no GGUF)
 
 ## Notes
 <any unexpected errors, architecture warnings, MLA handling messages>
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
+
+## Open from testing
+<only if stopping abnormally — describe the block>
 ```
 
 **Do NOT write to any file outside `results/BENCH_16_tengine_eval_glm_<timestamp>/`.**

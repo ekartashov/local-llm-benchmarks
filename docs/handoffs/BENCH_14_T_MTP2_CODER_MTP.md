@@ -19,6 +19,14 @@ BENCH_13 (T_MTP1 thinker) confirms MTP is stable on our vLLM 0.19.x stack before
 
 vLLM #40756 (MTP crash) does NOT apply: conditions are FP8+TP=4+n=5+25K tokens. Our config is AWQ+TP=2+n=1.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/vllm-deploy.md` — deploy commands and speculative-config flag syntax
+3. `docs/decisions/models.md` — coder role requirements (tool-call reliability is a hard constraint)
+
 ## Prerequisites
 
 ```bash
@@ -311,6 +319,14 @@ GPU0: <X> MiB  GPU1: <X> MiB (baseline: ~23,000 MiB/card)
 
 ## MTP startup
 SUCCESS / FAILED (see mtp_startup_failure.txt)
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
+
+## Open from testing
+<only if stopping abnormally — describe the block>
 
 ## Verdict
 PASS / FAIL / MARGINAL / NO-GAIN

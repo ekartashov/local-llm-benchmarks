@@ -19,6 +19,14 @@ At the ngl value identified in BENCH_05 as the TPS saturation point, test whethe
 ## Why this exists
 BENCH_05 finds the minimum ngl that achieves maximum TPS with --cpu-moe. This handoff answers whether any TPS gain remains by also offloading MoE experts, which are currently held in CPU RAM (~123 GB). Offloading even a fraction of experts to GPU trades VRAM for decode speed. The result determines whether a higher -ngl without --cpu-moe is worth the VRAM cost.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/arch/convergence.md` — Convergence deployment procedure, launch command
+3. Prior NGL sweep results: `results/T_CV5_ngl_sweep_*/summary.md` (baseline TPS to compare against)
+
 ## Prerequisites
 
 **BENCH_05 must be complete.** Verify before proceeding:
@@ -225,6 +233,11 @@ Config B OOM is a valid result, not a failure. Record the VRAM at the OOM point.
 |--------|-----------|-----------|----------------------|
 | A | yes | <tps_A> | <vram_A> |
 | B | no | <tps_B or OOM> | <vram_B or vram_at_oom> |
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 
 ## Status
 MEASURED / CONFIG_B_OOM

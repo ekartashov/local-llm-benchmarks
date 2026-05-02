@@ -15,6 +15,14 @@ Confirm that `podman container checkpoint` + `podman container restore` works fo
 ## Why this exists
 T_KV2 proved 0.28s hot restart for vLLM TP=2 (coder). The thinker uses TP=1 on GPU1 exclusively — the CUDA memory layout, process tree, and CUDA context setup differ from TP=2. Before standardizing CRIU for all vLLM processes (T_CRIU3), the thinker's CRIU feasibility must be confirmed independently. If it works, the thinker can be checkpointed before any model swap, enabling 0.28s restore instead of ~100s cold start.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/criu-ops.md` — CRIU procedure, cuda-checkpoint, UV_USE_IO_URING=0 requirement
+3. `docs/procedures/vllm-deploy.md` — deploy commands for thinker
+
 ## Prerequisites
 
 ```bash
@@ -280,6 +288,11 @@ RESTORE_OK / CHECKPOINT_FAILED / RESTORE_FAILED
 
 ## GPU1 VRAM after restore
 <MiB> MiB
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 
 ## Status
 RESTORE_OK / CHECKPOINT_FAILED / RESTORE_FAILED

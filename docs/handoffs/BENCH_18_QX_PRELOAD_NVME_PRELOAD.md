@@ -19,6 +19,15 @@ Pre-warming the checkpoint file into page cache before the CRIU restore call is 
 
 This handoff measures the mechanism on the small thinker checkpoint (~501 MiB) to confirm it works before applying it to the 123 GB Convergence case.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/criu-ops.md` — CRIU procedure, Convergence checkpoint path
+3. `docs/arch/convergence.md` — Convergence model path, always-resident policy, CRIU first-inference timing (100s without preload)
+4. Prior CRIU mmap results: `results/BENCH_08_*/summary.md` (100s first-inference baseline to improve on)
+
 ---
 
 ## Prerequisites
@@ -350,6 +359,14 @@ CRIU viable for Convergence (warm << 83s cold start): YES / MARGINAL / NO
 
 ## Production thinker
 RESTORED / FAILED
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
+
+## Open from testing
+<only if stopping abnormally — describe the block>
 
 ## Verdict
 PASS / FAIL / MARGINAL

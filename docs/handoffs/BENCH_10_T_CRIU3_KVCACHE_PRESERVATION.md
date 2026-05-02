@@ -5,6 +5,15 @@
 
 ---
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/criu-ops.md` — CRIU procedure, cuda-checkpoint, ghost VRAM notes
+3. `docs/procedures/vllm-deploy.md` — deploy commands for coder TP=2
+4. Prior thinker CRIU results: `results/BENCH_09_*/summary.md` (Phase 1 baseline)
+
 ## Objective
 
 Determine whether a CRIU checkpoint of vLLM Coder TP=2 (with populated prefix cache) restores

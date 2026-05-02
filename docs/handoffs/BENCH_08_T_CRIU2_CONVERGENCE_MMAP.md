@@ -18,6 +18,15 @@ With `--no-mmap` removed, model weights are memory-mapped from the GGUF file rat
 ## Why this exists
 BENCH_07 confirmed CRIU works for ik_llama.cpp. With `--no-mmap`, the checkpoint archive is ~135 GB — 18–20 s restore from NVMe, which is better than 83 s cold start but still slow. When `--no-mmap` is removed, model weights are file-backed (mmap'd from the GGUF on disk). CRIU checkpoints file-backed pages without including them in the archive — the checkpoint shrinks to ~12 GB (GPU state + process metadata only), restoring in sub-second. The cost is that after restore, the first inference triggers page faults to reload weights from disk. This test measures whether that page-fault warmup time is acceptable.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/criu-ops.md` — CRIU procedure, checkpoint/restore commands, ghost VRAM cleanup
+3. `docs/arch/convergence.md` — Convergence deployment procedure and model path
+4. Prior CRIU test results: `results/BENCH_07_*/summary.md` (--no-mmap findings to compare against)
+
 ## Prerequisites
 
 ```bash
@@ -284,6 +293,11 @@ RESTORE_OK / CHECKPOINT_FAILED / RESTORE_FAILED
 | Checkpoint size | ~135 GB | <x> GB |
 | Restore time | ~18 s | <x> s |
 | Rep-1 TTFT post-restore | <x> s | <x> s |
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 
 ## Status
 MEASURED / CHECKPOINT_FAILED / RESTORE_FAILED

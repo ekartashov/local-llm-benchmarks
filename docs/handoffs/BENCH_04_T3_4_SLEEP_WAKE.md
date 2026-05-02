@@ -18,6 +18,13 @@ Determine whether vLLM's CPU-offloaded prefix cache is preserved or flushed when
 ## Why this exists
 If the prefix cache survives sleep/wake, users can pause a model and resume without re-paying the full prefill cost on the same context. If it is flushed, the first post-wake request costs a full cold prefill. This affects whether sleep mode is transparent to running conversations.
 
+## Context to read
+
+Before running anything, read these files in order:
+
+1. `docs/INDEX.md` — current production config, gotchas, port assignments
+2. `docs/procedures/vllm-deploy.md` — deploy commands, VLLM_SERVER_DEV_MODE, sleep mode flags
+
 ## Prerequisites
 
 ```bash
@@ -152,6 +159,11 @@ There is no pass/fail for the post-wake result itself — both outcomes (cache s
 ## Post-wake ratio vs cold
 <warm_cache_postwake_ms> / <cold_prefill_ms> = <ratio>
 (1.0 = cache flushed, < 0.3 = cache survived)
+
+## Incidental findings
+<Any observation outside this benchmark's explicit scope: unexpected VRAM readings, other components
+behaving differently than documented, engine warnings about kernels or flags, etc. Write one FINDING
+block per observation. If nothing unusual observed: "none">
 
 ## Status
 MEASURED
