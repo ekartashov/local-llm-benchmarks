@@ -58,7 +58,7 @@ nvidia-smi --query-gpu=index,memory.used,memory.free --format=csv,noheader
 | Control | Value |
 |---------|-------|
 | Model | unsloth/Qwen3.5-397B-A17B UD-IQ2_M |
-| Engine | ik_llama.cpp pr-1288 |
+| Engine | ik_llama.cpp older branches |
 | --no-mmap | **ON** (current production default) |
 | -ngl | production default (999 --cpu-moe) |
 | -t (threads) | 32 |

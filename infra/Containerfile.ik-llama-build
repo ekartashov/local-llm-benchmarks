@@ -1,6 +1,6 @@
 # infra/Containerfile.ik-llama-build
 #
-# Build environment for ik_llama.cpp (pr-1288) targeting CUDA 12.8 / sm_120 (Blackwell).
+# Build environment for ik_llama.cpp (main) targeting CUDA 12.8 / sm_120 (Blackwell).
 #
 # PURPOSE: compilation only. The binary it produces is written to a bind-mounted
 # host directory — NOT baked into this image. Keep the binary on the host so you
@@ -19,7 +19,7 @@
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
 
 # Build tools only — no inference runtime, no Python, no model weights.
-# gcc-12 / g++-12: required by ik_llama.cpp pr-1288 (C++17 features).
+# gcc-12 / g++-12: required by ik_llama.cpp main (C++17 features).
 # ninja-build: faster parallel builds than make.
 # git: cmake version detection reads git metadata from the source tree.
 RUN apt-get update && apt-get install -y --no-install-recommends \

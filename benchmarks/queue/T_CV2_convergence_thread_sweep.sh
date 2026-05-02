@@ -152,7 +152,7 @@ EOJSON
 # T_CV2 — Convergence Thread Sweep (ngl=0)
 
 **Timestamp:** ${TIMESTAMP}
-**Config:** ik_llama.cpp pr-1288 · Qwen3.5-397B UD-IQ2_M · ngl=0 (CPU-only)
+**Config:** ik_llama.cpp main · Qwen3.5-397B UD-IQ2_M · ngl=0 (CPU-only)
 
 ## Results
 

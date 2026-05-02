@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # infra/scripts/build-ik-llama.sh
 #
-# Compiles ik_llama.cpp (pr-1288) inside a CUDA 12.8 build container.
+# Compiles ik_llama.cpp (main) inside a CUDA 12.8 build container.
 # The output binary lands at IK_LLAMA_SRC/build/bin/ on the HOST filesystem —
 # not inside a container volume. The build container is ephemeral and throwaway;
 # only the binary survives it.
@@ -26,7 +26,7 @@
 # Prerequisites:
 #   - ik_llama.cpp cloned at IK_LLAMA_SRC (git clone ikawrakow/ik_llama.cpp)
 #   - Rootless podman accessible in PATH
-#   - pr-1288 branch already fetched OR git remote reachable
+#   - main branch already fetched OR git remote reachable
 
 set -euo pipefail
 
@@ -63,19 +63,19 @@ if [[ ! -d "${IK_LLAMA_SRC}/.git" ]]; then
     exit 1
 fi
 
-# ── 2. Ensure pr-1288 branch is checked out ─────────────────────────────────
+# ── 2. Ensure main branch is checked out ────────────────────────────────────
 (
     cd "${IK_LLAMA_SRC}"
     CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-    if [[ "${CURRENT_BRANCH}" != "pr-1288" ]]; then
-        echo "[build-ik-llama] Current branch: ${CURRENT_BRANCH}. Switching to pr-1288..."
-        if ! git rev-parse --verify pr-1288 &>/dev/null; then
-            echo "[build-ik-llama] Fetching pr-1288 from origin..."
-            run git fetch origin pull/1288/head:pr-1288
+    if [[ "${CURRENT_BRANCH}" != "main" ]]; then
+        echo "[build-ik-llama] Current branch: ${CURRENT_BRANCH}. Switching to main..."
+        if ! git rev-parse --verify main &>/dev/null; then
+            echo "[build-ik-llama] Fetching main from origin..."
+            run git fetch origin main:main
         fi
-        run git checkout pr-1288
+        run git checkout main
     else
-        echo "[build-ik-llama] Already on pr-1288."
+        echo "[build-ik-llama] Already on main."
     fi
 )
 

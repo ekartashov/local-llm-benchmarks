@@ -78,7 +78,7 @@ curl -sf http://localhost:8002/health && echo "CONVERGENCE OK" || echo "CONVERGE
 | Control | Value |
 |---------|-------|
 | Model | unsloth/Qwen3.5-397B-A17B UD-IQ2_M |
-| Engine | ik_llama.cpp pr-1288 |
+| Engine | ik_llama.cpp older branches |
 | -ngl | **saturation ngl from BENCH_05** (fixed for this test) |
 | -t (threads) | 32 |
 | -np | 1 |

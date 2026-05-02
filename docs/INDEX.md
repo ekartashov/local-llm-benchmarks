@@ -11,7 +11,7 @@
 | Arclight Coder | Qwen3.6-35B-A3B-AWQ | vLLM TP=2 GPU0+1, fp8 KV, ctx=32768 | 30000 | 232 t/s | SETTLED |
 | Arclight Thinker | Qwen3.6-27B-AWQ | vLLM TP=1 GPU1, fp8 KV, cp-ON, max-num-seqs 4 | 30001 | 77 t/s seq=1 / 269 t/s N=4 | SETTLED |
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
-| Convergence | Qwen3.5-397B UD-IQ2_M | ik_llama.cpp main (merged pr-1288), -ngl 999 --cpu-moe -t 32 -np 4 | 8002 | 13.99 t/s | SETTLED |
+| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main (merged DeltaNet support), -ngl 999 --cpu-moe, -np 4, -t 32 | 8002 | 14 t/s | SETTLED |
 
 **Open questions:** T_MTP1/T_MTP2 HIGH — MTP n=1 on AWQ thinker/coder (+27% TPS potential, verify vLLM #40756 fix first). T_PQ1 MEDIUM — PrismaQuant thinker (CUDA 13.0 rebuild). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp).
 
@@ -28,7 +28,7 @@
   - *Grep for:* CRIU procedure, uvloop patch, UV_USE_IO_URING, ghost VRAM, 65K context numbers
 - **[docs/arch/convergence.md](arch/convergence.md)** — Convergence + Singularity operational guide
   - *Summary:* 397B always-resident at 13.99 t/s hybrid. 83s cold start → always-on policy. Concurrent-request crash N≥2 (investigating `main` branch fix).
-  - *Grep for:* launch command, -np caveat, pr-1288 crash, DDR5 bandwidth ceiling, model path
+  - *Grep for:* launch command, -np caveat, DeltaNet crash, DDR5 bandwidth ceiling, model path
 
 ### Decisions
 - **[docs/decisions/settled.md](decisions/settled.md)** — All SETTLED decisions, most recent first
@@ -37,35 +37,35 @@
 - **[docs/decisions/models.md](decisions/models.md)** — Model role assignments, candidates, eliminated models
   - *Summary:* Who won each role and why; what was eliminated and the specific failure mode.
   - *Grep for:* model names, parser flags, quantization choices, benchmark scores
-- **[docs/decisions/scoring.md](decisions/scoring.md)** — Per-role evaluation weights and engine selection criteria
+- **[docs/decisions/scoring.md](docs/decisions/scoring.md)** — Per-role evaluation weights and engine selection criteria
   - *Summary:* What matters for each role (TPS vs quality vs context vs TTFT) and decision rules.
   - *Load when:* evaluating a new model or engine candidate to ensure consistent scoring
 
 ### Queue
-- **[docs/queue/open.md](queue/open.md)** — OPEN and BLOCKED items only (full item spec)
+- **[docs/queue/open.md](docs/queue/open.md)** — OPEN and BLOCKED items only (full item spec)
   - *Summary:* T_PAR1 (Coder/Thinker rerun), T_KV3 (research blocked), T3.x optimization, T5.x integration, T6.x task suite
   - *Grep for:* item_id, procedure steps, pass criteria, hand-back triggers
-- **[docs/queue/status.md](queue/status.md)** — One-line status for every item (DONE + OPEN + BLOCKED)
+- **[docs/queue/status.md](docs/queue/status.md)** — One-line status for every item (DONE + OPEN + BLOCKED)
   - *Summary:* Quick lookup for whether any specific item has been run and what it found.
 
 ### Handoffs
-- **[docs/handoffs/](handoffs/)** — Gemini testing session handoff files (naming: HANDOFF_GEMINI_YYYYMMDD.md)
+- **[docs/handoffs/](docs/handoffs/)** — Gemini testing session handoff files (naming: HANDOFF_GEMINI_YYYYMMDD.md)
   - *Write new handoffs here*, not repo root.
   - *Load when:* handing off to Gemini — contains step-by-step procedure, deploy commands, termination conditions.
 
 ### History (grep target, rarely loaded inline)
-- **[docs/history/cycles.md](history/cycles.md)** — Chronological cycle log R1–R27
+- **[docs/history/cycles.md](docs/history/cycles.md)** — Chronological cycle log R1–R27
   - *Load when:* debugging why a decision was made, understanding context behind a specific test result
   - *Grep for:* cycle dates, specific findings, "triggered by", model names in historical context
-- **[docs/history/done-items.md](history/done-items.md)** — Full procedures for all DONE/CANCELLED/SKIPPED queue items
+- **[docs/history/done-items.md](docs/history/done-items.md)** — Full procedures for all DONE/CANCELLED/SKIPPED queue items
   - *Load when:* reproducing a past test, understanding exactly what was measured and how
   - *Grep for:* item_id, pass criteria, "what failure means", result numbers
 
 ### Procedures (load when executing an operation)
-- **[docs/procedures/vllm-deploy.md](procedures/vllm-deploy.md)** — vLLM deployment patterns, env vars, container flags
+- **[docs/procedures/vllm-deploy.md](docs/procedures/vllm-deploy.md)** — vLLM deployment patterns, env vars, container flags
   - *Load when:* deploying or scripting any vLLM endpoint change
   - *Grep for:* env var names, flag names, VLLM_USE_V1, CUDA graph flags, port assignments
-- **[docs/procedures/criu-ops.md](procedures/criu-ops.md)** — CRIU + cuda-checkpoint operational procedure
+- **[docs/procedures/criu-ops.md](docs/procedures/criu-ops.md)** — CRIU + cuda-checkpoint operational procedure
   - *Load when:* running Extended Arclight mode switches, checkpointing, debugging restore failures
   - *Grep for:* uvloop patch, checkpoint command, ghost VRAM cleanup, restore time expectations
 
@@ -78,7 +78,7 @@
 3. **TP=2 is broken for GDN (Qwen3.6-27B) regardless of chunked-prefill setting** — H-TP2 confirmed T2.4g. Do not attempt thinker TP=2 without a non-GDN replacement.
 4. **vLLM uvloop patch is mandatory for CRIU** — do not revert `api_server.py` / `v1/utils.py` asyncio changes; always export `UV_USE_IO_URING=0`.
 5. **`--reasoning-parser` must NOT be combined with tool-call parser for models that skip thinking** — causes all-`no_call` on Gemma4, Core/80B, and any model that emits tool calls directly. Use `--tool-call-parser X` alone.
-6. **T_CV4 15.6 t/s is sequential pipelining, not true concurrency** — concurrent HTTP to Convergence previously crashed at N≥2 (T_PAR1 on pr-1288); investigating if `main` branch fix (merged pr-1288 update) resolves this.
+6. **T_CV4 15.6 t/s is sequential pipelining, not true concurrency** — concurrent HTTP to Convergence previously crashed at N≥2 (T_PAR1 on older branches); investigating if `main` branch fix (merged DeltaNet update) resolves this.
 7. **Convergence always-resident** — 83s cold start; never on-demand. Always start before Arclight if doing a full system restart.
 8. **VLLM_USE_V1=0 is required** — V1 engine causes 10× TPS regression in eager mode and CUDA graph instability on Blackwell.
 9. **VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 required for coder TP=2** — prevents OOM during CUDA graph capture.

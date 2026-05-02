@@ -47,7 +47,7 @@ Wait until `curl -sf http://localhost:8002/health` returns 200 (may take up to 9
 | Control | Value |
 |---------|-------|
 | Model | unsloth/Qwen3.5-397B-A17B UD-IQ2_M |
-| Engine | ik_llama.cpp pr-1288 |
+| Engine | ik_llama.cpp older branches |
 | --cpu-moe | **ON** (fixed throughout all sweep points) |
 | -t (threads) | 32 |
 | -np | 1 (single slot — isolates decode TPS from pipelining) |

@@ -17,7 +17,7 @@
 #   > 90s  → always-resident strongly preferred
 #
 # PREREQUISITES:
-#   - ik_llama.cpp pr-1288 built (infra/scripts/build-ik-llama.sh)
+#   - ik_llama.cpp main built (infra/scripts/build-ik-llama.sh)
 #   - Model at ${MODEL_CACHE}/${CONVERGENCE_MODEL}
 #   - Container bench-ikllamacpp-convergence not already running
 #
@@ -343,7 +343,7 @@ EOJSON
 # T_CV1 — Convergence Startup Timing + Context Ceiling
 
 **Timestamp:** ${TIMESTAMP}
-**Config:** ik_llama.cpp pr-1288 · Qwen3.5-397B UD-IQ2_M · ngl=0 (CPU-only) · --no-mmap · t=$(nproc)
+**Config:** ik_llama.cpp main · Qwen3.5-397B UD-IQ2_M · ngl=0 (CPU-only) · --no-mmap · t=$(nproc)
 
 ## Part A — Startup timing
 

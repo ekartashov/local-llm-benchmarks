@@ -11,14 +11,13 @@
 # OS:      Linux, kernel 6.x
 #
 # ── Engine ─────────────────────────────────────────────────────────────────────
-# ik_llama.cpp, branch pr-1288 (Qwen3.5 MoE / GDN support)
+# ik_llama.cpp, branch main (Qwen3.5 MoE / GDN support)
 # Binary:  /srv/ai/projects/ik_llama.cpp/build/bin/llama-server
 # Bench:   /srv/ai/projects/ik_llama.cpp/build/bin/llama-bench
 #
 # ── Build instructions ─────────────────────────────────────────────────────────
 # cd /srv/ai/projects/ik_llama.cpp
-# git fetch origin pull/1288/head:pr-1288
-# git checkout pr-1288
+# git checkout main && git pull origin main
 # cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release
 # cmake --build build --config Release -j$(nproc)
 # # Verify Qwen3.5 support:
@@ -111,7 +110,7 @@ if [ ! -x "${BINARY}" ]; then
     log "ERROR: Binary not found at ${BINARY}"
     log "Build instructions:"
     log "  cd ${IK_DIR}"
-    log "  git fetch origin pull/1288/head:pr-1288 && git checkout pr-1288"
+    log "  git checkout main && git pull origin main"
     log "  cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release"
     log "  cmake --build build --config Release -j\$(nproc)"
     exit 1
@@ -294,7 +293,7 @@ metrics = {
     "timestamp": "${TIMESTAMP}",
     "config": {
         "engine": "ik_llama.cpp",
-        "engine_branch": "pr-1288",
+        "engine_branch": "main",
         "engine_commit": "see git log at /srv/ai/projects/ik_llama.cpp",
         "engine_binary": "${BINARY}",
         "model": "unsloth/Qwen3.5-397B-A17B-GGUF UD-IQ2_M",

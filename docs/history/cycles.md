@@ -14,7 +14,7 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 **Decisions from real data:**
 - 65K context confirmed for Coder Extended mode.
-- Convergence concurrent requests: pr-1288 crashes at N≥2. Production must use N=1 for client concurrency until upstream fix.
+- Convergence concurrent requests: older branches crashed at N≥2. Production must use N=1 for client concurrency until `main` branch fix is verified.
 - Coder/Thinker max-num-seqs: UNKNOWN. T_PAR1 rerun required.
 
 ---
@@ -58,9 +58,9 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 - **Aggregate TPS**: 15.59 tokens/sec at concurrency=4.
 - **Scaling**: 1.12x scaling (vs 13.9 t/s single).
-- **Insight**: llama-server in the pr-1288 build efficiently amortizes the DDR5 expert-fetch cost across the batch. The MoE architecture is multi-user viable on CPU.
+- **Insight**: llama-server in the previous ik_llama.cpp build efficiently amortizes the DDR5 expert-fetch cost across the batch. The MoE architecture is multi-user viable on CPU.
 
-**NOTE (added in R27/doc-tidy):** T_CV4 measured sequential pipelining into server's `-np 4` internal slots (client requests sequential). T_PAR1 showed truly concurrent client requests crash pr-1288 at N≥2 (GGML_ASSERT). The 15.6 t/s result reflects pipelining throughput, NOT true parallelism. Production `-np 4` is valid for throughput; true concurrent capacity is N=1.
+**NOTE (added in R27/doc-tidy):** T_CV4 measured sequential pipelining into server's `-np 4` internal slots (client requests sequential). T_PAR1 showed truly concurrent client requests crashed older branches at N≥2 (GGML_ASSERT). The 15.6 t/s result reflects pipelining throughput, NOT true parallelism. Production `-np 4` is valid for throughput; true concurrent capacity is N=1.
 
 ---
 
@@ -224,9 +224,9 @@ Key evidence: Benjamin Marie independent evaluation found UD-IQ2_M on 397B vs BF
 
 Model file: `/srv/ai/models/hub/models--unsloth--Qwen3.5-397B-A17B-GGUF/snapshots/da33c16fa4440f831149fcf53b98a22bc07785e5/UD-IQ2_M/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf` (~30GB first file, ~123GB total across 4 files).
 
-**Finding 3: Engine selection — ik_llama.cpp pr-1288, not vLLM.** vLLM `--cpu-offload-gb` unsuitable for 123GB model on 64GB VRAM (constant PCIe weight-chunk round-trips). ik_llama.cpp's `--cpu-moe` keeps MoE expert weights in RAM while putting hot path (attention, norms, embeddings) on GPU. mainline ik_llama.cpp HEAD (v4427) does NOT support Qwen3.5 GDN. Mainline llama.cpp (b8851) supports it but lacks ik_llama.cpp's fused MoE kernels. Solution: PR #1288 on ik_llama.cpp adds both.
+**Finding 3: Engine selection — ik_llama.cpp main, not vLLM.** vLLM `--cpu-offload-gb` unsuitable for 123GB model on 64GB VRAM (constant PCIe weight-chunk round-trips). ik_llama.cpp's `--cpu-moe` keeps MoE expert weights in RAM while putting hot path (attention, norms, embeddings) on GPU. mainline ik_llama.cpp HEAD (v4427) does NOT support Qwen3.5 GDN. Mainline llama.cpp (b8851) supports it but lacks ik_llama.cpp's fused MoE kernels. Solution: ik_llama.cpp `main` now incorporates both.
 
-**Finding 4: ik_llama.cpp pr-1288 flag changes vs assumed command.**
+**Finding 4: ik_llama.cpp flag changes vs assumed command.**
 - `-fa` now requires a value but is on by default — omit entirely
 - `-fmoe` is gone — fused MoE is on by default, disable with `-no-fmoe`
 - `--cpu-moe` is the clean alternative to the `-ot` regex

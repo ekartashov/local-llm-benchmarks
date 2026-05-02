@@ -83,7 +83,7 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 - **VLLM_USE_V1=0 mandatory:** V1 engine unstable on Blackwell sm_120 for our models. Always set in deploy.sh.
 - **VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 mandatory for TP=2:** Prevents OOM during CUDA graph capture.
 - **--swap-space blocked:** Flag unrecognized in vLLM 0.19.0 (R-V0 engine path). 65K is the hard context ceiling for Extended Arclight.
-- **Convergence always-resident:** 83s cold start is too high for on-demand routing. Keep as always-resident service. Context ceiling 128k tokens. True concurrency = N=1 per client (pr-1288 crashed at N≥2; investigating if `main` branch fix resolves this).
+- **Convergence always-resident:** 83s cold start is too high for on-demand routing. Keep as always-resident service. Context ceiling 128k tokens. True concurrency = N=1 per client (parallel request support limited by upstream engine); investigating if `main` branch fix resolves this.
 
 ## Known bad / excluded
 
