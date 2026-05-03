@@ -1,0 +1,18 @@
+{
+  "task_id": "th_h08_ansible_fact_cache_race",
+  "gold_answer": "(a) The failure mechanism is JSON fact cache file corruption via concurrent write without file locking. With forks=50, Ansible runs 50 worker processes in parallel. Each worker writes its gathered facts to /tmp/ansible_facts/<hostname>.json using open(path, 'w') followed by write() — truncate-then-write, without advisory file locking (fcntl LOCK_EX). When two workers write to the same hostname file concurrently (e.g., db-primary's facts are being refreshed while another worker reads the file for hostvars lookup), a reader can observe an empty or partially-written JSON file. json.loads() of an empty or truncated file returns None or an empty dict. Ansible's cache layer returns None for the cached value, making ansible_default_ipv4 deserialize as None.\n\n(b) The race only manifests when a worker for one of the 200 Play 2 hosts reads db-primary.json during the exact millisecond window when another worker is writing it. With 50 concurrent workers and 200 hosts in Play 1, db-primary's write window is microseconds-to-milliseconds. Only workers that happen to read the file during that window see corruption. The 1-in-20 failure rate reflects the probabilistic nature of this timing coincidence — on most runs, the write completes before any concurrent reader accesses the file.\n\n(c) In order of preference: (1) Use a concurrency-safe fact cache backend: fact_caching=redis or fact_caching=memcached. These backends are atomic at the operation level and eliminate the race entirely — not by reducing probability but by removing the file I/O race condition. (2) Separate db-primary fact gathering into a dedicated play with hosts: db-primary (serial: 1 is not needed — just running it as a separate play ensures its facts are written before the 200-host play starts). This is safe because Ansible plays run sequentially: Play 1b finishes before Play 2 begins. (3) Use set_fact with cacheable: yes for the specific IP address fact rather than relying on implicit gather_facts caching. This is more targeted but still subject to the same race if gather_facts runs concurrently. Option 1 is preferred because it eliminates the race; options 2 and 3 reduce the attack surface without eliminating the underlying unsafe file I/O.",
+  "key_discriminators": [
+    "Must identify the specific file operation: truncate-then-write (open with 'w') without file locking — not 'concurrent writes' vaguely",
+    "Must explain WHY jsonfile is unsafe: no LOCK_EX, not that Ansible has a general bug",
+    "Must correctly recommend redis/memcached as the fix that ELIMINATES the race (not reduces probability)",
+    "Must distinguish the 'separate play' approach (correct, eliminates timing) from 'serial: 1 on the 200-host play' (wrong layer)"
+  ],
+  "scoring_rubric": {
+    "5": "Identifies truncate-then-write without locking, explains timing window, recommends redis/memcached first, correctly explains separate play approach",
+    "4": "Identifies file locking issue, recommends redis/memcached, explains probability — misses the truncate-then-write specific detail or confuses serial: 1 scope",
+    "3": "Identifies 'race condition in fact cache' and 'concurrent writes', suggests redis, but cannot explain the specific file operation or why the rate is 1-in-20",
+    "2": "Suspects caching issue but proposes forks=1 or serial: 1 globally (solves the problem but is not the correct fix)",
+    "1": "Identifies Ansible caching as relevant but cannot explain the race",
+    "0": "Wrong diagnosis (e.g., blames hostvars syntax or YAML parsing)"
+  }
+}

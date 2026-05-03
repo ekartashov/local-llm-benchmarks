@@ -4,16 +4,16 @@
 
 ---
 
-## Current production configuration (R27, 2026-04-26)
+## Current production configuration (R31, 2026-05-02)
 
 | Role | Model | Config | Port | TPS | Status |
 |------|-------|--------|------|-----|--------|
 | Arclight Coder | Qwen3.6-35B-A3B-AWQ | vLLM TP=2 GPU0+1, fp8 KV, ctx=32768 | 30000 | 232 t/s | SETTLED |
-| Arclight Thinker | Qwen3.6-27B-AWQ | vLLM TP=1 GPU1, fp8 KV, cp-ON, max-num-seqs 4 | 30001 | 77 t/s seq=1 / 269 t/s N=4 | SETTLED |
+| Arclight Thinker | Qwen3.6-27B PrismaQuant-5.5bit (rdtand) | vLLM TP=1 GPU1, V0 engine, fp8 KV, cp-ON, max-num-seqs 4 | 30001 | 51 t/s seq=1 / 199 t/s N=4 | SETTLED (BENCH_12) |
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
 | Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main (merged DeltaNet support), -ngl 999 --cpu-moe, -np 4, -t 32 | 8002 | 14 t/s | SETTLED |
 
-**Open questions:** T_MTP1/T_MTP2 HIGH — MTP n=1 on AWQ thinker/coder (+27% TPS potential, verify vLLM #40756 fix first). T_PQ1 MEDIUM — PrismaQuant thinker (CUDA 13.0 rebuild). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp).
+**Open questions:** T_MTP1 HIGH — MTP n=1,2,3 on PrismaQuant thinker (AWQ superseded; n=3 optimal per author; use T_MTP1 TPS counting script). T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder (0/3 probes). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp). BENCH_16 SETTLED — GLM-4.7-Flash (30B-A3B) verified on ik_llama.cpp, 176 t/s, 5/5 tool-calling.
 
 ---
 
@@ -76,7 +76,7 @@
 
 ## Key gotchas (things easy to get wrong — scan this list before acting)
 
-1. **T_PAR1 Coder/Thinker numbers are fabricated** — do not cite "1,196 t/s at N=8" or "698 t/s at N=4". No measurement exists. Rerun required.
+1. **T_PAR1 real data exists (BENCH_01–03, 2026-04-28):** Coder TP=2: N=1 241 t/s → N=8 1,205 t/s (no saturation). Thinker max-num-seqs=4: 269.4 t/s at N=4. Old "fabricated" warning is retired — do NOT repeat it.
 2. **`--swap-space N` is unrecognized in vLLM 0.19.0** (R-V0 engine path). Context beyond 65K requires a vLLM version bump.
 3. **TP=2 is broken for GDN (Qwen3.6-27B) regardless of chunked-prefill setting** — H-TP2 confirmed T2.4g. Do not attempt thinker TP=2 without a non-GDN replacement.
 4. **vLLM uvloop patch is mandatory for CRIU** — do not revert `api_server.py` / `v1/utils.py` asyncio changes; always export `UV_USE_IO_URING=0`.

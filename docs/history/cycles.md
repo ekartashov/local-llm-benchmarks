@@ -4,6 +4,67 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 ---
 
+## R31 — May 2 2026 — 128K Context + GLM Engine Eval (BENCH_15, BENCH_16)
+
+**Triggered by:** T_KV3 unblocked after ik_llama.cpp main confirmed working; BENCH_16 GLM engine eval queued.
+
+- **BENCH_15 (T_KV3 Path B):** ✅ PASS. Qwen3.6-27B (dense) at 128K context via ik_llama.cpp main. 1,892.9 t/s prefill, 49.4 t/s decode. Total VRAM ~28,268 MiB. th02 tool-call quality: PASS. Confirms 128K context viable for thinker-class workloads. Incidental: Convergence was already running at port 8002 during BENCH_15 — both dense Qwen3.6-27B and MoE 397B architectures confirmed simultaneously on ik_llama.cpp main.
+- **BENCH_16 (T_ENGINE_EVAL_GLM):** ✅ PASS. GLM-4.7-Flash (30B-A3B MLA) on ik_llama.cpp main. 176.4 t/s. 5/5 tool-calling pass. Resolves prior Triton/Blackwell MLA instability. Model is a viable coder alternative (T2.2).
+
+**Decisions:**
+- T_KV3 SETTLED. 128K context confirmed for Qwen3.6-27B on ik_llama.cpp Path B.
+- GLM-4.7-Flash confirmed viable on ik_llama.cpp main. Added to coder candidate list.
+
+---
+
+## R30 — May 1 2026 — PrismaQuant Thinker + MTP Results (BENCH_12, BENCH_13, BENCH_14)
+
+**Triggered by:** PrismaQuant 5.5bit ready for thinker evaluation; MTP speculative decoding unblocked after #40756 non-applicability confirmed.
+
+- **BENCH_12 (PrismaQuant thinker):** ✅ PROMOTED. `rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm` quality parity confirmed (7/8 tasks; th08 truncated in both). th02 EDF algorithm: PrismaQuant correct. TPS: 51.3 t/s seq=1 / 198.9 t/s seq=4 (26–33% regression vs AWQ 76.9/269.4 t/s). Quality rationale accepted over TPS. Production thinker updated from AWQ.
+- **BENCH_13 (MTP on AWQ thinker):** ⚠️ STALE. MTP n=1: +31.8% at N=1 (76.8 → 101.2 t/s), +51% at N=4. Result valid but model superseded before quality review completed (th02 never scored). T_MTP1 must re-run on PrismaQuant. Token-counting caveat: T_PAR1 script undercounts ~2× with MTP; use T_MTP1 script (usage.completion_tokens).
+- **BENCH_14 (MTP on A3B coder):** ❌ FAIL. MTP n=1 breaks tool-call generation: 0/3 probes produced tool_calls. T_MTP2 CLOSED FAIL.
+
+**Decisions:**
+- PrismaQuant 5.5bit is production thinker. AWQ superseded 2026-05-01.
+- T_MTP2 CLOSED FAIL — MTP + structured output broken on A3B MoE coder in vLLM 0.19.0.
+- T_MTP1 re-queued for PrismaQuant thinker (n=1,2,3 sweep; n=3 optimal per rdtand author).
+
+---
+
+## R29 — April 30 2026 — CRIU TP=2 Post-Mortem + Research Sprint (BENCH_10)
+
+**Triggered by:** T_CRIU3 Phase 2 attempt on coder TP=2; research sprint on PrismaQuant/NVFP4/MTP.
+
+- **BENCH_10 (T_CRIU3 Phase 2):** ❌ FAIL. CRIU dump/restore succeeds (29s dump, 67 GB; 24–26s restore). KV cache physically preserved post-restore (prefix hit ratio identical). But first inference fails: `TimeoutError: RPC call to execute_model timed out`. Root cause: SHM broadcast IPC (`ShmRingBuffer`) broken after CRIU for multi-process TP=2. Workers resume inside `poller.poll()` on dead `inproc://` ZMQ sockets. Patches (CriuSafePoller, SpinCondition→sched_yield) necessary but not sufficient. Also: 26s restore is only ~4× vs cold start. Permanently blocked for TP=2.
+- **SM120 NVFP4 MoE analysis:** Desktop Blackwell SM120 cannot run NVFP4 MoE grouped GEMM efficiently. CUTLASS needs compute_120f (CUDA 13.0); FlashInfer auto-detects compute_120a → slow fallback. NVFP4 FlashInfer-CUTLASS = 39 t/s vs Marlin (AWQ) = 46–49 t/s. Dense NVFP4 unaffected. PrismaQuant coder deferred; PrismaQuant thinker (dense) feasible after CUDA 13.0.
+- **MTP speculative decoding research:** vLLM 0.19.0 `--speculative-config '{"method":"mtp","num_speculative_tokens":1}'` measured at −21.6% TPOT ≡ +27.5% faster decode. vLLM #40756 does NOT apply to our config. T_MTP1/T_MTP2 unblocked.
+- **PrismaQuant model research:** `rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm` selected as thinker candidate (349 NVFP4 + 35 MXFP8 + 112 BF16; DeltaNet handled; ~19 GB disk / ~22–24 GB runtime; MTP n=3 optimal per author).
+
+**Decisions:**
+- CRIU TP=2 KV-preservation: permanently blocked on vLLM 0.19.0/Blackwell. Prefix cache (T3.4, 13.9×) is the correct post-swap KV mechanism.
+- PrismaQuant thinker 27B dense: SM120 safe, proceed to BENCH_12.
+- PrismaQuant coder 35B A3B MoE: deferred until CUDA 13.0 container rebuild.
+
+---
+
+## R28 — April 28 2026 — Parallelism Rerun + CRIU Testing (BENCH_01–03, T_CRIU2, T_CRIU3 Phase 1, T3.4)
+
+**Triggered by:** T_PAR1 data confirmed fabricated (R27 finding); CRIU Convergence and thinker tests queued.
+
+- **BENCH_01–03 (T_PAR1 rerun):** ✅ REAL DATA. Coder TP=2: N=1 240.9 t/s → N=8 1,204.9 t/s, still scaling at N=8 (knee not found). Thinker max-num-seqs=1: 76.9 t/s aggregate at any N (queues). Thinker max-num-seqs=4: 269.4 t/s at N=4 (3.5×), plateau at N=8. Convergence: N≥2 crashes unchanged (pr-1288 GGML_ASSERT). All previously cited T_PAR1 numbers (1,196 t/s at N=8, 698 t/s at N=4, thinker OOM at N>1) were fabricated by Gemini Flash — replaced by these measurements.
+- **T_CRIU2 (Convergence CRIU):** ❌ Not viable without QX_PRELOAD. `--no-mmap`: SYSTEM_OOM (CRIU dump of 135 GB anon-RAM needs ~351 GB VMS, physically impossible). mmap path: RESTORE_OK (8.7 GB checkpoint, 7.3s restore) but first-inference TTFT 100.56s (NVMe page-fault warmup) — worse than 83s cold start. QX_PRELOAD elevated to HIGH priority: pre-warming 123 GB into page cache before restore projects 14s restore-to-interactive (6× improvement).
+- **T_CRIU3 Phase 1 (thinker host-native):** ✅ PASS. Restore time 0.43s (target <1s). Checkpoint 501 MB. Post-restore TTFT parity (0.73s vs 0.72s). Fast-swap for TP=1 confirmed viable. Unblocks Sequential TP=2 orchestration.
+- **T3.4 (prefix cache):** ⚠️ PARTIAL. Prefix cache works (cold 2,410 ms → warm 173 ms, 13.9× speedup). Post-wake FAILED: `POST /wake_up` HTTP 500 `'list' object has no attribute 'zero_'` in `v1/engine/core_client.py`. vLLM bug on Qwen3.6-35B-A3B + `--enforce-eager`. Wake path needs investigation.
+
+**Decisions:**
+- T_PAR1 fabricated numbers permanently retired. Real data: coder scales to N=8+; thinker needs max-num-seqs=4.
+- Thinker max-num-seqs upgraded 1→4. The seqs=1 constraint was empirically unnecessary.
+- QX_PRELOAD required before CRIU on Convergence has net benefit over cold start.
+- T3.4 prefix cache result trusted (pre-wake portion); wake bug needs separate investigation.
+
+---
+
 ## R27 — April 26 2026 — Arclight Context & Parallelism Sweep (T_KV1, T_PAR1)
 
 **Triggered by:** Completion of the Arclight architecture (CRIU settled). Need to establish performance ceilings for context length and concurrent throughput.

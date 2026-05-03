@@ -1,0 +1,18 @@
+{
+  "task_id": "th_h10_k8s_pdb_drain_deadlock",
+  "gold_answer": "(a) After pod-A is evicted and is rescheduled to node-3 but not yet Ready, the cluster state is: pod-A (node-3, Running/NotReady), pod-B (node-1, Running/Ready). PDB has minAvailable=2. The eviction API checks: currently_healthy (Ready pods) = 1 (pod-B only, since pod-A is not Ready) + any other replicas on node-2. Wait — let's be precise. If the deployment has 3 replicas: 2 on node-1 (pod-A and pod-B) and 1 on node-2 (pod-C). After evicting pod-A: pod-B (node-1, Ready), pod-C (node-2, Ready), pod-A' (node-3, Running/NotReady) = 2 Ready pods. PDB: minAvailable=2. Disruptions allowed = max(0, healthy - minAvailable) = max(0, 2 - 2) = 0. The eviction API rejects the eviction of pod-B. The drain is blocked: it cannot proceed with pod-B until another Ready pod exists.\n\n(b) Yes. Once pod-A' becomes Ready on node-3, healthy = 3 (pod-B, pod-C, pod-A'). Disruptions allowed = 3 - 2 = 1. The eviction API will now permit eviction of pod-B. kubectl drain's eviction loop retries periodically (default retry interval ~5s); it will automatically issue the eviction of pod-B and the drain will complete without operator intervention.\n\n(c) Options from least to most disruptive: (1) Wait — drain automatically unblocks when pod-A' becomes Ready. Risk: none, but may take minutes if the pod has a slow startup/readiness probe. (2) Temporarily patch the PDB: kubectl patch pdb myapp-pdb --type merge -p '{\"spec\":{\"minAvailable\":1}}'. Reduces minAvailable to 1, allowing disruptions_allowed=1. Restore after drain: kubectl patch pdb myapp-pdb --type merge -p '{\"spec\":{\"minAvailable\":2}}'. Risk: briefly reduces availability guarantee; if another disruption occurs simultaneously, only 1 pod is protected. (3) kubectl drain node-1 --disable-eviction — uses DELETE on the pod instead of the Eviction API, bypassing PDB checks entirely. Risk: PDB guarantee is fully bypassed; if pod-B cannot be rescheduled, you may have fewer than minAvailable pods for an extended period. (4) kubectl delete pod pod-B --force --grace-period=0 — immediately kills pod-B regardless of state. Risk: data loss if pod has in-flight state; should only be used if pod is already unresponsive.",
+  "key_discriminators": [
+    "Must correctly compute disruptions_allowed = healthy - minAvailable and show it is 0 when pod-A is NotReady",
+    "Must confirm drain automatically unblocks when pod-A becomes Ready (option b = yes, automatic)",
+    "Must list patch PDB as less disruptive than --disable-eviction (correct ordering)",
+    "Must note that --disable-eviction bypasses PDB entirely (not just reduces minAvailable)"
+  ],
+  "scoring_rubric": {
+    "5": "Correctly traces disruptions_allowed calculation with pod-A NotReady, confirms auto-unblock, lists all 4 options in correct order with risks",
+    "4": "Correctly explains the deadlock mechanism and auto-unblock — lists 2-3 unblocking options but misses one or orders them incorrectly",
+    "3": "Correctly identifies PDB blocks the eviction with correct mechanism, knows drain unblocks — but cannot enumerate options beyond 'patch PDB' or 'wait'",
+    "2": "Identifies PDB as the blocker but cannot compute disruptions_allowed correctly or misses that drain auto-retries",
+    "1": "Knows drain and PDB interact but cannot explain the blocking condition",
+    "0": "Wrong diagnosis"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "task_id": "th_h07_openstack_dvr_garp",
+  "gold_answer": "(a) The 45-60 second gap is caused by stale MAC/ARP cache entries in TOR (Top of Rack) switch hardware. In DVR, each compute node hosting an instance with a floating IP has a local fip-agent-gw port with a unique MAC address. When the FIP migrates from Node A to Node B, Neutron triggers a gratuitous ARP (GARP) from Node B's fip-agent-gw to announce the new MAC for the FIP's IP. If the GARP is dropped (due to a transient MAC learning storm, VLAN misconfiguration, or port security filtering), the TOR switch continues forwarding packets destined for the FIP to Node A's MAC. Node A no longer has the FIP port, so packets are dropped. Traffic resumes when the TOR switch's MAC aging timer expires (commonly 30-300s depending on vendor/config) and the switch re-learns the correct MAC from new traffic. The 45-60s window matches typical switch MAC aging defaults.\n\n(b) Different external clients reach the FIP through different physical paths: different TOR switches, upstream routers, or ISP peering points. Clients routed through a switch that successfully received and processed the GARP update their forwarding tables immediately. Clients routed through the specific switch that dropped or missed the GARP continue hitting the stale entry until aging. Network path asymmetry between clients (different egress routes, different TOR switches in multi-rack topologies) explains why some see the gap and others do not.\n\n(c) Neutron layer: increase send_arp_for_ha / send_gratuitous_arp_count (set to 5 with spacing, not burst) in neutron.conf so transient drops don't prevent all copies from arriving. Verify port security on fip-agent-gw ports does not filter GARPs (port security must allow the fip-agent-gw's MAC as source). OVS layer: ensure GARP exits on br-ex (external bridge) with correct VLAN tagging; check that OVS flow rules do not drop broadcast traffic before it reaches the physical port. Physical network layer: reduce MAC aging timer on TOR switches for the external VLAN (e.g., Cisco: arp timeout 30 on the SVI; Arista: mac address-table aging-time 30). Long-term: migrate to OVN, which handles FIP mobility via BFD-tracked tunnels and does not rely on GARP propagation through the physical fabric.",
+  "key_discriminators": [
+    "Must identify TOR switch MAC aging timer as the specific mechanism causing the 45-60s gap (not ARP cache on the instance or router only)",
+    "Must explain that GARP was generated but dropped/missed — not that Neutron failed to generate it (logs show success)",
+    "Must explain path asymmetry as the reason 30% vs 70% see the gap",
+    "Must prescribe fixes at all three layers: Neutron (repeat GARPs), OVS (port security / flow rules), physical switch (aging timer)"
+  ],
+  "scoring_rubric": {
+    "5": "Identifies TOR MAC aging as the mechanism, explains GARP drop (not generation failure), explains path asymmetry, prescribes all three layers of fix",
+    "4": "Identifies ARP/MAC staleness and aging timer, explains path asymmetry — misses one layer of fix or misattributes the GARP drop to Neutron not generating it",
+    "3": "Identifies 'ARP cache issue' generically, suggests sending more GARPs, but does not trace to TOR switch aging timer specifically or explain the 30/70 split",
+    "2": "Suspects network issue but attributes to instance ARP cache or router ARP (not TOR switch MAC table)",
+    "1": "Knows FIP migration involves ARP but cannot identify the specific failure point",
+    "0": "Wrong diagnosis"
+  }
+}

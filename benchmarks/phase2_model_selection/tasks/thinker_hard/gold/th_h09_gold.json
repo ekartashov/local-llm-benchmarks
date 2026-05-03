@@ -1,0 +1,18 @@
+{
+  "task_id": "th_h09_k8s_hpa_vpa_conflict",
+  "gold_answer": "(a) HPA computes CPU utilisation as: current CPU usage / requested CPU. VPA in Auto mode increases the pod's CPU request (e.g., from 200m to 400m). After VPA evicts and recreates pods with the higher request, the current CPU usage stays roughly the same (the workload hasn't changed), but the denominator increases. Example: 240m used / 200m requested = 120% -> triggers scale-out. After VPA: 240m used / 400m requested = 60% -> at target, HPA scales in. With fewer pods, each pod's actual CPU usage rises (same workload, fewer pods), pushing utilisation above target again, triggering HPA scale-out. VPA then sees the new (smaller, under-resourced) pods and evicts them to apply higher requests. The oscillation is a feedback loop between HPA's utilisation metric and VPA's resource request changes.\n\n(b) This is documented as unsupported, not a bug, because the two controllers have fundamentally incompatible objectives: HPA adjusts the number of pods based on utilisation of the current resource requests; VPA adjusts the resource requests themselves. Any change VPA makes to requests immediately invalidates HPA's utilisation signal. There is no correct ordering or lock mechanism that would make them compatible — the interaction is a design-level conflict, not an implementation bug. Kubernetes documents this explicitly: do not use HPA on CPU/memory metrics and VPA in Auto mode on the same Deployment.\n\n(c) Option 1: Use HPA only, with resource requests set manually and left unchanged. Trade-off: requests must be tuned manually; under-provisioning wastes resources, over-provisioning causes eviction pressure. Option 2: Use VPA only in Auto mode. Trade-off: VPA cannot add replicas — if the workload needs more parallelism, VPA only makes pods larger (vertical). This limits horizontal scalability. Supported combination: HPA on CUSTOM metrics (e.g., requests-per-second, queue depth) + VPA in Auto mode. Since HPA no longer uses CPU/memory utilisation as its signal, VPA's resource request changes do not affect HPA's scaling decisions. This requires instrumenting the application with custom metrics.",
+  "key_discriminators": [
+    "Must trace the exact formula: utilisation = current usage / REQUESTED (not limit), so VPA increasing requests drops utilisation",
+    "Must explain that this is a design-level incompatibility (incompatible objectives), not a fixable bug",
+    "Must correctly state the supported combination: HPA on custom metrics + VPA Auto (not 'disable one of them' as the only answer)",
+    "Must distinguish VPA Auto mode (evicts pods) from VPA Off mode (only provides recommendations)"
+  ],
+  "scoring_rubric": {
+    "5": "Traces the utilisation formula with request denominator, explains design-level incompatibility, describes HPA-custom-metrics + VPA as the supported combination",
+    "4": "Explains the request/utilisation feedback loop, correctly labels as unsupported — misses the custom metrics combination or VPA mode distinction",
+    "3": "Explains that VPA changes requests affect HPA, suggests using one or the other — does not explain the formula or the custom metrics option",
+    "2": "Identifies HPA and VPA conflict exists, suggests disabling one, but cannot explain the mechanism",
+    "1": "Knows HPA and VPA interact but cannot explain why",
+    "0": "Wrong diagnosis"
+  }
+}

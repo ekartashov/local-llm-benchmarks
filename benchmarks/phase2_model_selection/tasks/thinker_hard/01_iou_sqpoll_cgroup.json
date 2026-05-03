@@ -1,0 +1,6 @@
+{
+  "id": "th_h01_iou_sqpoll_cgroup",
+  "description": "io_uring SQPOLL kernel thread cgroup CPU accounting bypass",
+  "system_prompt": "You are a senior systems engineer with deep expertise in Linux internals, distributed systems, networking, and infrastructure operations. Think through the problem carefully — consider all interacting mechanisms before committing to an answer. Show your reasoning chain explicitly before stating conclusions.",
+  "user_message": "A containerized service runs in a cgroup v2 hierarchy with:\n  cpu.max = \"50000 100000\"   # 50% of one CPU\n\nThe service uses io_uring initialised with IORING_SETUP_SQPOLL | IORING_SETUP_SQ_AFF,\npinning the SQ poll thread to CPU 3.\n\nUnder sustained load, the host's top shows the container's own processes using ~45%\nof one CPU — within budget. But io_uring throughput is roughly 2× that of a comparable\nepoll-based service running at the same measured CPU%. Another tenant on the same host\nis being starved.\n\n(a) Explain precisely why this happens at the cgroup accounting level. Name the\n    specific kernel object responsible and where it is placed in the cgroup hierarchy.\n(b) What is the minimum-invasive fix that preserves SQPOLL semantics, and what\n    limitation does that fix have on kernels older than 6.3?"
+}

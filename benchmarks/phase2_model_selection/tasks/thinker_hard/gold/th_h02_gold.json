@@ -1,0 +1,18 @@
+{
+  "task_id": "th_h02_tcp_paws_nat",
+  "gold_answer": "(a) PAWS (Protection Against Wrapped Sequences, RFC 7323). When tcp_tw_reuse=1, the kernel may reuse a TIME_WAIT socket for a new connection with the same 4-tuple if the incoming SYN's TCP timestamp is STRICTLY GREATER THAN the last timestamp seen on the TIME_WAIT entry. If Client B's timestamp value is <= Client A's last timestamp (possible because they are different machines with independent clocks starting from boot), PAWS treats the SYN as a late/duplicate segment from the old connection and silently drops it. No RST is sent because the kernel considers this a retransmit of old data, not a new connection.\n\n(b) PAWS assumes that a given 4-tuple (src_ip:src_port -> dst_ip:dst_port) is used by a single endpoint with a monotonically increasing timestamp clock. NAT collapses multiple physical machines — each with an independent timestamp clock starting from their own boot time — behind one source IP. The assumption is broken: timestamp values from different machines behind the NAT are not ordered relative to each other.\n\n(c) The fix must be applied at the NAT layer: the NAT device must rewrite or normalize TCP timestamps so that all hosts behind it appear to share a single monotonically increasing clock (timestamp masquerading). A server-side fix cannot be made safe because from the server's perspective, the 4-tuple, source IP, and source port are all identical — there is no signal the server can use to distinguish Client B's new SYN from a duplicate of Client A's old traffic. Disabling tcp_tw_reuse on the server is a valid server-side mitigation but sacrifices the reuse optimization globally.",
+  "key_discriminators": [
+    "Must name PAWS specifically, not just 'TIME_WAIT reuse logic'",
+    "Must state the precise comparison: incoming SYN timestamp must be STRICTLY GREATER than the stored TIME_WAIT timestamp",
+    "Must explain WHY NAT breaks the invariant: independent clocks on different machines",
+    "Must correctly identify that no server-side fix preserves tcp_tw_reuse safely — only NAT-side timestamp rewriting or disabling the feature"
+  ],
+  "scoring_rubric": {
+    "5": "Names PAWS, states the exact comparison rule, explains the NAT clock independence problem, correctly identifies NAT-side timestamp rewriting as the only fix that preserves reuse",
+    "4": "Names PAWS and the comparison rule, explains NAT problem, but recommends disabling tcp_tw_reuse as primary fix without noting NAT-side alternative",
+    "3": "Identifies TIME_WAIT and tcp_tw_reuse interaction and NAT as problematic, but does not name PAWS or state the exact comparison rule",
+    "2": "Knows tcp_tw_reuse causes issues with NAT but attributes the drop to the wrong mechanism (e.g., 'TIME_WAIT prevents connection' rather than PAWS timestamp comparison)",
+    "1": "Knows there is a TIME_WAIT issue but cannot explain the NAT interaction",
+    "0": "Wrong diagnosis"
+  }
+}

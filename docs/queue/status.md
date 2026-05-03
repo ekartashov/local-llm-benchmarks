@@ -61,7 +61,8 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CV5 | DONE ✓ | NGL sweep complete. Expert offload (no --cpu-moe) OOMs as expected. |
 | T_ENGINE_EVAL | DONE ✓ | GLM-4.7-Flash re-evaluation: SETTLED (2026-05-02) — ik_llama.cpp resolves MLA instability. 176 t/s. |
 | QX_PRELOAD | OPEN (HIGH) | REQUIRED for CRIU on Convergence. T_CRIU2 mmap: 100s first-inference without pre-warm (worse than 83s cold start). With pre-warm (123 GB at 7.4 GB/s ≈ 17s): projected 14s restore-to-interactive. |
-| T_MTP1 | STALE ⚠ | BENCH_13 ran on AWQ (+31.8% at N=1, +51% at N=4) but AWQ is now superseded by PrismaQuant. Quality never scored. Re-run on PrismaQuant required. |
+| T_MTP1 | READY (BENCH_19) | BENCH_13 ran on AWQ (stale). BENCH_19 handoff written for PrismaQuant sweep n=1,2,3. Primary risk: VLLM_ENGINE_ITERATOR_SOURCE=LEGACY + speculative-config compatibility unknown. |
 | T_MTP2 | DONE ✗ | BENCH_14 2026-05-01. MTP breaks tool-call generation on A3B MoE coder (0/3 probes). TPS delta +4-7% irrelevant. Do not enable on coder. |
 | T_PQ1 | DONE ✓ | BENCH_12 2026-05-01. Quality parity confirmed (7/8 tasks; th02 correct). TPS -26 to -33% vs AWQ but quality accepted. Promoted to production thinker. |
 | T_PQ2 | DEFERRED | rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm. MoE NVFP4 grouped GEMM underperforms Marlin on SM120 (39 vs 46-49 t/s). Revisit when SM120 compute_120f kernel matures upstream. |
+| T_HARD1 | READY (BENCH_20) | 10-task hard systems engineering suite (Linux, networking, Raft, Proxmox, OpenStack, Ansible, K8s). AWQ vs PrismaQuant head-to-head. Gemini saves raw responses; Claude scores in research mode. |

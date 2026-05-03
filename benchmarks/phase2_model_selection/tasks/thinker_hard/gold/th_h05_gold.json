@@ -1,0 +1,18 @@
+{
+  "task_id": "th_h05_ext4_fsync_durability",
+  "gold_answer": "(a) YES — the 4KB content is guaranteed. With data=ordered and barrier=1, ext4's fsync() path: (1) writes dirty data pages to the block layer; (2) issues a flush/FUA to force the SATA volatile write cache to NAND; (3) writes the journal commit block to the journal; (4) issues a second barrier. Since the SATA drive correctly honours FLUSH CACHE EXT (stated in the problem), all 4KB are on persistent NAND before fsync() returns. The data pages are written before the journal commit (data=ordered guarantee), so the journal commit being durable implies the data pages are durable.\n\n(b) NOT guaranteed. fsync(fd) makes the file's inode and its data blocks durable. It does NOT fsync the parent directory inode. The directory entry — the dentry linking '/data/important.dat' to the file's inode number — lives in the directory's data block, which is a separate inode with its own dirty-page lifecycle. That directory block may still be in the page cache unflushed when power is lost. After reboot, the inode exists and is intact, but the directory entry is missing. ext4's journal recovery process finds the inode as an orphan (allocated inode, no directory reference) and DELETES it as part of orphan cleanup. The file content is gone despite the successful fsync(fd).\n\n(c) Also fsync the parent directory:\n  int dfd = open('/data', O_RDONLY | O_DIRECTORY);\n  fsync(dfd);\n  close(dfd);\nThis forces the directory's data block (containing the new dentry) through the journal and into persistent storage. The journal transaction covering the dentry creation is committed and flushed. After this, the directory entry is durable. The standard crash-safe file creation pattern is: write to temp file -> fsync temp file -> rename -> fsync parent directory. The rename is atomic at the filesystem level, and the directory fsync makes the rename durable.",
+  "key_discriminators": [
+    "Must distinguish file inode durability (guaranteed by fsync(fd)) from directory entry durability (NOT guaranteed)",
+    "Must know ext4 orphan cleanup: on recovery, an allocated inode with no directory entry is DELETED, not recovered",
+    "Must prescribe fsync on the DIRECTORY fd (O_DIRECTORY), not fsync on the file again",
+    "Bonus: mention the canonical pattern (write temp -> fsync -> rename -> fsync dir)"
+  ],
+  "scoring_rubric": {
+    "5": "Correctly answers yes/no/no with correct reasoning for each, explains orphan cleanup deletes the file, prescribes directory fsync with O_DIRECTORY, optionally mentions rename pattern",
+    "4": "Correctly answers all three, explains directory entry durability gap, prescribes directory fsync — but misses orphan cleanup detail or rename pattern",
+    "3": "Correctly answers (a) and (b) as yes/no, knows directory must be fsynced, but cannot explain orphan cleanup or the exact journal mechanism",
+    "2": "Correctly answers (a) yes but incorrectly answers (b) yes (unaware of directory entry durability gap)",
+    "1": "Knows fsync is involved but cannot distinguish inode vs directory entry durability",
+    "0": "Wrong on (a) or fundamentally confused about fsync guarantees"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "task_id": "th_h01_iou_sqpoll_cgroup",
+  "gold_answer": "The SQpoll thread (`iou-sqp-<pid>`) is a kernel thread spawned by the kernel on behalf of the io_uring instance. Kernel threads are placed in the root cgroup, not the creating process's cgroup. Therefore the SQpoll thread's CPU burns against the root cgroup's quota, not the container's cpu.max=50%. The container's own processes do minimal CPU work (posting SQEs, reaping CQEs), staying within budget. The SQpoll thread on CPU 3 is effectively uncapped from the cgroup's perspective.\n\n(b) Minimum-invasive fix: On kernels >= 6.3, io_uring kernel threads are accounted to the cgroup of the creating process — verify via /proc/<iou-sqp-pid>/cgroup. If the kernel is older, the only correct mitigation is to remove IORING_SETUP_SQPOLL for workloads where cgroup CPU isolation is a hard requirement. IORING_SETUP_SQ_AFF constrains WHERE the thread runs (CPU affinity) but does NOT fix the cgroup accounting — the thread still bills to root regardless of its CPU pinning. Doubling cpu.max to account for the SQpoll thread is also valid but requires capacity planning, not code.",
+  "key_discriminators": [
+    "Must identify that kernel threads go to the ROOT cgroup, not any parent cgroup of the creating process",
+    "Must distinguish IORING_SETUP_SQ_AFF (CPU affinity, not cgroup fix) from the accounting problem",
+    "Must know the kernel >=6.3 fix exists and how to verify it via /proc/<pid>/cgroup",
+    "Must not confuse the fix with cpuset.cpus pinning (different mechanism)"
+  ],
+  "scoring_rubric": {
+    "5": "Correctly identifies root cgroup placement of kernel threads, distinguishes affinity from accounting, mentions kernel 6.3 fix or /proc check, explains why the fix is limited pre-6.3",
+    "4": "Correctly identifies root cgroup issue, proposes removing SQPOLL as fix, but misses the kernel 6.3 fix or conflates affinity with accounting",
+    "3": "Identifies that the kernel thread escapes cgroup accounting but is vague about root cgroup vs parent cgroup placement, or confuses SQ_AFF with a fix",
+    "2": "Suspects a cgroup issue but attributes it to wrong mechanism (e.g., cpu.shares vs cpu.max, or thinks SQPOLL thread inherits the process cgroup)",
+    "1": "Identifies io_uring is involved but cannot explain the accounting gap",
+    "0": "Wrong diagnosis (e.g., attributes to cpu.max formula error, or suggests increasing the limit without identifying the root cause)"
+  }
+}

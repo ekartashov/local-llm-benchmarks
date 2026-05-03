@@ -1,0 +1,18 @@
+{
+  "task_id": "th_h04_xsnp_hitm_perf",
+  "gold_answer": "(a) Cross-core cache coherence stall (XSNP_HITM — hit in modified state on another core). The producer writes the packet data and the ready flag to the cache line, leaving it in MODIFIED state in the producer's L1 cache. When the consumer reads the ready flag, the MESI protocol requires the producer's L1 to flush the modified line to the LLC, after which the consumer fetches it. This cross-core transfer costs ~60-80 cycles on Raptor Lake (remote L2 hit via LLC). The LLC-load-miss counter does NOT fire because the line IS served by the LLC — but it arrives there from another core's private cache (a cache-to-cache transfer). This is 'remote hit in modified state' — nearly as costly as a true LLC miss, but invisible to the standard LLC-load-miss hardware counter. Because the flag and packet data share the same 64-byte cache line, every flag read by the consumer triggers this cross-core transfer.\n\n(b) Confirm with: perf stat -e mem_load_l3_hit_retired.xsnp_hitm. A high count confirms loads hitting lines in MODIFIED state on another core. The dedicated tool is: perf c2c record (run the workload under this) followed by perf c2c report — it surfaces the hottest cache lines with hitm (hit-in-modified) counts and identifies the producer/consumer load-store pair.\n\n(c) Minimum-invasive fix: pad the ready flag to its own 64-byte cache line — declare it as a separate struct member with __attribute__((aligned(64))) and pad to 64 bytes. This means the producer's writes to the flag do not share a cache line with the packet data, so the consumer's polling of the flag does not trigger a transfer of the entire 1500-byte packet's cache lines. The producer can write packet data to one cache line (now Modified only for the consumer's data read, which happens once per packet) and set the flag on a separate cache line. Add _mm_pause() in the polling loop to reduce bus traffic and yield to the memory subsystem between checks.",
+  "key_discriminators": [
+    "Must identify XSNP_HITM specifically — 'cache miss' or 'false sharing' without naming the specific coherence state is insufficient",
+    "Must explain WHY LLC-load-miss counter does not capture it: the line IS in the LLC, but arrives via cache-to-cache transfer",
+    "Must name perf c2c or the specific XSNP_HITM counter — not just 'use perf stat'",
+    "Must correctly prescribe cache line padding — not just 'use atomic operations' (already implied) or 'reduce sharing'"
+  ],
+  "scoring_rubric": {
+    "5": "Identifies XSNP_HITM, explains why LLC counter misses it (cache-to-cache transfer still hits LLC but from Modified state), names perf c2c or exact counter, prescribes cache line padding",
+    "4": "Identifies cross-core coherence issue and Modified state, names perf c2c, prescribes padding — but does not explain the LLC counter gap",
+    "3": "Identifies 'false sharing' or 'cache coherence' generically, suggests padding, but does not name XSNP_HITM or explain the counter gap",
+    "2": "Suspects memory/cache issue but diagnoses as LLC miss or TLB miss — contradicts the given data",
+    "1": "Mentions cache but cannot explain why standard counters don't show it",
+    "0": "Wrong diagnosis (branch misprediction, memory bandwidth, etc.)"
+  }
+}

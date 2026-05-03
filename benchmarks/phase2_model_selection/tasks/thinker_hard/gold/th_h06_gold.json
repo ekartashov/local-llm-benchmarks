@@ -1,0 +1,18 @@
+{
+  "task_id": "th_h06_proxmox_numa_hugepages",
+  "gold_answer": "(a) During live migration, QEMU on the target host starts and faults in migrated pages. Linux's first-touch NUMA policy allocates each page on the NUMA node local to the faulting thread. If the QEMU process is not constrained to socket 0 on the target (e.g., via numactl or cpuset), the QEMU threads may be scheduled on socket 1 cores, causing page allocations to land on socket 1. For 1G huge pages specifically: 1G huge pages must be pre-allocated from contiguous 1GB-aligned physically contiguous regions. These regions are typically reserved at boot via hugepages= kernel parameter or hugepagesz= on specific nodes. If socket 0 on the target has its 1G huge page pool exhausted by other VMs, the kernel falls back to socket 1's pool regardless of the faulting thread's NUMA node. The result: vCPUs pinned to socket 0 cores access memory resident on socket 1, incurring inter-socket NUMA latency (~40-80ns additional per access on typical dual-socket systems).\n\n(b) With numa=1, the guest OS sees the NUMA topology and its in-memory database pins its worker threads to guest NUMA node 0 (expecting local memory). After migration, guest NUMA node 0 is backed by host socket 1 physical pages. The guest's NUMA-aware optimizations concentrate all memory traffic on one guest NUMA node — which is backed by cross-socket memory — maximizing the cross-socket penalty. Without NUMA exposure to the guest, the workload would distribute across guest NUMA nodes, partially masking the host-side locality loss.\n\n(c) Pre-migration: (1) Pre-allocate 1G huge pages on target socket 0: echo N > /sys/devices/system/node/node0/hugepages/hugepages-1048576kB/nr_hugepages. (2) Set numapin for the VM's memory in Proxmox config. Post-migration: (1) Identify QEMU's PID and run numactl --membind=0 --cpunodebind=0 on the QEMU process, or use taskset to rebind its threads to socket 0 cores. (2) If a full fix is needed, perform an online NUMA memory migration: use numactl --membind=0 on a new QEMU process (requires VM restart). (3) Verify with numastat -p <qemu_pid>: numa_hit should dominate, numa_miss should be near zero after rebinding.",
+  "key_discriminators": [
+    "Must identify first-touch NUMA policy as the root cause of page placement during migration",
+    "Must explain the 1G huge page pre-allocation constraint: they come from pre-reserved pools per NUMA node, not dynamically from the faulting thread's node",
+    "Must explain that NUMA topology exposure (numa=1) worsens the impact by concentrating access on one guest node backed by cross-socket memory",
+    "Must distinguish pre-migration (huge page pre-allocation) from post-migration (numactl rebind) remediation"
+  ],
+  "scoring_rubric": {
+    "5": "Correctly explains first-touch policy, 1G huge page pool constraint, why numa=1 worsens impact, and both pre/post migration steps with sysfs paths",
+    "4": "Correctly explains first-touch and 1G pool constraint, prescribes pre-allocation and numactl rebind — misses the numa=1 amplification mechanism",
+    "3": "Identifies NUMA locality loss as the cause, suggests numactl or cpuset pinning, but misses the 1G huge page pool specifics",
+    "2": "Identifies NUMA as relevant but proposes vague fixes (e.g., 'enable NUMA pinning in Proxmox') without understanding the migration page fault mechanism",
+    "1": "Notes post-migration latency is common but cannot explain the mechanism",
+    "0": "Wrong diagnosis"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "task_id": "th_h03_raft_asymmetric_partition",
+  "gold_answer": "(a) A remains leader (term=7). B, C, D, E receive A's heartbeats over the working outbound link. Since they observe a live leader with the current term, their election timers never fire. A receives no higher-term message (its inbound is black-holed), so it never steps down. A continues sending heartbeats but receives no acknowledgments.\n\n(b) A CANNOT commit any writes. The Raft commit protocol requires the leader to receive acknowledgment from a majority (3 of 5 nodes) that they have appended the entry. A can send AppendEntries (outbound works) and followers append and respond, but A cannot receive those acknowledgments (inbound is black-holed). A never reaches quorum for the commit phase. commitIndex does not advance.\n\n(c) The client's write reaches A. A appends the entry to its own log, sends AppendEntries to B,C,D,E (they receive and append, responding with success — but A cannot receive these). After the client's RPC timeout, A returns a timeout error (or the client retries). The entry is appended to A's log but uncommitted. On all follower nodes, the entry is also appended but uncommitted (they wait for A's commit notification, which never comes because A cannot receive ACKs and thus never advances commitIndex). When the partition heals, A still holds the highest term (term=7); followers reconnect and accept A's leadership. A can now receive ACKs, commits the pending entry (if quorum responds), and followers apply it. If the client retried to another node during the partition (impossible here since B,C,D,E only accept writes via leader), it would get a redirect.\n\n(d) Pre-vote does NOT change answer (a). Pre-vote prevents a candidate from bumping the term when it would not win an election — it applies when a follower INITIATES a candidacy. In this scenario, B,C,D,E are NOT initiating elections because they receive A's heartbeats and believe the leader is alive. Pre-vote only activates when a follower's election timer fires (i.e., it stops receiving heartbeats). Since heartbeats arrive normally, pre-vote is never triggered and has no effect.",
+  "key_discriminators": [
+    "Must recognize the asymmetric partition means followers RECEIVE heartbeats -> they do NOT time out -> no new election",
+    "Must distinguish leader LIVENESS (A is alive as leader) from leader PROGRESS (A cannot commit)",
+    "Must trace the commit protocol: leader needs to RECEIVE acks from majority — sending is not enough",
+    "Must correctly scope pre-vote: it only triggers when a follower's election timer fires, which does not happen here"
+  ],
+  "scoring_rubric": {
+    "5": "Correctly handles all 4 parts: A stays leader (heartbeats received by followers), A cannot commit (cannot receive acks), client sees timeout with write uncommitted-but-appended, pre-vote irrelevant because no election timeout fires",
+    "4": "Correctly handles 3 of 4 parts; common miss is pre-vote (incorrectly says it would prevent something) or misses that the entry is appended on followers but uncommitted",
+    "3": "Gets (a) and (b) correct but confuses (c) or (d); or gets the asymmetry right but misses that followers append uncommitted entries",
+    "2": "Incorrectly states a new leader is elected (misses that heartbeats are received), or confuses commit with append",
+    "1": "Gets basic Raft leadership concepts but cannot reason about the asymmetric partition",
+    "0": "Wrong on fundamentals"
+  }
+}

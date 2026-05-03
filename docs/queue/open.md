@@ -10,7 +10,9 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ### T_MTP1 — mtp_speculative_thinker — OPEN (re-run on PrismaQuant)
 
-**Question:** Does MTP n=1 give measurable TPS improvement on the production thinker (PrismaQuant 5.5bit)?
+**Handoff:** `docs/handoffs/BENCH_19_T_MTP1_PRISMAQUANT_THINKER.md`
+
+**Question:** Does MTP n=1,2,3 give measurable TPS improvement on the production thinker (PrismaQuant 5.5bit)?
 
 **Context:** BENCH_13 (2026-05-01) ran on AWQ and showed +31.8% at N=1 / +51% at N=4. But:
 1. Production thinker is now PrismaQuant (promoted BENCH_12). Result doesn't apply.
@@ -42,6 +44,19 @@ Repeat with n=2 and n=3 to find the optimal setting.
 
 ---
 
+### T_HARD1 — thinker_hard_suite — OPEN (AWQ vs PrismaQuant head-to-head)
+
+**Handoff:** `docs/handoffs/BENCH_20_THINKER_HARD_SUITE_AWQ_VS_PQ.md`
+
+**Question:** Does PrismaQuant's GPTQ calibration produce measurably better reasoning than AWQ on hard multi-step systems engineering tasks? BENCH_12 showed parity on the standard th01–th08 suite — this suite is calibrated harder to find the differentiation point if one exists.
+
+**Tasks:** 10 tasks in `benchmarks/phase2_model_selection/tasks/thinker_hard/` covering: Linux kernel (io_uring/cgroup, ext4 fsync, CPU coherence), networking (TCP PAWS/NAT), distributed systems (Raft), Proxmox (NUMA + huge pages), OpenStack (DVR/GARP), Ansible (fact cache race), Kubernetes (HPA/VPA conflict, PDB drain deadlock).
+
+**Gold answers:** `benchmarks/phase2_model_selection/tasks/thinker_hard/gold/` — 10 files with answers, scoring rubrics (0–5), and key discriminators for each task.
+
+**Scoring:** NOT done by Gemini. Testing agent saves raw responses only. Research mode (Claude) scores against gold answers after the run.
+
+**Deps:** None. AWQ model must be available in `/srv/ai/models/` (was production until 2026-05-01, should still be present).
 
 ---
 

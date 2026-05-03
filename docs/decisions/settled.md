@@ -26,8 +26,11 @@ Core RETIRED (2026-04-25, R19): Extended Arclight fills the escalation role with
 ### Arclight Coder: Qwen3.6-35B-A3B-AWQ
 SETTLED (T2.5, 2026-04-18). 96.7% tool-call reliability, 100% quality completion, 237.1 t/s. Parser: `--tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice`. TP=2 mandatory on vLLM 0.19.0 (TP=1 → Reasoning Collapse in eager mode).
 
-### Arclight Thinker: Qwen3.6-27B-AWQ
-SETTLED (T2.4d, R17, 2026-04-25). 4.875/5 quality, 77.4 t/s. Config: TP=1 GPU1, fp8 KV, `--enable-chunked-prefill --max-num-seqs 4 --tool-call-parser qwen3_coder --reasoning-parser qwen3`. Requires `transformers>=5.5.4`.
+### Arclight Thinker: Qwen3.6-27B PrismaQuant-5.5bit — CURRENT PRODUCTION
+SETTLED (BENCH_12, R31, 2026-05-01). Quality parity confirmed (7/8 tasks; th08 truncated in both). TPS: 51.3 t/s seq=1 / 198.9 t/s seq=4 (26–33% regression vs AWQ). Quality rationale: th02 EDF algorithm correct; DeltaNet not corrupted. Config: `rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm`, TP=1 GPU1, V0 engine, fp8 KV, `--trust-remote-code --enable-chunked-prefill --max-num-seqs 4 --tool-call-parser qwen3_coder --reasoning-parser qwen3`. Full NVFP4 path expected to recover TPS gap after CUDA 13.0 container rebuild. MTP n=3 optimal per rdtand author — T_MTP1 rerun pending.
+
+### Arclight Thinker: Qwen3.6-27B-AWQ — SUPERSEDED 2026-05-01
+SETTLED (T2.4d, R17, 2026-04-25). 4.875/5 quality, 77.4 t/s. Config: TP=1 GPU1, fp8 KV, `--enable-chunked-prefill --max-num-seqs 4 --tool-call-parser qwen3_coder --reasoning-parser qwen3`. Requires `transformers>=5.5.4`. Reference numbers valid for comparisons.
 
 **max-num-seqs upgraded 1→4 (T_PAR1, R30, 2026-04-30):** BENCH_02/03 confirmed max-num-seqs=4 is safe: 269.4 t/s aggregate at N=4 (3.5× vs seqs=1), VRAM delta 4 MiB. The seqs=1 constraint was conservative and empirically unnecessary. At seqs=4, TTFT for N=1 requests is unchanged (73 ms). Production deploy should use `--max-num-seqs 4`.
 
