@@ -113,9 +113,11 @@ subprocess.Popen(
         --verbosity=3; then
         echo "[T_QX_PRELOAD] ERROR: CRIU Dump failed."
         for p in ${PIDS}; do sudo "${CUDA_CHECKPOINT}" --toggle --pid "$p" || true; done
+        sudo chown -R "$(id -u):$(id -g)" "${RESULTS_DIR}"
         rm -rf "${TMP_CKPT_DIR}"
         exit 1
     fi
+    sudo chown -R "$(id -u):$(id -g)" "${RESULTS_DIR}" "${TMP_CKPT_DIR}"
     
     # Standardize checkpoint file (using Podman format or directory?)
     # Since we use host-native CRIU, we store the directory or a tarball.
@@ -151,8 +153,10 @@ if ! sudo "${CRIU}" restore \
     --log-file "${RESULTS_DIR}/criu_restore_cold.log" \
     --verbosity=3; then
     echo "[T_QX_PRELOAD] ERROR: Cold restore failed."
+    sudo chown -R "$(id -u):$(id -g)" "${RESULTS_DIR}"
     exit 1
 fi
+sudo chown -R "$(id -u):$(id -g)" "${RESULTS_DIR}"
 
 # Resume GPU
 MAIN_PID=$(pgrep -f "vllm.entrypoints.openai.api_server.*--port ${PORT}" | head -1)
@@ -190,8 +194,10 @@ if ! sudo "${CRIU}" restore \
     --log-file "${RESULTS_DIR}/criu_restore_warm.log" \
     --verbosity=3; then
     echo "[T_QX_PRELOAD] ERROR: Warm restore failed."
+    sudo chown -R "$(id -u):$(id -g)" "${RESULTS_DIR}"
     exit 1
 fi
+sudo chown -R "$(id -u):$(id -g)" "${RESULTS_DIR}"
 
 # Resume GPU
 MAIN_PID=$(pgrep -f "vllm.entrypoints.openai.api_server.*--port ${PORT}" | head -1)
