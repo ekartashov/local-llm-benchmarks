@@ -8,39 +8,9 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ## HIGH priority
 
-### T_MTP1 — mtp_speculative_thinker — OPEN (re-run on PrismaQuant)
+### T_MTP1 — mtp_speculative_thinker — **DONE ✓ (BENCH_19, 2026-05-03)**
 
-**Handoff:** `docs/handoffs/BENCH_19_T_MTP1_PRISMAQUANT_THINKER.md`
-
-**Question:** Does MTP n=1,2,3 give measurable TPS improvement on the production thinker (PrismaQuant 5.5bit)?
-
-**Context:** BENCH_13 (2026-05-01) ran on AWQ and showed +31.8% at N=1 / +51% at N=4. But:
-1. Production thinker is now PrismaQuant (promoted BENCH_12). Result doesn't apply.
-2. th02 quality was never scored. Quality gate was incomplete.
-3. Author reports n=3 optimal for PrismaQuant (vs n=1 tested so far).
-
-**Scope:** Sweep n=1, 2, 3. Use `usage.completion_tokens` for token counting (T_PAR1 undercounts with MTP — confirmed in BENCH_13 analysis). Score th02 manually before recording PASS.
-
-**Deploy command (PrismaQuant + MTP n=1):**
-```bash
-export VLLM_USE_V1=0; export VLLM_ENGINE_ITERATOR_SOURCE=LEGACY
-VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-./infra/scripts/deploy.sh vllm gpu1 rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm \
-  --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
-  --enable-chunked-prefill --max-num-seqs 4 \
-  --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice \
-  --hf-overrides '{"architectures":["Qwen3_5ForCausalLM"]}' \
-  --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
-```
-
-Repeat with n=2 and n=3 to find the optimal setting.
-
-**Baseline (no MTP, PrismaQuant):** 51.3 t/s at N=1, 198.9 t/s at N=4 (BENCH_12).
-
-**Pass:** TPS ≥10% vs PrismaQuant baseline AND th02 scored correct.
-**Fail:** CUDA error, crash, tool-call breakage, or th02 semantic regression.
-
-**Note:** T_MTP2 (coder MTP) is CLOSED FAIL — MTP breaks tool calls on A3B MoE. No coder re-test planned.
+**Result:** MTP n=3 is optimal. 91.9 t/s N=1 (+79.1%), 314.8 t/s N=4 (+58.3%) vs PrismaQuant baseline. th02 reasoning intact. Tool calls: **5/5 PASS** under MTP n=3 (unlike the Coder which is 0/3 FAIL). MTP n=3 promoted to production. See `results/BENCH_19_mtp1_prismaquant_*/summary.md`.
 
 ---
 
@@ -111,7 +81,7 @@ VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 **Pass:** Quality ≥ 4.875/5 on thinker suite AND TPS within 10% of AWQ (quality win alone is sufficient — PrismaQuant at 5.5bit > AWQ 4bit per-bit quality).
 
-**Deps:** T_MTP1 complete (confirm MTP is stable before stacking with a new model).
+**Deps:** T_MTP1 ✓ DONE (BENCH_19 — MTP n=3 stable, no tool-call breakage).
 
 ---
 
@@ -152,7 +122,7 @@ VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ### QX_PRELOAD — nvme_checkpoint_preload_mechanism — OPEN (design + implement)
 
-**Context:** CRIU restore from page cache (RAM-warm checkpoint) = 0.28s. Restore from cold NVMe = proportional to checkpoint size (e.g., 135GB at 7,400 MB/s = ~18s for ik_llama.cpp --no-mmap). Pre-loading the checkpoint into OS page cache before the switch eliminates the disk latency.
+**Context:** BENCH_18 (2026-05-03) proved posix_fadvise pre-warming works for fat checkpoints: Thinker 31GB fat dump (full GPU state) reduced from 19.8s cold to 12.0s warm (1.65×). **Convergence is a different case:** the Convergence CRIU dump is only 8.7GB (mmap, dirty pages only), but restore hits 100s first-inference due to demand-paging of the 123GB GGUF model files from NVMe. QX_PRELOAD for Convergence must pre-warm the GGUF model files, not the checkpoint images. This has not been tested.
 
 **Hardware:** Lexar NM790 4TB (7,400 MB/s read). Loading 135GB → ~18s. Router needs ~10s advance notice to trigger pre-warm before the switch is visible to the user.
 

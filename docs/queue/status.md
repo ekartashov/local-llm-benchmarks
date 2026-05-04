@@ -60,8 +60,8 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CRIU3 Ph.2 | DONE ✗ | Coder TP=2: dump/restore OK (29s/67GB), KV preserved in VRAM, inference FAIL — SHM IPC broken post-restore (Blackwell forces V1 engine, ShmRingBuffer cross-process writes invisible after CRIU). 26s restore = 4× cold start. Not viable. |
 | T_CV5 | DONE ✓ | NGL sweep complete. Expert offload (no --cpu-moe) OOMs as expected. |
 | T_ENGINE_EVAL | DONE ✓ | GLM-4.7-Flash re-evaluation: SETTLED (2026-05-02) — ik_llama.cpp resolves MLA instability. 176 t/s. |
-| QX_PRELOAD | OPEN (HIGH) | REQUIRED for CRIU on Convergence. T_CRIU2 mmap: 100s first-inference without pre-warm (worse than 83s cold start). With pre-warm (123 GB at 7.4 GB/s ≈ 17s): projected 14s restore-to-interactive. |
-| T_MTP1 | READY (BENCH_19) | BENCH_13 ran on AWQ (stale). BENCH_19 handoff written for PrismaQuant sweep n=1,2,3. Primary risk: VLLM_ENGINE_ITERATOR_SOURCE=LEGACY + speculative-config compatibility unknown. |
+| QX_PRELOAD | OPEN (HIGH) | BENCH_18 proven posix_fadvise on Thinker fat checkpoint (31GB: 19.8s→12s). Convergence target is different: must pre-warm GGUF model files (123GB) not checkpoint images (mmap dump is only 8.7GB). Never tested on Convergence. |
+| T_MTP1 | DONE ✓ | BENCH_19 2026-05-03. PrismaQuant MTP n=3 optimal: 91.9 t/s N=1 (+79.1%), 314.8 t/s N=4 (+58.3%). VRAM stable. th02 reasoning intact. Tool calls: 5/5 PASS (unlike coder). MTP n=3 promoted to production. |
 | T_MTP2 | DONE ✗ | BENCH_14 2026-05-01. MTP breaks tool-call generation on A3B MoE coder (0/3 probes). TPS delta +4-7% irrelevant. Do not enable on coder. |
 | T_PQ1 | DONE ✓ | BENCH_12 2026-05-01. Quality parity confirmed (7/8 tasks; th02 correct). TPS -26 to -33% vs AWQ but quality accepted. Promoted to production thinker. |
 | T_PQ2 | DEFERRED | rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm. MoE NVFP4 grouped GEMM underperforms Marlin on SM120 (39 vs 46-49 t/s). Revisit when SM120 compute_120f kernel matures upstream. |

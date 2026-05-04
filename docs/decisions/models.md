@@ -26,9 +26,10 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
 - **Why coder wins:** SWE-bench Verified 73.4%, Terminal-Bench 51.5%, MCPMark 37.0%, WideSearch 60.1% — dominates every agentic benchmark relevant to this workload. Gemma4-31B ties on pure coding (LiveCodeBench 80.0 vs 80.4) but loses on all agentic tasks.
 
 ### Arclight Thinker: Qwen3.6-27B-PrismaQuant-5.5bit (rdtand)
-**SETTLED (BENCH_12, 2026-05-01).** Supersedes Qwen3.6-27B-AWQ.
-- **Performance:** 51.3 t/s seq=1; 198.9 t/s aggregate at N=4 (BENCH_12, V0 engine / marlin fallback — no CUDA 13.0 yet)
-- **Quality:** 7/8 tasks evaluated vs AWQ baseline, full parity. th02 correct. No regressions. Quality rationale for promotion: GPTQ calibration over AWQ yields sharper algorithmic reasoning; TPS regression (-26 to -33%) accepted.
+**SETTLED (BENCH_12 2026-05-01, updated BENCH_19 2026-05-03).** Supersedes Qwen3.6-27B-AWQ.
+- **Performance:** **91.9 t/s seq=1; 314.8 t/s aggregate at N=4** (BENCH_19, MTP n=3). Baseline without MTP: 51.3/198.9 t/s (BENCH_12).
+- **Quality:** 7/8 tasks evaluated vs AWQ baseline, full parity. th02 correct. No regressions. Quality rationale for promotion: GPTQ calibration over AWQ yields sharper algorithmic reasoning; TPS regression (-26 to -33% vs AWQ) was accepted at BENCH_12 and is now fully erased by MTP n=3 (+79% gain).
+- **Tool calls under MTP:** **5/5 PASS** (BENCH_19) — MTP does NOT break the `qwen3_coder` tool parser for this model (contrast: Coder MTP is 0/3 FAIL).
 - **Production config:**
   ```
   Model: rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm
@@ -39,12 +40,12 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
   --max-num-seqs 4
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
   --hf-overrides '{"architectures":["Qwen3_5ForCausalLM"]}'   # REQUIRED: model config declares VL arch
+  --speculative-config '{"method":"mtp","num_speculative_tokens":3}'  # BENCH_19: n=3 optimal
   env: VLLM_USE_V1=0 VLLM_ENGINE_ITERATOR_SOURCE=LEGACY       # V0 engine required (compressed-tensors)
   ```
 - **Extended Context Mode:** Verified at **128K context** (BENCH_15, 2026-05-02) using ik_llama.cpp `main` branch with `--tensor-split 0.5,0.5`. 1,892 t/s prefill.
 - **Why TP=1 only:** Same GDN constraint as AWQ — recurrent state sync broken across TP shards (T2.4g). Not a PrismaQuant issue.
-- **Why this wins over AWQ:** Quality parity at sharper reasoning (GPTQ calibration). Current TPS is V0/marlin-fallback — full NVFP4 path (CUDA 13.0) expected to recover TPS gap.
-- **T_MTP1 next:** MTP n=1 to n=3 sweep on this model. Author reports n=3 optimal; verify on SM120.
+- **Why this wins over AWQ:** Quality parity at sharper reasoning (GPTQ calibration). MTP n=3 now also eliminates the prior TPS regression vs AWQ.
 
 ### Arclight Thinker (previous): Qwen3.6-27B-AWQ (QuantTrio) — SUPERSEDED 2026-05-01
 - Quality 4.875/5, th02 correct 3/3, 77.4 t/s seq=1. Retain as fallback. See history for full profile.
