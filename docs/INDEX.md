@@ -9,11 +9,11 @@
 | Role | Model | Config | Port | TPS | Status |
 |------|-------|--------|------|-----|--------|
 | Arclight Coder | Qwen3.6-35B-A3B-AWQ | vLLM TP=2 GPU0+1, fp8 KV, ctx=32768 | 30000 | 232 t/s | SETTLED |
-| Arclight Thinker | Qwen3.6-27B PrismaQuant-5.5bit (rdtand) | vLLM TP=1 GPU1, V0 engine, fp8 KV, cp-ON, max-num-seqs 4 | 30001 | 51 t/s seq=1 / 199 t/s N=4 | SETTLED (BENCH_12) |
+| Arclight Thinker | Qwen3.6-27B PrismaQuant-5.5bit (rdtand) | vLLM TP=1 GPU1, V0 engine, fp8 KV, cp-ON, max-num-seqs 4, MTP n=3 | 30001 | 92 t/s seq=1 / 315 t/s N=4 | SETTLED (BENCH_19) |
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
 | Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main (merged DeltaNet support), -ngl 999 --cpu-moe, -np 4, -t 32 | 8002 | 14 t/s | SETTLED |
 
-**Open questions:** T_MTP1 HIGH — MTP n=1,2,3 on PrismaQuant thinker (AWQ superseded; n=3 optimal per author; use T_MTP1 TPS counting script). T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder (0/3 probes). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp). BENCH_16 SETTLED — GLM-4.7-Flash (30B-A3B) verified on ik_llama.cpp, 176 t/s, 5/5 tool-calling.
+**Open questions:** T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder (0/3 probes). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp). BENCH_16 SETTLED — GLM-4.7-Flash (30B-A3B) verified on ik_llama.cpp, 176 t/s, 5/5 tool-calling.
 
 ---
 

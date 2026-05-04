@@ -190,7 +190,7 @@ models:
     ctx_default: 32768
     engines: [vllm]              # vLLM 0.19.x with compressed-tensors; V0 engine required
     flags:
-      vllm: "--kv-cache-dtype fp8 --enable-chunked-prefill --max-num-seqs 4 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice --hf-overrides '{\"architectures\":[\"Qwen3_5ForCausalLM\"]}'"
+      vllm: "--kv-cache-dtype fp8 --enable-chunked-prefill --max-num-seqs 4 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice --hf-overrides '{\"architectures\":[\"Qwen3_5ForCausalLM\"]}' --speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":3}'"
       # --hf-overrides: REQUIRED — model config.json declares VL architecture; overrides to
       #   text-only to prevent vision encoder init (causes compressed-tensors NotImplementedError)
       # VLLM_USE_V1=0 + VLLM_ENGINE_ITERATOR_SOURCE=LEGACY: set in deploy env; V0 required for
@@ -201,7 +201,7 @@ models:
       mxfp8_linears: 35
       bf16_entries: 112
       calibration: "GPTQ-OBS + closed-form scale sweep, 0.33× RTN MSE"
-      mtp_optimal_n: 3           # n=2 leaves ~10% TPS; n=4 regresses (per author; unverified on SM120)
+      mtp_optimal_n: 3           # verified optimal on SM120 via BENCH_19
     publisher_trust: HIGH        # Rob Tand = original PrismaQuant author
     architecture_note: "DeltaNet layers explicitly handled in per-linear allocation"
     placement:
@@ -212,18 +212,18 @@ models:
       cuda: ">=13.0 for full NVFP4 kernel path (compute_120f) — without it falls back to marlin/cutlass"
       flashinfer: "0.6.5 with SM120 patches for optimal NVFP4 GEMM"
     measured:
-      single_gpu_seq1_tps: 51.3    # BENCH_12 (V0 engine, no MTP)
-      single_gpu_seq4_tps: 198.9   # BENCH_12
+      single_gpu_seq1_tps: 91.9    # BENCH_19 (V0 engine, MTP n=3)
+      single_gpu_seq4_tps: 314.8   # BENCH_19 (V0 engine, MTP n=3)
       quality_mean_7task: null     # human_review.md scores not filled; qualitative parity confirmed
-      th02_correct: true
-    test_items: [T_PQ1]
+      th02_correct: true           # BENCH_19 verified reasoning not corrupted by MTP
+      tool_call_pass_rate: 1.00    # BENCH_19 verified 5/5 pass under MTP
+    test_items: [T_PQ1, BENCH_19]
     notes: >
-      27B dense, GDN hybrid. SETTLED as production thinker 2026-05-01 (BENCH_12).
-      Supersedes Qwen3.6-27B-AWQ: quality at parity or better (sharper th02 EDF reasoning),
-      accepted TPS regression (-26 to -33% vs AWQ). Currently running V0 engine path
-      (marlin/cutlass fallback — CUDA 13.0 not yet available). Full NVFP4 path
-      (compute_120f) requires CUDA 13.0 container rebuild; expected to close TPS gap.
-      T_MTP1 next: MTP n=1 on PrismaQuant — author reports n=3 optimal; verify on SM120.
+      27B dense, GDN hybrid. SETTLED as production thinker (BENCH_12, updated BENCH_19).
+      Supersedes Qwen3.6-27B-AWQ: quality at parity or better (sharper th02 EDF reasoning).
+      BENCH_19 confirmed MTP n=3 completely erases the previous TPS regression (+79% gain)
+      and critically does NOT break tool calling (unlike the Coder model). Currently running
+      V0 engine path (marlin/cutlass fallback) — full NVFP4 path will further boost TPS.
 
   # ── CANDIDATE thinker ──────────────────────────────────────────────────
   glm45_air_awq:

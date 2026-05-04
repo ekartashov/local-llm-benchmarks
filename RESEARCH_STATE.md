@@ -32,9 +32,9 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 - **BENCH_14 FAIL (2026-05-01):** MTP n=1 on A3B MoE coder breaks tool-call generation. 0/3 probes produced tool_calls in response. TPS delta (+4–7%) irrelevant. MTP on coder is not viable until vLLM resolves the speculative-decoding / structured-output interaction. T_MTP2 is CLOSED FAIL — no re-test planned.
 
-- **MTP speculative decoding (R30, 2026-04-30):** Qwen3.6 models have native MTP heads. vLLM supports `--speculative-config '{"method":"mtp","num_speculative_tokens":1}'`. Measured on RTX 3090, vLLM 0.19.1: −21.6% TPOT ≡ **+27.5% faster decode rate** at n=1. For thinker at max-num-seqs=1 (no concurrency to hurt), this is a near-zero-cost gain — one flag, no model swap, no rebuild. **#40756 does NOT apply (R30 verified):** Bug conditions are FP8+TP4+n=5+25K tokens — none match our PrismaQuant+TP1+n=1 config. T_MTP1/T_MTP2 unblocked on current vLLM 0.19.0.
+- **BENCH_19 COMPLETE (2026-05-03):** MTP n=1,2,3 sweep performed on PrismaQuant 5.5bit thinker. Result: **n=3 is optimal**. TPS reached 91.9 t/s at N=1 (+79.1% vs baseline) and 314.8 t/s at N=4 (+58.3%), utterly erasing the previous 26-33% TPS regression against the AWQ baseline without waiting for CUDA 13.0 NVFP4 kernels. Reasoning quality (th02) passed. Critically, unlike the Coder model, the Thinker model (via `qwen3_coder` tool parser) passed 5/5 tool-calling probes under MTP n=3. **Action:** MTP n=3 promoted to production Thinker configuration.
 
-- **PrismaQuant model registry (R30, 2026-04-30):** Three candidates researched. All use rdtand/Rob Tand's PrismaQuant method (GPTQ+scale_sweep, 0.33× RTN MSE, per-linear sensitivity-driven allocation). Publisher trust: rdtand = original PrismaQuant author; cyburn = third-party using same method.
+- **MTP speculative decoding (R30, 2026-04-30):** Qwen3.6 models have native MTP heads. vLLM supports `--speculative-config '{"method":"mtp","num_speculative_tokens":X}'`. For the Thinker (PrismaQuant dense), MTP n=3 is highly successful (+79% N=1 TPS, tool calls intact). For the Coder (A3B MoE), MTP breaks structured tool calls. **#40756 does NOT apply (R30 verified):** Bug conditions are FP8+TP4+n=5+25K tokens — none match our PrismaQuant+TP1+n=1 config.
   - `rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm` — thinker CANDIDATE. 349 NVFP4 + 35 MXFP8 + 112 BF16. DeltaNet layers explicitly handled. ~19 GB disk / ~22–24 GB runtime. MTP n=3 optimal per author. Dense → SM120 safe.
   - `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` — coder CANDIDATE, DEFERRED. 192 NVFP4 + 45 MXFP8 + 274 BF16. MoE → SM120 MoE kernel not ready. Preferred over cyburn 4.9bit when SM120 kernel matures.
   - `cyburn/35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-PrismaQuant-4.75bit-vllm` — wrong slot. Coder base (35B A3B MoE) with Claude reasoning distillation. Not a thinker replacement. Quality on thinker task suite unknown. Keep as quality research candidate only.
@@ -68,7 +68,7 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 | Tier | Model | Config | TPS | Status |
 |------|-------|--------|-----|--------|
 | Arclight Coder | cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit | TP=2 GPU0+1, fp8 KV, ctx 32K | 237 t/s | SETTLED |
-| Arclight Thinker | rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm | TP=1 GPU1, V0 engine, fp8 KV, cp-ON, --max-num-seqs 4 | 51 t/s | SETTLED (BENCH_12 2026-05-01) |
+| Arclight Thinker | rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm | TP=1 GPU1, V0 engine, fp8 KV, cp-ON, --max-num-seqs 4, MTP n=3 | 92 t/s | SETTLED (BENCH_19) |
 | Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main (merged pr-1288), -ngl 999 --cpu-moe, -np 4, -t 32 | 14 t/s | SETTLED |
 | Extended Arclight | same as Coder, 65K ctx | CRIU hot restore from checkpoint, 0.28s | 238 t/s | SETTLED |
 
