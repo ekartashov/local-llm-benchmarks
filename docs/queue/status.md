@@ -65,4 +65,4 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_MTP2 | DONE ✗ | BENCH_14 2026-05-01. MTP breaks tool-call generation on A3B MoE coder (0/3 probes). TPS delta +4-7% irrelevant. Do not enable on coder. |
 | T_PQ1 | DONE ✓ | BENCH_12 2026-05-01. Quality parity confirmed (7/8 tasks; th02 correct). TPS -26 to -33% vs AWQ but quality accepted. Promoted to production thinker. |
 | T_PQ2 | DEFERRED | rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm. MoE NVFP4 grouped GEMM underperforms Marlin on SM120 (39 vs 46-49 t/s). Revisit when SM120 compute_120f kernel matures upstream. |
-| T_HARD1 | READY (BENCH_20) | 10-task hard systems engineering suite (Linux, networking, Raft, Proxmox, OpenStack, Ansible, K8s). AWQ vs PrismaQuant head-to-head. Gemini saves raw responses; Claude scores in research mode. |
+| T_HARD1 | DONE ✓ | BENCH_20 2026-05-03. PQ 41/50, AWQ 42/50 — statistical tie. PQ task 03 (Raft) truncated at 28K reasoning tokens (finish_reason=length); complete prior-run response scores 5/5 → PQ 43 vs AWQ 42. Production rationale unchanged: PQ+MTP at 92 t/s vs AWQ 77 t/s. **Lesson:** hard reasoning tasks need max_tokens≥32K and --max-model-len 131072. |

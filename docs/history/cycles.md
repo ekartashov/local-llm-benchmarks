@@ -4,6 +4,20 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 ---
 
+## R32 — May 3–4 2026 — Hard Suite Quality Eval + Context/KV Research (BENCH_20, T_HARD1)
+
+**Triggered by:** T_HARD1 ready; BENCH_19 MTP results confirmed PrismaQuant production; hard task suite calibrated to find PQ vs AWQ quality gap if one exists.
+
+- **BENCH_20 (T_HARD1 — hard systems engineering suite):** ✅ TIED. PQ 41/50, AWQ 42/50 on 10 hard tasks (Linux kernel, networking, Raft, Proxmox, OpenStack, Ansible, K8s). No quality gap found at maximum task difficulty. PQ task 03 (Raft asymmetric partition) truncated mid-reasoning at 28K tokens (finish_reason=length, empty response) — prior run (095341Z) has a complete response scoring 5/5; substituting it gives PQ 43 vs AWQ 42. Both automated scoring passes contained hallucinated evidence (XSNP_HITM for PQ task 04, --disable-eviction for AWQ task 10) — corrected manually against raw response files.
+- **Context/KV research:** `--max-model-len 131072` costs ~0 extra VRAM on Qwen3.6-27B hybrid (DeltaNet recurrent state is fixed-size, not stored in the KV pool — confirmed T3.1 Phase 1). fp8 KV only quantizes transformer layers; DeltaNet layers are unaffected. At 32K–64K context, fp8 vs bf16 quality delta negligible. bf16 halves the token pool (~165K vs ~330K combined capacity for fp8) — not justified at current workloads.
+
+**Decisions:**
+- T_HARD1 CLOSED. PQ and AWQ quality-equivalent across standard (BENCH_12) and hard (BENCH_20) suites. Production stays PQ+MTP n=3 for TPS advantage (92 vs 77 t/s).
+- Hard reasoning re-runs require `--max-model-len 131072` + `max_tokens≥32000`. Documented in settled.md.
+- fp8 KV is correct for production. bf16 KV not justified at current context lengths.
+
+---
+
 ## R31 — May 2 2026 — 128K Context + GLM Engine Eval (BENCH_15, BENCH_16)
 
 **Triggered by:** T_KV3 unblocked after ik_llama.cpp main confirmed working; BENCH_16 GLM engine eval queued.

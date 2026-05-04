@@ -2,7 +2,7 @@
 
 Living document. Current-state summary only. Full cycle log: `docs/history/cycles.md`.
 
-**Last complete cycle:** R31 (2026-05-02) — BENCH_15: T_KV3 (128K context) verified for Qwen3.6-27B via ik_llama.cpp main. 1.9K t/s prefill achieved.
+**Last complete cycle:** R32 (2026-05-04) — BENCH_20: T_HARD1 hard suite closed. PQ 41/50 vs AWQ 42/50 (tie). Context/KV research: --max-model-len 131072 is free on DeltaNet hybrid; fp8 KV correct for production.
 
 **Current mode:** Research
 
@@ -33,6 +33,8 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 - **BENCH_14 FAIL (2026-05-01):** MTP n=1 on A3B MoE coder breaks tool-call generation. 0/3 probes produced tool_calls in response. TPS delta (+4–7%) irrelevant. MTP on coder is not viable until vLLM resolves the speculative-decoding / structured-output interaction. T_MTP2 is CLOSED FAIL — no re-test planned.
 
 - **BENCH_19 COMPLETE (2026-05-03):** MTP n=1,2,3 sweep performed on PrismaQuant 5.5bit thinker. Result: **n=3 is optimal**. TPS reached 91.9 t/s at N=1 (+79.1% vs baseline) and 314.8 t/s at N=4 (+58.3%), utterly erasing the previous 26-33% TPS regression against the AWQ baseline without waiting for CUDA 13.0 NVFP4 kernels. Reasoning quality (th02) passed. Critically, unlike the Coder model, the Thinker model (via `qwen3_coder` tool parser) passed 5/5 tool-calling probes under MTP n=3. **Action:** MTP n=3 promoted to production Thinker configuration.
+
+- **BENCH_20 COMPLETE (2026-05-03):** T_HARD1 hard 10-task systems engineering suite. PQ 41/50, AWQ 42/50 — statistical tie. No quality differentiation found even at maximum task difficulty. PQ task 03 (Raft) truncated at 28K reasoning tokens (finish_reason=length) — prior run has complete 5/5 response; corrected total PQ 43 vs AWQ 42. Production decision unchanged: PQ+MTP n=3 at 92 t/s vs AWQ 77 t/s. **Key operational finding:** hard thinker tasks need `--max-model-len 131072` + `max_tokens≥32000` to avoid mid-reasoning truncation. Both free on this hardware (DeltaNet KV pool ~0 growth with context).
 
 - **MTP speculative decoding (R30, 2026-04-30):** Qwen3.6 models have native MTP heads. vLLM supports `--speculative-config '{"method":"mtp","num_speculative_tokens":X}'`. For the Thinker (PrismaQuant dense), MTP n=3 is highly successful (+79% N=1 TPS, tool calls intact). For the Coder (A3B MoE), MTP breaks structured tool calls. **#40756 does NOT apply (R30 verified):** Bug conditions are FP8+TP4+n=5+25K tokens — none match our PrismaQuant+TP1+n=1 config.
   - `rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm` — thinker CANDIDATE. 349 NVFP4 + 35 MXFP8 + 112 BF16. DeltaNet layers explicitly handled. ~19 GB disk / ~22–24 GB runtime. MTP n=3 optimal per author. Dense → SM120 safe.

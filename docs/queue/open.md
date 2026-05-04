@@ -14,19 +14,21 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ---
 
-### T_HARD1 — thinker_hard_suite — OPEN (AWQ vs PrismaQuant head-to-head)
+### T_HARD1 — thinker_hard_suite — **DONE ✓ (BENCH_20, 2026-05-03)**
 
-**Handoff:** `docs/handoffs/BENCH_20_THINKER_HARD_SUITE_AWQ_VS_PQ.md`
+**Result:** PQ 41/50, AWQ 42/50 — statistical tie on a 10-task hard systems engineering suite. No quality gap found even at maximum task difficulty. Production decision confirmed on TPS grounds: PQ+MTP n=3 at 92 t/s vs AWQ 77 t/s.
 
-**Question:** Does PrismaQuant's GPTQ calibration produce measurably better reasoning than AWQ on hard multi-step systems engineering tasks? BENCH_12 showed parity on the standard th01–th08 suite — this suite is calibrated harder to find the differentiation point if one exists.
+**Score detail:** PQ task 03 (Raft asymmetric partition) truncated at 28K reasoning tokens in the final run (finish_reason=length, empty response content). A complete response from the prior run (095341Z, finish_reason=stop) covers all 4 sub-questions correctly and scores 5/5, giving PQ 43 vs AWQ 42 with that substitution. The truncation was an infrastructure artifact (max_tokens ceiling), not a quality failure.
 
-**Tasks:** 10 tasks in `benchmarks/phase2_model_selection/tasks/thinker_hard/` covering: Linux kernel (io_uring/cgroup, ext4 fsync, CPU coherence), networking (TCP PAWS/NAT), distributed systems (Raft), Proxmox (NUMA + huge pages), OpenStack (DVR/GARP), Ansible (fact cache race), Kubernetes (HPA/VPA conflict, PDB drain deadlock).
+**Both evaluations contained scoring errors:** research-mode Claude hallucinated specific term evidence for PQ task 04 (claimed XSNP_HITM present — absent in raw response) and AWQ task 10 (claimed --disable-eviction present — absent). Corrected scores are 41/50 and 42/50 respectively.
 
-**Gold answers:** `benchmarks/phase2_model_selection/tasks/thinker_hard/gold/` — 10 files with answers, scoring rubrics (0–5), and key discriminators for each task.
+**Operational finding — context for re-runs:** The thinker's extended `<think>` budget on hard multi-step tasks can exceed 20–28K reasoning tokens. Any re-run of this suite must use:
+- `--max-model-len 131072` on the vLLM deploy (costs ~0 extra VRAM on this hybrid DeltaNet model)
+- `max_tokens: 32000` (or higher) in the task request payload
 
-**Scoring:** NOT done by Gemini. Testing agent saves raw responses only. Research mode (Claude) scores against gold answers after the run.
+Without these, Raft-class and cache-coherence tasks will truncate mid-reasoning. The 32K default context window leaves only ~31K tokens after the system prompt — enough for most tasks but not for the deepest reasoning chains.
 
-**Deps:** None. AWQ model must be available in `/srv/ai/models/` (was production until 2026-05-01, should still be present).
+**Raw results:** `results/T_HARD1_thinker_hard_suite_20260503T105322Z/` (final scored run). Prior partial run: `results/T_HARD1_thinker_hard_suite_20260503T095341Z/` (PQ only, tasks 01/04/08 truncated at max_tokens=20K).
 
 ---
 

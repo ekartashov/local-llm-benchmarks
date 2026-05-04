@@ -4,7 +4,7 @@
 
 ---
 
-## Current production configuration (R31, 2026-05-02)
+## Current production configuration (R32, 2026-05-04)
 
 | Role | Model | Config | Port | TPS | Status |
 |------|-------|--------|------|-----|--------|
@@ -13,7 +13,7 @@
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
 | Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main (merged DeltaNet support), -ngl 999 --cpu-moe, -np 4, -t 32 | 8002 | 14 t/s | SETTLED |
 
-**Open questions:** T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder (0/3 probes). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp). BENCH_16 SETTLED — GLM-4.7-Flash (30B-A3B) verified on ik_llama.cpp, 176 t/s, 5/5 tool-calling.
+**Open questions:** T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder (0/3 probes). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp). T_HARD1 CLOSED — PQ 41/50 vs AWQ 42/50 on hard suite, statistical tie; production choice on TPS grounds. Next deploy: add --max-model-len 131072 (free on DeltaNet hybrid).
 
 ---
 

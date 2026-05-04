@@ -4,6 +4,29 @@ Full procedures for DONE/CANCELLED/SKIPPED/PUNTED items. This is a grep/ripgrep 
 
 ---
 
+## T_HARD1 — thinker_hard_suite — DONE ✓ (BENCH_20, 2026-05-03)
+
+**Question:** Does PrismaQuant's GPTQ calibration produce measurably better reasoning than AWQ on hard multi-step systems engineering tasks?
+
+**Result:** No measurable gap. PQ 41/50, AWQ 42/50 — statistical tie. With the PQ task 03 truncation artifact corrected (complete response from prior run): PQ 43/50, AWQ 42/50.
+
+**Tasks run:** 10 tasks in `benchmarks/phase2_model_selection/tasks/thinker_hard/` — io_uring SQpoll cgroup, TCP PAWS/NAT, Raft asymmetric partition, XSNP_HITM cache coherence, ext4 fsync durability, Proxmox NUMA + huge pages, OpenStack DVR GARP, Ansible fact cache race, K8s HPA/VPA conflict, K8s PDB drain deadlock.
+
+**Scoring:** Research-mode Claude vs gold answers in `benchmarks/phase2_model_selection/tasks/thinker_hard/gold/` (0–5 rubric, key discriminators per task). Gemini never scores.
+
+**Scoring caveats:** Both automated evaluations contained errors — research-mode Claude hallucinated evidence of XSNP_HITM in PQ task 04 (absent in raw response) and --disable-eviction in AWQ task 10 (absent in raw response). Always verify key discriminators against raw response files in `results/*/pq/` and `results/*/awq/` before accepting a score.
+
+**Key finding — context truncation:** PQ task 03 (Raft asymmetric partition) truncated mid-reasoning at 28K reasoning tokens in the 105322Z run (finish_reason=length, empty response content). Prior run (095341Z) has a complete non-truncated response for the same task (finish_reason=stop, 4,663 tokens, all 4 sub-questions answered correctly). The truncation was a benchmark artifact (max_tokens ceiling), not a quality failure.
+
+**Operational requirement for re-runs:** Hard reasoning tasks require:
+- `--max-model-len 131072` on the vLLM deploy (costs ~0 VRAM on this hybrid DeltaNet model — confirmed T3.1 Phase 1)
+- `max_tokens: 32000` (or higher) in the task request payload
+- Failure to set these causes silent truncation on Raft, cache-coherence, and distributed-systems tasks
+
+**Artifacts:** `results/T_HARD1_thinker_hard_suite_20260503T105322Z/` (final scored run, PQ+AWQ). Prior partial run (PQ only): `results/T_HARD1_thinker_hard_suite_20260503T095341Z/`.
+
+---
+
 ## T1.1 — sleep_mode_operational_under_podman — DONE ✓
 
 **Previous attempt:** FAIL on 2026-04-17. Root cause (R5): `--enable-sleep-mode` was missing from `vllm serve`. `VLLM_SERVER_DEV_MODE=1` exposes HTTP routes but `--enable-sleep-mode` is what makes the engine use `CuMemAllocator`. Without it, `/sleep` is a no-op.
