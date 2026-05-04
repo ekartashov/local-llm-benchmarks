@@ -41,7 +41,7 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 - **T_CRIU2 COMPLETE (2026-04-28):** Two findings. (1) --no-mmap: CHECKPOINT_FAILED (SYSTEM_OOM). CRIU dump of a 135 GB anon-RAM process requires VMS to spike to ~351 GB — physically impossible on 188 GB RAM. (2) mmap (--no-mmap removed): RESTORE_OK. Checkpoint 8.7 GB in 7.6 s. Restore 7.3 s. First-inference TTFT 100.56 s (page-fault warmup from NVMe, 123 GB → ~17 s theoretical, but access is demand-paged across the full generation), rep-2 36.1 s, rep-3 7.7 s. **Critical implication:** without QX_PRELOAD, CRIU mmap restore-to-interactive (100 s) is WORSE than cold start (83 s). QX_PRELOAD is now a prerequisite for CRIU to benefit Convergence. With QX_PRELOAD (pre-warm 123 GB into page cache 17 s before restore): projected 14 s restore-to-interactive — 6× improvement. QX_PRELOAD elevated to HIGH priority.
 
-- **BENCH_18 COMPLETE (2026-05-03):** QX_PRELOAD NVMe Checkpoint Pre-warm verified. Tested on PrismaQuant 27B via `posix_fadvise(WILLNEED)`. A 31 GB checkpoint (full GPU+KV state) restored in 19.8s cold vs **12.0s warm** (1.65× speedup). The OS page cache pre-warming effectively hides NVMe latency. **Conclusion:** CRIU is highly viable for Convergence; projected 10s restore is massively superior to the 83s engine cold start.
+- **BENCH_18 COMPLETE (2026-05-03):** QX_PRELOAD NVMe Checkpoint Pre-warm mechanism verified — on the **Thinker** (vLLM, 31 GB checkpoint), NOT Convergence. `posix_fadvise(WILLNEED)` reduced restore from 19.8s cold to 12.0s warm (1.65× speedup). The summary includes a Convergence projection (~10s warm for a 123 GB dump at the same 0.61 ratio) but this was **not measured** — Convergence was never actually checkpointed in this bench. QX_PRELOAD mechanism is proven; Convergence-specific test is still OPEN.
 
 - **T_CRIU3 Phase 1 COMPLETE (2026-04-28):** Thinker host-native CRIU success. Restore time **0.43s** (target < 1s). Checkpoint size **501 MB** (CPU state only; GPU state retained via `cuda-checkpoint --toggle`). Post-restore TTFT parity (0.73s vs 0.72s). **Conclusion:** Fast-swapping is viable for TP=1 configurations using the host-native path. This unblocks Sequential TP=2 orchestration (swapping thinker/coder on GPU1).
 
@@ -106,7 +106,7 @@ See `docs/queue/open.md` for full specs. Key items:
 
 | Item | Priority | Status |
 |------|----------|--------|
-| QX_PRELOAD | HIGH | DONE ✓ | SETTLED (BENCH_18) — 1.65× speedup (19.8s → 12.0s) for 31GB checkpoint. Viable for Convergence (~10s projected, << 83s cold start). |
+| QX_PRELOAD | HIGH | OPEN — Mechanism proven on Thinker (BENCH_18: 1.65× speedup, 19.8s→12.0s for 31GB). Convergence (123 GB, ik_llama.cpp) never actually tested. Projected ~10s warm restore, but needs a dedicated test run. |
 | T_CRIU3 Ph.1 | DONE ✓ | Thinker TP=1: 0.43s restore, 501 MB, TTFT parity. Sequential TP=2 swaps unblocked. |
 | T_CRIU3 Ph.2 | DONE ✗ | Coder TP=2: dump/restore OK (29s/67GB), KV preserved, inference FAIL (SHM IPC broken post-restore). |
 | T_ENGINE_EVAL | DONE ✓ | GLM-4.7-Flash verified on ik_llama.cpp (BENCH_16). |
