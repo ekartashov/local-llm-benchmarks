@@ -8,30 +8,6 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ## HIGH priority
 
-### T_MTP1 — mtp_speculative_thinker — **DONE ✓ (BENCH_19, 2026-05-03)**
-
-**Result:** MTP n=3 is optimal. 91.9 t/s N=1 (+79.1%), 314.8 t/s N=4 (+58.3%) vs PrismaQuant baseline. th02 reasoning intact. Tool calls: **5/5 PASS** under MTP n=3 (unlike the Coder which is 0/3 FAIL). MTP n=3 promoted to production. See `results/BENCH_19_mtp1_prismaquant_*/summary.md`.
-
----
-
-### T_HARD1 — thinker_hard_suite — **DONE ✓ (BENCH_20, 2026-05-03)**
-
-**Result:** PQ 41/50, AWQ 42/50 — statistical tie on a 10-task hard systems engineering suite. No quality gap found even at maximum task difficulty. Production decision confirmed on TPS grounds: PQ+MTP n=3 at 92 t/s vs AWQ 77 t/s.
-
-**Score detail:** PQ task 03 (Raft asymmetric partition) truncated at 28K reasoning tokens in the final run (finish_reason=length, empty response content). A complete response from the prior run (095341Z, finish_reason=stop) covers all 4 sub-questions correctly and scores 5/5, giving PQ 43 vs AWQ 42 with that substitution. The truncation was an infrastructure artifact (max_tokens ceiling), not a quality failure.
-
-**Both evaluations contained scoring errors:** research-mode Claude hallucinated specific term evidence for PQ task 04 (claimed XSNP_HITM present — absent in raw response) and AWQ task 10 (claimed --disable-eviction present — absent). Corrected scores are 41/50 and 42/50 respectively.
-
-**Operational finding — context for re-runs:** The thinker's extended `<think>` budget on hard multi-step tasks can exceed 20–28K reasoning tokens. Any re-run of this suite must use:
-- `--max-model-len 131072` on the vLLM deploy (costs ~0 extra VRAM on this hybrid DeltaNet model)
-- `max_tokens: 32000` (or higher) in the task request payload
-
-Without these, Raft-class and cache-coherence tasks will truncate mid-reasoning. The 32K default context window leaves only ~31K tokens after the system prompt — enough for most tasks but not for the deepest reasoning chains.
-
-**Raw results:** `results/T_HARD1_thinker_hard_suite_20260503T105322Z/` (final scored run). Prior partial run: `results/T_HARD1_thinker_hard_suite_20260503T095341Z/` (PQ only, tasks 01/04/08 truncated at max_tokens=20K).
-
----
-
 ### T_CRIU3 — criu_universal_checkpoint_library — OPEN (design + implement)
 
 **Question:** Standardize CRIU checkpointing for ALL vLLM processes, not just coder-tp2. Enable the model checkpoint library concept.
@@ -87,6 +63,30 @@ VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ---
 
+### T_PQ2 — prismaquant_coder_phase1 — OPEN (Phase 1: Marlin fallback, no rebuild)
+
+**Question:** Does `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` give better TPS and/or quality than the current AWQ coder (`cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit`)?
+
+**Why MEDIUM (Phase 1 only):** MoE NVFP4 grouped GEMM is blocked by FlashInfer #38718 (compute_120a vs compute_120f for TMA WS grouped GEMM on SM120). Community Docker fix exists; upstream ETA late Q2 2026. Phase 1 uses compressed-tensors Marlin fallback — no CUDA rebuild needed. This is exactly the path T_PQ1 / BENCH_12 used for the thinker (validated approach).
+
+**Critical constraint — NO MTP:** `--speculative-config` must NOT be added to the coder. BENCH_14 (2026-05-01) proved MTP breaks tool-call generation for A3B MoE coder (0/3 probes). Do not add speculative config regardless of what the PrismaQuant README suggests.
+
+**Deploy command (Phase 1):**
+```bash
+VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+./infra/scripts/deploy.sh vllm tp2a rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm \
+  --trust-remote-code --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
+  --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
+```
+
+**Metrics:** TPS at N=1, TPS at N=4, tool-call pass rate (5 probes), quality on th02. Compare vs AWQ baseline (237 t/s N=1 / 1205 t/s N=8).
+
+**Pass:** tool-call pass rate ≥ 95% AND quality ≥ AWQ on th02. TPS is informational in Phase 1 (Marlin fallback expected slightly slower than AWQ; Phase 2 NVFP4 may recover the gap).
+
+**Deps:** T_MTP2 ✓ CLOSED FAIL (MTP excluded from coder). T_PQ1 ✓ DONE (confirms Phase 1 Marlin fallback works).
+
+---
+
 ### T3.4 — prefix_cache_survival_across_sleep — OPEN (scope updated)
 
 **Original question:** Does vLLM's CPU-offloaded prefix cache survive a sleep/wake cycle at level=1?
@@ -128,11 +128,17 @@ VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 **Hardware:** Lexar NM790 4TB (7,400 MB/s read). Loading 135GB → ~18s. Router needs ~10s advance notice to trigger pre-warm before the switch is visible to the user.
 
-**Pre-warm mechanism:**
+**Pre-warm mechanism (Convergence — mmap confirmed T_CRIU2):**
 ```bash
-posix_fadvise(fd, 0, checkpoint_size, POSIX_FADV_WILLNEED)
-# or equivalently:
-cat /srv/ai/checkpoints/convergence/checkpoint.tar.gz > /dev/null &
+# T_CRIU2 confirmed Convergence uses mmap (--no-mmap removed) for CRIU.
+# GGUF pages are file-backed and served directly from page cache.
+# Pre-warming the GGUF files populates page cache → eliminates 100s NVMe demand-paging.
+# Pre-warm all 4 GGUF shards (~123GB total):
+GGUF_DIR=/srv/ai/models/hub/models--unsloth--Qwen3.5-397B-A17B-GGUF/snapshots/da33c16fa4440f831149fcf53b98a22bc07785e5/UD-IQ2_M
+cat "${GGUF_DIR}"/*.gguf > /dev/null &
+PREWARM_PID=$!
+# Expected: ~17s at 7,400 MB/s. Also warm the CRIU checkpoint (8.7GB, trivial):
+cat /srv/ai/checkpoints/convergence/*.tar* > /dev/null &
 ```
 
 **Router integration points:**

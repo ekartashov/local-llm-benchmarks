@@ -1,6 +1,6 @@
 # Convergence + Singularity Operational Guide
 
-> **Summary:** Qwen3.5-397B-A17B UD-IQ2_M always-resident in RAM. Production: `-ngl 999 --cpu-moe -t 32 -np 4`. 13.99 t/s single-seq (T_CV3), 15.6 t/s sequential pipelining (T_CV4). ⚠ True concurrent HTTP requests previously crashed on older branches at N≥2 (T_PAR1); investigating if `main` branch fix resolves this. 128K context ceiling (T_CV1). 83s cold start → always-on policy.
+> **Summary:** Qwen3.5-397B-A17B UD-IQ2_M always-resident in RAM. Production: `-ngl 999 --cpu-moe -t 32 -np 4`. 13.99 t/s single-seq (T_CV3), 15.6 t/s sequential pipelining (T_CV4). ⚠ True concurrent HTTP N≥2: **SETTLED FAIL** — PR #1288 architectural limit (Qwen3.5-MoE cannot exceed 1 concurrent sequence). 128K context ceiling (T_CV1). 83s cold start → always-on policy.
 
 ---
 
@@ -16,7 +16,7 @@
 | Hybrid speedup vs CPU-only | 3.75× | T_CV3 |
 | Optimal thread count | **32 threads** (PP scales linearly) | T_CV2 |
 | Sequential pipelining (-np 4) | **15.6 t/s aggregate** | T_CV4 |
-| True concurrent HTTP (N≥2) | ❌ Previously CRASHED (Server disconnect / GGML_ASSERT); investigating `main` fix | T_PAR1 |
+| True concurrent HTTP (N≥2) | ❌ **SETTLED FAIL** — architectural limit (PR #1288: Qwen3.5-MoE cannot exceed 1 concurrent sequence) | T_PAR1 |
 | GPU VRAM consumed (hybrid) | ~12GB split across both 5090s | T_CV3 |
 
 **Policy:** Always-resident (current). Never on-demand in this mode. The 83s cold start is too high for transparent routing. Convergence must be running before any request that might escalate to it.
@@ -91,7 +91,7 @@ rg "qwen35|ssm_alpha|delta_net" /srv/ai/projects/ik_llama.cpp/src/
 
 ## Concurrency caveat (IMPORTANT)
 
-`-np 4` sets the server's internal parallel slot count. **This does not mean 4 concurrent HTTP clients work safely.** T_PAR1 (2026-04-26) showed the server previously crashed at N≥2 concurrent HTTP requests with `Server disconnected` / `GGML_ASSERT(S > 0)`. We are currently investigating if moving to the `main` branch (which includes many stability fixes since February) resolves this.
+`-np 4` sets the server's internal parallel slot count. **This does not mean 4 concurrent HTTP clients work safely.** T_PAR1 (2026-04-26) showed the server crashed at N≥2 concurrent HTTP requests with `Server disconnected` / `GGML_ASSERT(S > 0)`. **SETTLED FAIL (PR #1288):** Qwen3.5-MoE has an explicit architectural constraint preventing more than one concurrent sequence. This is not a bug to investigate or fix — it is a model design property. Even on `main` branch, N≥2 concurrent HTTP requests are not supported for this model.
 
 Production use: send one request at a time. The `-np 4` gives throughput benefits when a single client's request fills multiple slots (long context, many output tokens), not when multiple clients send simultaneously.
 

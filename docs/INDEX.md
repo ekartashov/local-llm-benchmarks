@@ -27,7 +27,7 @@
   - *Summary:* Thinker sleeps → coder spans TP=2 at 65K ctx. Hot-restart via CRIU+cuda-checkpoint.
   - *Grep for:* CRIU procedure, uvloop patch, UV_USE_IO_URING, ghost VRAM, 65K context numbers
 - **[docs/arch/convergence.md](arch/convergence.md)** — Convergence + Singularity operational guide
-  - *Summary:* 397B always-resident at 13.99 t/s hybrid. 83s cold start → always-on policy. Concurrent-request crash N≥2 (investigating `main` branch fix).
+  - *Summary:* 397B always-resident at 13.99 t/s hybrid. 83s cold start → always-on policy. Concurrent-request capacity: permanently N=1 (SETTLED FAIL, PR #1288 architectural limit).
   - *Grep for:* launch command, -np caveat, DeltaNet crash, DDR5 bandwidth ceiling, model path
 
 ### Decisions
@@ -81,7 +81,7 @@
 3. **TP=2 is broken for GDN (Qwen3.6-27B) regardless of chunked-prefill setting** — H-TP2 confirmed T2.4g. Do not attempt thinker TP=2 without a non-GDN replacement.
 4. **vLLM uvloop patch is mandatory for CRIU** — do not revert `api_server.py` / `v1/utils.py` asyncio changes; always export `UV_USE_IO_URING=0`.
 5. **`--reasoning-parser` must NOT be combined with tool-call parser for models that skip thinking** — causes all-`no_call` on Gemma4, Core/80B, and any model that emits tool calls directly. Use `--tool-call-parser X` alone.
-6. **T_CV4 15.6 t/s is sequential pipelining, not true concurrency** — concurrent HTTP to Convergence previously crashed at N≥2 (T_PAR1 on older branches); investigating if `main` branch fix (merged DeltaNet update) resolves this.
+6. **T_CV4 15.6 t/s is sequential pipelining, not true concurrency** — concurrent HTTP to Convergence is permanently limited to N=1 (SETTLED FAIL, PR #1288: Qwen3.5-MoE architectural constraint, not a bug).
 7. **Convergence always-resident** — 83s cold start; never on-demand. Always start before Arclight if doing a full system restart.
 8. **VLLM_USE_V1=0 is required** — V1 engine causes 10× TPS regression in eager mode and CUDA graph instability on Blackwell.
 9. **VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 required for coder TP=2** — prevents OOM during CUDA graph capture.
