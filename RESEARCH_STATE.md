@@ -10,6 +10,47 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 *(none — BENCH_10 closed)*
 
+## BENCH_21 COMPLETE (2026-05-05) — run 20260505T092106Z
+
+Three-model co-load VERIFIED. Thinker TP=1 (GPU1, util=0.95, ctx=131K, MTP n=3) + Coder TP=1 (GPU0, util=0.80, enforce-eager, ctx=32K) + Convergence (ngl=15, --cpu-moe). All three models co-resident on 2×32 GiB RTX 5090. See `results/BENCH_21_coload_vram_20260505T092106Z/summary.md`.
+
+**Key numbers:**
+
+| Phase | GPU0 used | GPU0 free | GPU1 used | GPU1 free |
+|-------|-----------|-----------|-----------|-----------|
+| After thinker | — | 32,045 | 29,280 | 2,832 |
+| After thinker+coder | 25,800 | 6,278 | 29,280 | 2,832 |
+| After all three (ngl=15) | 31,377 | **701** | 31,645 | **467** |
+
+Per-process at ngl=15: Coder 25,758 MiB (GPU0), Thinker 29,238 MiB (GPU1), Convergence 5,336 MiB (GPU0) + 2,124 MiB (GPU1). ik_llama.cpp auto-skewed 2.5:1 to GPU0 (more room available).
+
+Convergence TPS under co-load: **4.05 t/s warm** (reps 2–3) vs **13.99 t/s isolated** (71% reduction).
+
+**Critical findings:**
+1. **vLLM is 0.20.0**: `VLLM_USE_V1`, `VLLM_ENGINE_ITERATOR_SOURCE` are unknown/ignored env vars. V1 is the only engine. All gotcha #8 / deploy.sh references to "VLLM_USE_V1=0 mandatory" are obsolete.
+2. **Co-load feasible but Convergence TPS degraded at ngl=15**: 4.05 t/s warm vs 3.7 t/s CPU-only — the 15 layers barely help. However: thinker util is NOT constrained by KV pool size (see GDN correction below). Higher ngl is achievable by reducing thinker util.
+3. **Coder TP=1 enforce-eager severe TPS degradation**: 25,800 MiB GPU0 with minimal KV cache. enforce-eager observed to cause up to 20× TPS degradation on the coder model (reason unknown — possibly CUDA graph warm-path vs fallback kernel path). Production coder baseline is TP=2 CUDA-graph at 237 t/s (N=1) / 1205 t/s (N=8); enforce-eager co-load TPS NOT measured in BENCH_21 but expected ~12–60 t/s range. This is a second major degradation in the co-load config alongside Convergence TPS loss.
+4. **Residual margins are razor-thin at util=0.95**: 701/467 MiB free. With thinker util reduced, this relaxes substantially.
+
+**GDN architecture correction (2026-05-05):** The thinker model (Qwen3.6-27B PrismaQuant) uses Gated DeltaNet (GDN) hybrid architecture. GDN layers maintain O(d) recurrent state — they do NOT populate the KV cache regardless of context length. "DeltaNet KV pool ~0 growth with context" (BENCH_20). The 5.92 GiB KV pool at util=0.95 is only for the few traditional attention heads in the hybrid; it is NOT a constraint on reasoning quality at 128K context. This invalidates any analysis that constrained thinker util to preserve KV token capacity.
+
+**Two-point Convergence VRAM model** (ngl=15 measured: 7,942 MiB total; ngl=94 all-layers isolated: ~16,866 MiB):
+- Fixed overhead ≈ 6,247 MiB (KV auto-allocated + shared weights, regardless of ngl)
+- Per additional layer ≈ 113 MiB
+
+| Thinker util | GPU1 free | Convergence budget | Est. max ngl | Est. Convergence TPS |
+|---|---|---|---|---|
+| 0.95 (current) | ~2,832 MiB | ~9,110 MiB total | ~25 | ~4.6 t/s |
+| 0.80 | ~6,026 MiB | ~12,304 MiB total | ~53 | ~6.3 t/s |
+| 0.73 (model floor) | ~8,309 MiB | ~14,587 MiB total | ~73 | ~8.6 t/s |
+
+Model floor: non-KV overhead = 23,218 MiB → min_util = 23,218/32,112 ≈ 0.723. At util=0.73, KV pool ≈ 585 MiB — trivially sufficient for GDN hybrid. TPS from formula TPS(ngl) ≈ 1/(0.07148 + (94−ngl)×0.00211).
+
+**Architecture decision needed (research mode):** Whether to:
+- (A) Accept co-load at ~4 t/s Convergence with current util=0.95 (established, verified)
+- (B) Run BENCH_21b: thinker util=0.73 + CONVERGENCE_NGL=70, targeting ~8.6 t/s (potentially 61% of isolated vs 29% now) — requires verifying thinker loads at util=0.73 and measuring actual ngl ceiling
+- (C) Keep Convergence at ngl=999 (14 t/s) but require CRIU-based swap (option B from before)
+
 ---
 
 ## Open from research / known issues
