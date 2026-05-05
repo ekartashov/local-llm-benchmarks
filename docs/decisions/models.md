@@ -22,9 +22,9 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
   env: VLLM_USE_V1=1  # MANDATORY for TP=1 stability
   env: PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
   ```
-- **Why TP=1 is now viable:** Discovery in BENCH_23/23a confirmed that Reasoning Collapse was an artifact of the V0/Eager-mode kernel path. The **vLLM V1 Engine** with **CUDA graphs** (captured at 0.54 GiB) provides a logically stable execution path even for a single-shard MoE model.
-- **Why this wins over AWQ:** Higher theoretical precision (FP4 weights vs INT4) and significantly better VRAM flexibility. While raw TPS is regressed by 4x compared to TP=2 AWQ (~240 t/s), the ability to co-load Thinker and Coder on 2x5090 without OOM risk is the decisive factor.
-- **Why it is "slow":** Grouped GEMM software for MoE models on SM120 is immature. FlashInfer falls back to `compute_120a` instead of `compute_120f`.
+- **Why TP=1 is now viable:** Discovery in BENCH_23/23a confirmed that Reasoning Collapse was an artifact of the V0/Eager-mode kernel path. The **vLLM V1 Engine** with **CUDA graphs** provides a logically stable execution path even for a single-shard MoE model.
+- **MTP Finding:** Speculative decoding (MTP n=1) is **logically stable** at TP=1 (5/5 tool calls passed). However, it currently incurs a **~40% speed tax** (35 t/s vs 60 t/s) because the expert verification cost on the V1 kernel path exceeds the speed gain from speculation.
+- **Why it is "slow":** Grouped GEMM software for MoE models on SM120 is immature. FlashInfer falls back to `compute_120a` instead of `compute_120f`. Production config remains **No-MTP** until software maturity improves.
 
 ### Arclight Thinker: Qwen3.6-27B-PrismaQuant-5.5bit (rdtand)
 **SETTLED (BENCH_12 2026-05-01, updated BENCH_19 2026-05-03).** Supersedes Qwen3.6-27B-AWQ.
@@ -119,8 +119,9 @@ SUPERSEDED by Qwen3.6-35B-A3B (better quality, similar TPS). Baseline performanc
 
 ### MoE models on SM120: SETTLED CAP — PrismaQuant prioritized over TPS
 **SETTLED (BENCH_23, 2026-05-05).** CUTLASS grouped FP4 GEMM on SM120 desktop Blackwell produces suboptimal results: FlashInfer emits `compute_120a` instead of `compute_120f`, blocking native TMA WS tactics.
-- **Measured:** **NVFP4 FlashInfer-CUTLASS = 56.5 t/s (N=1).**
-- **Decision:** Settled on this path for production Coder (35B A3B) due to precision and TP=1 stability. The 60 t/s cap is accepted until CUDA 13.0+ kernel maturation resolves the grouped GEMM bottleneck.
+- **Measured:** **NVFP4 FlashInfer-CUTLASS = 60.5 t/s (N=1).**
+- **MTP Speed Tax:** Speculative decoding at TP=1 is stable but drops throughput to **35 t/s**.
+- **Decision:** Settled on this path for production Coder (35B A3B) due to precision and TP=1 stability. The 60 t/s cap is accepted until CUDA 13.0+ kernel maturation resolves the grouped GEMM bottleneck. MTP remains DISABLED.
 
 ### Dense models on SM120: T_PQ1 QUEUED
 Dense NVFP4 GEMM is unaffected by the grouped GEMM bug. PrismaQuant thinker (rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm) queued as T_PQ1 after CUDA 13.0 container rebuild.

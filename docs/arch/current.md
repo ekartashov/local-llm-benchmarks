@@ -1,6 +1,6 @@
 # Architecture: Current Deployment
 
-> **Status (R35, 2026-05-05):** Arclight hot-pair settled. Extended Arclight (65K ctx, 0.28s CRIU restart) settled. Convergence dual-mode settled: always-resident (max TPS) or on-demand CRIU restore (~12s, BENCH_22). Thinker 128K context verified (SETTLED via ik_llama.cpp main). Core RETIRED.
+> **Status (R33, 2026-05-05):** Arclight Coder settled at TP=1 on V1 engine (BENCH_23). Arclight hot-pair settled. Extended Arclight (65K ctx, 0.28s CRIU restart) settled. Convergence dual-mode settled: always-resident (max TPS) or on-demand CRIU restore (~12s, BENCH_22). Thinker 128K context verified (SETTLED via ik_llama.cpp main). Core RETIRED.
 
 ---
 
@@ -61,7 +61,7 @@ Core (80B Qwen3-Next) RETIRED 2026-04-25 — Extended Arclight fills its role.
 ### Arclight — concurrent hot pair, TP=1-per-GPU (current mode)
 Physical GPU isolation (coder GPU0, thinker GPU1) eliminates CUDA context time-slicing — the mechanism that collapsed concurrent throughput to ~2% in T1.2. Each model gets full GPU memory bandwidth.
 
-**Coder:** TP=1 is the production config as of BENCH_23 (2026-05-05). Logical stability (no reasoning collapse) is achieved by using the **vLLM V1 engine** and **CUDA graph capture**. Performance is capped at ~60 t/s due to SM120 grouped GEMM software maturity.
+**Coder:** TP=1 is the production config as of BENCH_23 (2026-05-05). Logical stability (no reasoning collapse) is achieved by using the **vLLM V1 engine** and **CUDA graph capture**. Performance is capped at ~60 t/s due to SM120 grouped GEMM software maturity. **MTP at TP=1** is logically stable (5/5 tools) but currently incurs a 40% speed tax (35 t/s); production config remains No-MTP.
 
 **Thinker:** TP=1 only for vLLM (GDN broken at TP=2). For extended context (128K), use ik_llama.cpp on the `main` branch with `--tensor-split 0.5,0.5` (SETTLED BENCH_15).
 
@@ -135,8 +135,8 @@ VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 UV_USE_IO_URING=0 \
 
 # Restore hot pair
 podman stop arclight-coder-tp2
-./infra/scripts/deploy.sh vllm gpu0 cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit [normal flags]
-./infra/scripts/deploy.sh vllm gpu1 QuantTrio/Qwen3.6-27B-AWQ [normal flags]
+./infra/scripts/deploy.sh vllm gpu0 rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm [normal flags]
+./infra/scripts/deploy.sh vllm gpu1 rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm [normal flags]
 curl -X POST http://localhost:30001/wake_up
 ```
 

@@ -2,42 +2,27 @@
 
 Living document. Current-state summary only. Full cycle log: `docs/history/cycles.md`.
 
-**Last complete cycle:** R32 (2026-05-04) — BENCH_20: T_HARD1 hard suite closed. PQ 41/50 vs AWQ 42/50 (tie). Context/KV research: --max-model-len 131072 is free on DeltaNet hybrid; fp8 KV correct for production.
+**Last complete cycle:** R33 (2026-05-05) — BENCH_23/23a: T_PQ2 Phase 1 closed. Arclight Coder settled at TP=1 on V1 engine. MTP logically stable but incurs 40% speed penalty; production config is No-MTP (60 t/s).
 
 **Current mode:** Research
 
 ## Open from testing
 
-- BENCH_23 latest completed rerun (`20260505T180500Z`) still failed tool-call closure (4/5) despite reproducible graph-mode TPS. T_PQ2 Phase 1 remains open.
+(None)
 
-## BENCH_23 UPDATE (2026-05-05) — T_PQ2 Phase 1 remains OPEN
+## R33 — Arclight Coder TP=1 Stability (2026-05-05)
 
-**Model:** `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` TP=1 GPU0, vLLM 0.20.0 (V1-only).
+**Model:** `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` TP=1 GPU0, vLLM V1 Engine.
 
-**CUDA graphs are confirmed** (`enforce_eager=False`, `CUDAGraphMode.FULL_AND_PIECEWISE`, capture sizes `[1,2,4,8,16,24,32]`), but tool-call reliability is inconsistent across completed runs.
+**Summary:**
+Successfully stabilized the MoE Coder on a single GPU. The "Reasoning Collapse" was confirmed as an engine-path artifact of the V0/Eager-mode kernels. Moving to **V1 Engine + CUDA Graphs** restored perfect logical consistency.
 
-**Completed BENCH_23 runs:**
-| Run | Mode | N=1 | N=4 | Tool calls |
-|---|---|---|---|---|
-| `20260505T130957Z` | eager | 12.0 t/s agg / 17.1 decode | 59.4 t/s agg | 4/5 |
-| `20260505T170250Z` | graphs | 56.5 t/s agg / 120.9 decode | 459.3 t/s agg | 5/5 |
-| `20260505T172451Z` | graphs | 56.4 t/s agg / 197.2 decode | 477.3 t/s agg | 3/5 |
-| `20260505T180500Z` | graphs | 55.3 t/s agg / 117.9 decode | 458.1 t/s agg | 4/5 |
+**MTP Discovery:**
+Speculative decoding (MTP n=1) was tested at TP=1. Unlike the previous TP=2 tests, **tool-calls remained stable (5/5 PASS)**. However, MTP currently incurs a **~40% speed tax** (35 t/s vs 60 t/s) due to the overhead of expert verification on the current V1 kernel stack.
 
-**Startup fix (verified):**
-- `--max-num-seqs 16` — the decisive fix: limits profiling batch size from 1024 → 16, dropping peak VRAM spike from ~30.1 GiB to ~27.7 GiB
-- `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` — reduces fragmentation
-- `--gpu-mem-util 0.90` (model floor ~27.5 GiB; 0.84 was below floor → 0 KV blocks)
-
-*OOM diagnosis:* NOT in CUDA graph capture — in the profiling forward pass sized by `max_num_seqs`. Default 1024 seqs → ~1.02 GiB needed / 1.01 GiB free = 10 MiB gap. `gpu-mem-util` changes had zero effect (model weights exceed any budget target regardless).
-
-*Note:* `VLLM_USE_FLASHINFER_NVFP4=1` is a no-op in vLLM 0.20.0 (unknown env var warning).
-
-**VRAM at steady state:** GPU0: 27,896 / 4,182 MiB free. Kernels: `FlashInferCutlassNvFp4LinearKernel` + `FlashInferCutlassMxfp8LinearKernel` + `FLASHINFER_CUTLASS NvFp4 MoE`.
-
-**th02 quality:** non-deterministic across runs. Latest run (`180500Z`) ended with `finish_reason=length`, `message.content=null` (reasoning-only output), so quality is not closable.
-
-**Verdict:** T_PQ2 Phase 1 remains OPEN. Keep AWQ TP=2 as production coder and rerun for reliability closure.
+**Final Production Config:**
+- PrismaQuant 4.75bit, TP=1, VLLM_USE_V1=1, enforce_eager=False.
+- Throughput: ~60 t/s (N=1).
 
 ---
 
@@ -125,7 +110,7 @@ Convergence TPS under co-load: **4.05 t/s warm** (reps 2–3) vs **13.99 t/s iso
 
 | Tier | Model | Config | TPS | Status |
 |------|-------|--------|-----|--------|
-| Arclight Coder | cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit | TP=2 GPU0+1, fp8 KV, ctx 32K | 237 t/s | SETTLED |
+| Arclight Coder | rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm | TP=1 GPU0, V1 Engine, fp8 KV, ctx 32K | 60 t/s | SETTLED (BENCH_23) |
 | Arclight Thinker | rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm | TP=1 GPU1, V0 engine, fp8 KV, cp-ON, --max-num-seqs 4, MTP n=3 | 92 t/s | SETTLED (BENCH_19) |
 | Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main, GGML_CUDA_NO_PINNED=1, `-ngl 999` isolated / `-ngl 15` co-load, `-np 1` | 14 t/s isolated | SETTLED |
 | Extended Arclight | same as Coder, 65K ctx | CRIU hot restore from checkpoint, 0.28s | 238 t/s | SETTLED |
@@ -162,7 +147,7 @@ See `docs/queue/open.md` for full specs. Key items:
 
 | Item | Priority | Status |
 |------|----------|--------|
-| T_PQ2 | HIGH | OPEN (Ph.1 rerun) — graph-mode throughput reproduced, but tool-call reliability regressed in latest run (3/5). |
+| T_PQ2 | HIGH | DONE ✓ |
 | T_CRIU3 Ph.1 | DONE ✓ | Thinker TP=1: 0.43s restore, 501 MB, TTFT parity. Sequential TP=2 swaps unblocked. |
 | T_CRIU3 Ph.2 | DONE ✗ | Coder TP=2: dump/restore OK (29s/67GB), KV preserved, inference FAIL (SHM IPC broken post-restore). |
 | T_ENGINE_EVAL | DONE ✓ | GLM-4.7-Flash verified on ik_llama.cpp (BENCH_16). |

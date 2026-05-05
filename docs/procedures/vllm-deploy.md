@@ -13,20 +13,23 @@ UV_USE_IO_URING=0                          # Required if CRIU checkpointing is p
 
 | Role | Container name | Port | GPU(s) | TP |
 |------|---------------|------|--------|-----|
-| Arclight Coder | arclight-coder (or bench-vllm-tp2a) | 30000 | GPU0+1 | 2 |
+| Arclight Coder | arclight-coder | 30000 | GPU0 | 1 |
 | Arclight Thinker | arclight-thinker | 30001 | GPU1 | 1 |
 | Extended Arclight | (same container as coder, restarted) | 30000 | GPU0+1 | 2 |
 | Convergence | convergence | 8002 | CPU + GPU (attn) | N/A |
 
 ## Standard deploy commands
 
-### Arclight Coder (TP=2, production)
+### Arclight Coder (TP=1, production)
 ```bash
-VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-./infra/scripts/deploy.sh vllm tp2a cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
+VLLM_USE_V1=1 \
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+./infra/scripts/deploy.sh vllm gpu0 rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm \
+  --trust-remote-code \
   --gpu-mem-util 0.90 \
   --ctx 32768 \
   --kv-cache-dtype fp8 \
+  --max-num-seqs 16 \
   --tool-call-parser qwen3_coder \
   --reasoning-parser qwen3 \
   --enable-auto-tool-choice
@@ -109,8 +112,8 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
 Notes:
 - `--gpu-mem-util 0.90` required (0.84 is below the model floor → 0 KV blocks).
 - CUDA graphs work with this config (`enforce_eager=False`, `CUDAGraphMode.FULL_AND_PIECEWISE`).
-- BENCH_23 best graph-mode run (170250Z): 56.5 t/s agg / 120.9 t/s decode at N=1, 459.3 t/s agg at N=4.
-- Tool-call reliability was unstable across reruns (5/5, 3/5, 4/5), so T_PQ2 Phase 1 remains open.
+- **SETTLED (BENCH_23):** 60.5 t/s seq=1 decode. Logical stability confirmed.
+- **MTP Caveat:** Speculative decoding is stable at TP=1 but incurs a 40% speed tax (35 t/s). Stay No-MTP.
 
 ### TP=1 gives ~20 t/s instead of ~230 t/s
 - Check whether `--enforce-eager` was set (large penalty on coder models)

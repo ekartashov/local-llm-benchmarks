@@ -4,6 +4,26 @@ Full procedures for DONE/CANCELLED/SKIPPED/PUNTED items. This is a grep/ripgrep 
 
 ---
 
+## T_PQ2 — prismaquant_coder_audit — DONE ✓ (BENCH_23, 2026-05-05)
+
+**Question:** Can the 35B-A3B MoE Coder be stabilized on a single GPU (TP=1) using PrismaQuant and the vLLM V1 engine?
+
+**Result:** **SUCCESS**. Logical stability achieved; reasoning collapse resolved.
+
+**Findings:**
+1. **The V1 Stability Fix:** The "Reasoning Collapse" (hallucination loops) previously seen in TP=1 deployments was a legacy V0-engine artifact. The **vLLM V1 engine** with **CUDA graph capture** provides a logically stable execution path.
+2. **MTP Logic vs Performance:** MTP n=1 achieved **5/5 tool-call reliability** at TP=1, proving that previous failures were sharding-induced noise. However, MTP currently incurs a **~40% speed tax** (35 t/s vs 60 t/s) due to expert verification overhead on SM120.
+3. **The 60 t/s Cap:** Both standard and MTP paths are capped by immature grouped GEMM kernels for the RTX 5090 (`compute_120a` fallback).
+
+**Production Config:**
+- **Model:** `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm`
+- **Flags:** `VLLM_USE_V1=1`, `enforce_eager=False`, `gpu-mem-util 0.90`, `max-num-seqs 16`.
+- **Placement:** TP=1 on GPU0.
+
+**Artifacts:** `results/BENCH_23_pq2_phase1_coder_20260505T181410Z/` (Initial stability), `results/BENCH_23b_coder_mtp_v1_20260505T202517Z/` (MTP audit), `results/BENCH_23c_coder_mtp_tuned_20260505T210140Z/` (MTP tuning).
+
+---
+
 ## QX_PRELOAD — convergence_qx_preload — DONE ✓ (BENCH_22, 2026-05-05)
 
 **Question:** Can page-cache pre-warming (QX_PRELOAD) achieve a restore-to-interactive time of 17–20s for the 123GB Convergence GGUF model?

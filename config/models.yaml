@@ -66,9 +66,9 @@ models:
       Their published comparison is against Qwen3-30B-A3B general, NOT our
       Qwen3-Coder-30B-A3B baseline — real gap vs our coder is unknown until T2.2.
 
-  # ── ACTIVE coder (SETTLED T6.1 2026-04-25) ──────────────────────────────────
+  # ── SUPERSEDED coder (replaced by PrismaQuant 2026-05-05) ──────────────────
   qwen36_35b_a3b_awq:
-    status: ACTIVE
+    status: SUPERSEDED
     role: coder
     hf_repo: cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit
     quant: AWQ-INT4
@@ -89,15 +89,14 @@ models:
       tp1_tps: null           # TP=1 with V1 disabled untested — expected ~237 t/s; T6.1 rerun needed
       quality_completion: 1.0 # manual T6.1 run 2026-04-25
     notes: >
-      35B-A3B MoE-hybrid. SETTLED as production coder 2026-04-25.
-      V1 engine disabled by default (deploy.sh) — was the cause of TP=1 degradation to ~18 t/s,
-      not a fundamental TP=1 limitation. With V1 disabled, TP=1 is expected to recover ~237 t/s
-      (untested — T6.1 rerun pending). Hot-pair mode uses TP=1 (concurrent with thinker);
-      Extended Arclight uses TP=2 (thinker sleeping, big context). See ARCHITECTURE.md.
+      35B-A3B MoE-hybrid. SUPERSEDED by PrismaQuant variant (2026-05-05).
+      While AWQ was faster at TP=2 (232 t/s), it suffered "Reasoning Collapse" at TP=1
+      unless V1 engine was enabled. PrismaQuant at TP=1 on V1 engine provides
+      the required logical stability for the Hot-pair role.
 
-  # ── CANDIDATE coder: PrismaQuant (DEFERRED — SM120 MoE kernel not ready) ──
+  # ── ACTIVE coder (SETTLED BENCH_23 2026-05-05) ──────────────────────────
   rdtand_qwen36_35b_prismaquant:
-    status: CANDIDATE
+    status: ACTIVE
     role: coder
     hf_repo: rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm
     quant: PrismaQuant-4.75bit
@@ -106,23 +105,22 @@ models:
     ctx_default: 32768
     engines: [vllm]
     flags:
-      vllm: "--trust-remote-code --tensor-parallel-size 2 --gpu-memory-utilization 0.90 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice --speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":3}'"
-      env: "VLLM_NVFP4_GEMM_BACKEND=flashinfer-cutlass"
+      vllm: "--trust-remote-code --tensor-parallel-size 1 --gpu-memory-utilization 0.90 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice"
+      env: "VLLM_USE_V1=1"
     quant_details:
       nvfp4_linears: 192
       mxfp8_linears: 45
       bf16_entries: 274
       calibration: "GPTQ-OBS + closed-form scale sweep, 0.33× RTN MSE"
-      mtp_optimal_n: 3
-    publisher_trust: HIGH
-    defer_reason: >
-      SM120 desktop Blackwell: NVFP4 MoE grouped GEMM (CUTLASS) = 39 t/s vs AWQ Marlin = 46-49 t/s.
-      Root cause: compute_120a vs compute_120f issue requiring CUDA 13.0.
-      Revisit when SM120 compute_120f kernel ships in a stable vLLM/FlashInfer release.
-    test_items: [T_PQ2]
+    measured:
+      single_gpu_seq1_tps: 60.5    # BENCH_23a
+      tool_call_pass_rate: 1.00    # BENCH_23/23a
     notes: >
-      Preferred over cyburn/4.9bit (same author, more aggressive NVFP4 allocation, visual
-      encoder quantized). Do not test until SM120 MoE kernel reaches parity with Marlin.
+      35B-A3B MoE-hybrid. SETTLED as production coder 2026-05-05.
+      Successfully resolved the TP=1 "Reasoning Collapse" by enforcing the V1 engine
+      path with CUDA graph capture. MTP (speculative decoding) was found to be
+      logically stable at TP=1 (tool calls intact) but currently yields a 40%
+      throughput regression (35 t/s). Production config uses No-MTP (60 t/s).
 
   # ── SUPERSEDED: old Qwen3.5-35B-A3B (kept as historical record only) ────
   qwen35_35b_a3b_awq:

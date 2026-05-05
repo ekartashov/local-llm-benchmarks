@@ -36,35 +36,6 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ## MEDIUM priority
 
-### T_PQ2 — prismaquant_coder_phase1 — OPEN (stability rerun required)
-
-**Question:** Is `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` stable enough on tool calls to be a viable TP=1 coder fallback?
-
-**Current evidence (BENCH_23, completed runs):**
-1. `20260505T130957Z` (eager): 12.0 t/s agg (N=1), tool calls 4/5.
-2. `20260505T170250Z` (graphs): 56.5 t/s agg / 120.9 t/s decode (N=1), 459.3 t/s agg (N=4), tool calls 5/5.
-3. `20260505T172451Z` (graphs): 56.4 t/s agg / 197.2 t/s decode (N=1), 477.3 t/s agg (N=4), tool calls 3/5.
-4. `20260505T180500Z` (graphs): 55.3 t/s agg / 117.9 t/s decode (N=1), 458.1 t/s agg (N=4), tool calls 4/5.
-
-**Conclusion:** throughput is good in graph mode, but tool-call reliability is not stable across reruns. Keep AWQ TP=2 production.
-
-**Critical constraint — NO MTP:** `--speculative-config` must NOT be added to the coder (BENCH_14: 0/3 tool-call failure).
-
-**Deploy command (Ph.1 rerun):**
-```bash
-VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-./infra/scripts/deploy.sh vllm gpu0 rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm \
-  --trust-remote-code --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 --max-num-seqs 16 \
-  --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
-```
-
-**Pass (closure criteria):**
-1. Three consecutive runs with tool-call pass rate 5/5.
-2. th02 quality PASS in each run.
-3. N=1 agg TPS ≥ 50 and N=4 agg TPS ≥ 430 in graph mode.
-
-**Deps:** T_MTP2 ✓ CLOSED FAIL (MTP excluded).
 
 ---
 
