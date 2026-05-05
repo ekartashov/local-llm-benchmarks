@@ -4,6 +4,21 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 ---
 
+## R33 — May 5 2026 — TP=1 Stability Discovery + PrismaQuant Coder Promotion (BENCH_23/23a)
+
+**Triggered by:** T_PQ2 Phase 1 (PrismaQuant Coder Audit); ongoing OOM and reliability issues with AWQ Coder at TP=2 during tri-model co-loads.
+
+- **BENCH_23 (PrismaQuant Coder Audit):** ✅ PASS (Stability). `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` successfully loaded at **TP=1** on a single GPU using the **vLLM V1 engine** and **CUDA graph capture**. 
+- **Reasoning Stability Discovery:** Both BENCH_23 (PQ) and BENCH_23a (AWQ) confirmed that the "Reasoning Collapse" (loops/hallucinations) previously seen at TP=1 was an artifact of the legacy V0/Eager-mode kernel path (vLLM 0.19). The V1 engine with CUDA graphs provides a stable execution path for single-shard MoE models on Blackwell (sm_120).
+- **Performance (TPS):** Both models hit a **~60 t/s (N=1)** cap. This was confirmed to be a **Software Bottleneck** (SM120 grouped GEMM immaturity in FlashInfer/CUTLASS) rather than a quantization issue.
+- **VRAM:** TP=1 deployment uses ~22-24 GiB VRAM, drastically improving the co-load headroom compared to the previous TP=2 requirement.
+
+**Decisions:**
+- **Arclight Coder SETTLED on TP=1.** The AWQ TP=2 config is superseded to reclaim VRAM.
+- **Production choice:** `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm`. Precision (FP4) prioritized over raw AWQ speed, as both are currently capped at 60 t/s on the stable V1 path.
+- **Engine:** `VLLM_USE_V1=1` and `enforce_eager=False` are mandatory for TP=1 stability on this architecture.
+
+
 ## R32 — May 3–4 2026 — Hard Suite Quality Eval + Context/KV Research (BENCH_20, T_HARD1)
 
 **Triggered by:** T_HARD1 ready; BENCH_19 MTP results confirmed PrismaQuant production; hard task suite calibrated to find PQ vs AWQ quality gap if one exists.

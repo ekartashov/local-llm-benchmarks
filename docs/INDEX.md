@@ -8,12 +8,12 @@
 
 | Role | Model | Config | Port | TPS | Status |
 |------|-------|--------|------|-----|--------|
-| Arclight Coder | Qwen3.6-35B-A3B-AWQ | vLLM TP=2 GPU0+1, fp8 KV, ctx=32768 | 30000 | 232 t/s | SETTLED |
+| Arclight Coder | Qwen3.6-35B-A3B PrismaQuant-4.75bit (rdtand) | vLLM TP=1 GPU0, V1 engine, fp8 KV, ctx=32768 | 30000 | 57 t/s | SETTLED (BENCH_23) |
 | Arclight Thinker | Qwen3.6-27B PrismaQuant-5.5bit (rdtand) | vLLM TP=1 GPU1, V0 engine, fp8 KV, cp-ON, max-num-seqs 4, MTP n=3 | 30001 | 92 t/s seq=1 / 315 t/s N=4 | SETTLED (BENCH_19) |
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
 | Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main, GGML_CUDA_NO_PINNED=1, `-ngl 999` (singularity) / `-ngl 15` (co-load), `-np 1` | 8002 | 14 t/s isolated | SETTLED (BENCH_22) |
 
-**Open questions:** T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder (0/3 probes). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp). T_HARD1 CLOSED — PQ 41/50 vs AWQ 42/50 on hard suite, statistical tie; production choice on TPS grounds. **T_PQ2 Ph.1 REOPENED** — CUDA graphs confirmed, but tool-call reliability is unstable across reruns (5/5, 3/5, 4/5 latest 180500Z). Keep AWQ coder as production until stability rerun closes.
+**Open questions:** T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder (0/3 probes). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp). T_HARD1 CLOSED — PQ 41/50 vs AWQ 42/50 on hard suite, statistical tie; production choice on TPS grounds. **T_PQ2 Ph.1 SETTLED PASS (BENCH_23/23a)** — Logical stability confirmed on V1 engine at TP=1. Reasoning collapse is an engine-path artifact (V0/Eager), not a sharding defect. PrismaQuant promoted to production for precision/VRAM benefits despite 60 t/s cap.
 
 ---
 
@@ -89,7 +89,7 @@
 11. **Convergence model path uses split GGUF** — reference only `00001-of-00004.gguf`; loader finds the rest. All 4 files must be in the same directory.
 12. **`--max-num-seqs 4` for thinker** — upgraded from 1 (T_PAR1 R30). 3.5× parallel throughput (269 t/s at N=4), 4 MiB VRAM delta. The seqs=1 constraint was empirically unnecessary.
 13. **CRIU is TP=1 only** — TP=2 CRIU restore succeeds but post-restore inference fails (SHM IPC broken; Blackwell forces V1 engine). 26s restore is also only 4× vs cold start. Do not attempt for coder. See `docs/decisions/settled.md` and `docs/procedures/criu-ops.md`.
-14. **PrismaQuant 4.75bit 35B MoE startup OOM without tuned `max_num_seqs`** — model weights (~29.4 GiB) exceed any `gpu-mem-util` budget; OOM is in profiling forward pass sized by `max_num_seqs`. Default 1024 seqs → ~1.02 GiB needed / ~1.01 GiB free. Fix: `--max-num-seqs 16` + `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` + `--gpu-mem-util 0.90`. CUDA graphs are confirmed, but tool-call stability is not yet settled (BENCH_23 reruns: 5/5, 3/5, 4/5). Do not set `VLLM_USE_FLASHINFER_NVFP4` — unknown env var in vLLM 0.20.0, no-op.
+14. **PrismaQuant 4.75bit 35B MoE startup OOM without tuned `max_num_seqs`** — model weights (~29.4 GiB) exceed any `gpu-mem-util` budget; OOM is in profiling forward pass sized by `max_num_seqs`. Default 1024 seqs → ~1.02 GiB needed / ~1.01 GiB free. Fix: `--max-num-seqs 16` + `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` + `--gpu-mem-util 0.90`. **Logical stability confirmed on V1 engine at TP=1** (BENCH_23/23a). Do not use V0/Eager for this model at TP=1. TPS is capped at ~60 t/s due to SM120 grouped GEMM software immaturely; fix requires CUDA 13.0+ kernel maturation. Do not set `VLLM_USE_FLASHINFER_NVFP4` — unknown env var in vLLM 0.20.0, no-op.
 
 ---
 

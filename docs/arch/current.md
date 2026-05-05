@@ -27,11 +27,11 @@ Core (80B Qwen3-Next) RETIRED 2026-04-25 — Extended Arclight fills its role.
 │  │  GPU 0  (32GB GDDR7)   │       │  GPU 1  (32GB GDDR7)   │         │
 │  │                        │       │                        │         │
 │  │  vLLM: ARCLIGHT CODER  │       │  vLLM: ARCLIGHT THINKER│         │
-│  │  Qwen3.6-35B-A3B-AWQ   │       │  Qwen3.6-27B-AWQ       │         │
-│  │  TP=2 (spans GPU0+1)   │       │  TP=1, fp8 KV, cp-ON   │         │
-│  │  fp8 KV, port 30000    │       │  port 30001            │         │
-│  │  ~23GB VRAM (split)    │       │  ~21GB VRAM            │         │
-│  │  ~9GB free (KV cache)  │       │  ~11GB free (KV cache) │         │
+│  │  Qwen3.6-35B-A3B-PQ    │       │  Qwen3.6-27B-PQ        │         │
+│  │  TP=1, fp8 KV, V1-ON   │       │  TP=1, fp8 KV, MTP-n3  │         │
+│  │  port 30000            │       │  port 30001            │         │
+│  │  ~22GB VRAM            │       │  ~22GB VRAM            │         │
+│  │  ~10GB free (KV budget)│       │  ~10GB free (KV budget)│         │
 │  └────────────────────────┘       └────────────────────────┘         │
 │                                                                      │
 │  DDR5 RAM (192 GB)                                                   │
@@ -61,7 +61,7 @@ Core (80B Qwen3-Next) RETIRED 2026-04-25 — Extended Arclight fills its role.
 ### Arclight — concurrent hot pair, TP=1-per-GPU (current mode)
 Physical GPU isolation (coder GPU0, thinker GPU1) eliminates CUDA context time-slicing — the mechanism that collapsed concurrent throughput to ~2% in T1.2. Each model gets full GPU memory bandwidth.
 
-**Coder:** TP=2 is the production config at 232 t/s (T6.1 manual baseline, 2026-04-25). TP=1 suffers Reasoning Collapse (hallucination loops from Triton/FLA kernel shape mismatches in eager mode) and cannot serve as production without a non-eager path.
+**Coder:** TP=1 is the production config as of BENCH_23 (2026-05-05). Logical stability (no reasoning collapse) is achieved by using the **vLLM V1 engine** and **CUDA graph capture**. Performance is capped at ~60 t/s due to SM120 grouped GEMM software maturity.
 
 **Thinker:** TP=1 only for vLLM (GDN broken at TP=2). For extended context (128K), use ik_llama.cpp on the `main` branch with `--tensor-split 0.5,0.5` (SETTLED BENCH_15).
 
@@ -116,9 +116,9 @@ See [convergence.md](convergence.md) for full guide.
 
 ### Normal operation (Arclight hot pair)
 ```
-vllm serve qwen3.6-35b   --port 30000 --gpu 0 --tp 1    [running]
-vllm serve qwen3.6-27b   --port 30001 --gpu 1 --tp 1    [running]
-ik_llama-server 397b     --port 8002                    [always-resident]
+vllm serve qwen3.6-35b-pq   --port 30000 --gpu 0 --tp 1 --v1 [running]
+vllm serve qwen3.6-27b-pq   --port 30001 --gpu 1 --tp 1      [running]
+ik_llama-server 397b        --port 8002                      [always-resident]
 ```
 
 ### Extended Arclight — coder big-context mode
@@ -146,8 +146,8 @@ curl -X POST http://localhost:30001/wake_up
 
 | Tier | Container/Process | Model | Engine | Port | VRAM | RAM |
 |------|------------------|-------|--------|------|------|-----|
-| Arclight coder | arclight-coder | cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit | vLLM TP=2 GPU0+1 | 30000 | ~23GB | 0 |
-| Arclight thinker | arclight-thinker | QuantTrio/Qwen3.6-27B-AWQ | vLLM TP=1 GPU1 | 30001 | ~21GB | 0 |
+| Arclight coder | arclight-coder | rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm | vLLM TP=1 GPU0 (V1) | 30000 | ~22GB | 0 |
+| Arclight thinker | arclight-thinker | rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm | vLLM TP=1 GPU1 (V0) | 30001 | ~22GB | 0 |
 | Ext. Arclight | — (on-demand) | same as coder | vLLM TP=2 GPU0+1 | 30000 | ~60GB split | 0 |
 | Convergence | convergence | unsloth/Qwen3.5-397B UD-IQ2_M | ik_llama.cpp | 8002 | ~12GB (attn) | ~123GB |
 | Singularity | singularity | Qwen3.5-397B Q4_K_M | ik_llama.cpp | 8003 | ~30GB | ~180GB |
@@ -160,7 +160,7 @@ curl -X POST http://localhost:30001/wake_up
 ### vLLM (Arclight)
 - Container: rootless podman via `infra/compose/`, version 0.19.x
 - Deploy: `infra/scripts/deploy.sh`
-- V1 engine: **disabled** (`VLLM_USE_V1=0`) — stability fix for Blackwell sm_120
+- V1 engine: **enabled** for Coder TP=1 stability; **disabled** for Thinker (compressed-tensors path).
 
 ### ik_llama.cpp (Convergence)
 - Repo: `/srv/ai/projects/ik_llama.cpp`, branch `main`

@@ -7,23 +7,24 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
 
 ## Active roles
 
-### Arclight Coder: Qwen3.6-35B-A3B-AWQ (cyankiwi)
-**SETTLED (T2.5, 2026-04-18).** Supersedes Qwen3-Coder-30B.
-- **Performance:** 237.1 t/s seq=1, 232 t/s TP=2 (T6.1 baseline 2026-04-25)
-- **Quality:** 96.7% tool-call reliability (29/30), 100% quality completion (10/10)
+### Arclight Coder: Qwen3.6-35B-A3B PrismaQuant-4.75bit (rdtand)
+**SETTLED (BENCH_23, 2026-05-05).** Supersedes AWQ baseline.
+- **Performance:** 56.5 - 59.5 t/s seq=1 (TP=1, V1 Engine).
+- **Quality:** Stable reasoning trace on th02. 100% logical coherence in graph mode.
 - **Production config:**
   ```
-  Model: cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit
-  TP=2, GPU0+1
+  Model: rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm
+  TP=1, GPU0
   --gpu-memory-utilization 0.90
   --kv-cache-dtype fp8
-  --ctx 32768 (65536 in Extended mode)
+  --max-num-seqs 16
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
-  VLLM_USE_V1=0
-  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
+  env: VLLM_USE_V1=1  # MANDATORY for TP=1 stability
+  env: PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
   ```
-- **Why TP=2 mandatory:** TP=1 on vLLM 0.19.0 triggers Reasoning Collapse (hallucination loops, Triton/FLA kernel shape mismatch in eager mode). TP=1 regresses to ~20 t/s. Not worth debugging.
-- **Why coder wins:** SWE-bench Verified 73.4%, Terminal-Bench 51.5%, MCPMark 37.0%, WideSearch 60.1% — dominates every agentic benchmark relevant to this workload. Gemma4-31B ties on pure coding (LiveCodeBench 80.0 vs 80.4) but loses on all agentic tasks.
+- **Why TP=1 is now viable:** Discovery in BENCH_23/23a confirmed that Reasoning Collapse was an artifact of the V0/Eager-mode kernel path. The **vLLM V1 Engine** with **CUDA graphs** (captured at 0.54 GiB) provides a logically stable execution path even for a single-shard MoE model.
+- **Why this wins over AWQ:** Higher theoretical precision (FP4 weights vs INT4) and significantly better VRAM flexibility. While raw TPS is regressed by 4x compared to TP=2 AWQ (~240 t/s), the ability to co-load Thinker and Coder on 2x5090 without OOM risk is the decisive factor.
+- **Why it is "slow":** Grouped GEMM software for MoE models on SM120 is immature. FlashInfer falls back to `compute_120a` instead of `compute_120f`.
 
 ### Arclight Thinker: Qwen3.6-27B-PrismaQuant-5.5bit (rdtand)
 **SETTLED (BENCH_12 2026-05-01, updated BENCH_19 2026-05-03).** Supersedes Qwen3.6-27B-AWQ.
@@ -116,8 +117,10 @@ SUPERSEDED by Qwen3.6-35B-A3B (better quality, similar TPS). Baseline performanc
 
 ## NVFP4 / PrismaQuant (Blackwell-native FP4) — split status
 
-### MoE models on SM120: DEFERRED — Marlin is faster
-SETTLED (R30, 2026-04-30). CUTLASS grouped FP4 GEMM on SM120 desktop Blackwell produces suboptimal results: FlashInfer emits `compute_120a` instead of `compute_120f`, blocking native TMA WS tactics. Measured: **NVFP4 FlashInfer-CUTLASS = 39 t/s vs AWQ Marlin = 46–49 t/s.** Fix requires CUDA 13.0. Do not test PrismaQuant coder (35B A3B MoE) until this matures upstream.
+### MoE models on SM120: SETTLED CAP — PrismaQuant prioritized over TPS
+**SETTLED (BENCH_23, 2026-05-05).** CUTLASS grouped FP4 GEMM on SM120 desktop Blackwell produces suboptimal results: FlashInfer emits `compute_120a` instead of `compute_120f`, blocking native TMA WS tactics.
+- **Measured:** **NVFP4 FlashInfer-CUTLASS = 56.5 t/s (N=1).**
+- **Decision:** Settled on this path for production Coder (35B A3B) due to precision and TP=1 stability. The 60 t/s cap is accepted until CUDA 13.0+ kernel maturation resolves the grouped GEMM bottleneck.
 
 ### Dense models on SM120: T_PQ1 QUEUED
 Dense NVFP4 GEMM is unaffected by the grouped GEMM bug. PrismaQuant thinker (rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm) queued as T_PQ1 after CUDA 13.0 container rebuild.
