@@ -94,6 +94,22 @@ All engines run as rootless podman containers. Scripts use `podman compose`, not
 - Add `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`
 - If still failing, reduce `--gpu-memory-utilization` (try 0.85 → 0.80)
 
+### OOM on startup with NVFP4 MoE model (PrismaQuant 35B A3B)
+The OOM is in the **profiling forward pass**, not CUDA graph capture. `gpu-mem-util` has no effect because model weights alone (~29.4 GiB) already exceed any budget. The pass size is controlled by `max_num_seqs`.
+```bash
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+./infra/scripts/deploy.sh vllm gpu0 rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm \
+  --trust-remote-code \
+  --gpu-mem-util 0.90 \
+  --kv-cache-dtype fp8 \
+  --max-num-seqs 16 \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3
+```
+Notes:
+- `--gpu-mem-util 0.90` required (0.84 is below the model floor → 0 KV blocks).
+- CUDA graphs work with this config: `enforce_eager=False`, `CUDAGraphMode.FULL_AND_PIECEWISE`. TPS: 120.9 t/s decode (N=1) / 459.3 t/s agg (N=4). BENCH_23 2026-05-05.
+
 ### TP=1 gives ~20 t/s instead of ~230 t/s
 - Check if V1 engine is active (`VLLM_USE_V1=0` may not be set)
 - V1 forces eager mode on Blackwell in some configs → 10× penalty

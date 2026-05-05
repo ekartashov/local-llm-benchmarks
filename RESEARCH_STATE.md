@@ -10,6 +10,40 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 *(none — BENCH_10 closed)*
 
+## BENCH_23 COMPLETE (2026-05-05) — T_PQ2 Phase 1 — run 20260505T170250Z
+
+**Model:** `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` TP=1 GPU0, vLLM 0.20.0 V1.
+
+**CUDA graphs confirmed.** `enforce_eager=False`, `CUDAGraphMode.FULL_AND_PIECEWISE`, capture sizes `[1,2,4,8,16,24,32]`. The earlier 130957Z run used the original script which still had `--enforce-eager` explicitly — 12 t/s was a CLI flag artifact, not an auto-detection issue.
+
+**Startup fix (after 3 OOM iterations):**
+- `--max-num-seqs 16` — the decisive fix: limits profiling batch size from 1024 → 16, dropping peak VRAM spike from ~30.1 GiB to ~27.7 GiB
+- `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` — reduces fragmentation
+- `--gpu-mem-util 0.90` (model floor ~27.5 GiB; 0.84 was below floor → 0 KV blocks)
+
+*OOM diagnosis:* NOT in CUDA graph capture — in the profiling forward pass sized by `max_num_seqs`. Default 1024 seqs → ~1.02 GiB needed / 1.01 GiB free = 10 MiB gap. `gpu-mem-util` changes had zero effect (model weights exceed any budget target regardless).
+
+*Note:* `VLLM_USE_FLASHINFER_NVFP4=1` was set during the run but is a **no-op** — vLLM 0.20.0 logs "Unknown vLLM environment variable detected: VLLM_USE_FLASHINFER_NVFP4". Removed from script and docs.
+
+**TPS (definitive — CUDA graphs):**
+
+| N | PQ 4.75bit (TP=1, graphs) | AWQ 4bit (TP=2, graphs) | Delta |
+|---|---|---|---|
+| 1 | 56.5 t/s agg / 120.9 t/s decode | 240.9 t/s | -76.5% agg / -49.8% decode |
+| 4 | 459.3 t/s agg (155.4 t/s/seq) | 709.8 t/s | -35.3% |
+
+N=1 agg is TTFT-dominated (1,413 ms TTFT vs 335 ms at N=4). Decode TPS at 120.9 t/s is the real throughput number. PQ TP=1 at N=4 (459 t/s) exceeds AWQ TP=1 at N=4 (~350 t/s from T_PAR1).
+
+**VRAM at steady state:** GPU0: 27,896 / 4,182 MiB free. Kernels: `FlashInferCutlassNvFp4LinearKernel` + `FlashInferCutlassMxfp8LinearKernel` + `FLASHINFER_CUTLASS NvFp4 MoE`.
+
+**Tool calls:** 5/5 — PASS.
+
+**th02 quality:** PASS — complete correct preemptive EDF implementation, `finish_reason=stop`, 10,338 completion tokens.
+
+**Verdict: T_PQ2 Phase 1 DONE ✓ — CUDA graphs work, 120.9/459.3 t/s, 5/5 tool calls, th02 complete. TPS below AWQ TP=2 (240 t/s N=1) but viable as TP=1 coder. AWQ TP=2 production unchanged.**
+
+---
+
 ## BENCH_21 COMPLETE (2026-05-05) — run 20260505T092106Z
 
 Three-model co-load VERIFIED. Thinker TP=1 (GPU1, util=0.95, ctx=131K, MTP n=3) + Coder TP=1 (GPU0, util=0.80, enforce-eager, ctx=32K) + Convergence (ngl=15, --cpu-moe). All three models co-resident on 2×32 GiB RTX 5090. See `results/BENCH_21_coload_vram_20260505T092106Z/summary.md`.
