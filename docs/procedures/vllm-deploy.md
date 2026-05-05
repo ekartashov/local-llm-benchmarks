@@ -3,7 +3,7 @@
 ## Critical environment variables (all required, set in deploy.sh or exported)
 
 ```bash
-VLLM_USE_V1=0                          # Disable V1 engine — stability fix for Blackwell sm_120
+VLLM_USE_V1=0                          # vLLM 0.19.x only; ignored as unknown on vLLM 0.20+
 VLLM_SERVER_DEV_MODE=1                     # Exposes /sleep, /wake_up, /is_sleeping routes
 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 # Required for TP=2 -- prevents OOM during graph capture
 UV_USE_IO_URING=0                          # Required if CRIU checkpointing is planned
@@ -108,11 +108,13 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
 ```
 Notes:
 - `--gpu-mem-util 0.90` required (0.84 is below the model floor → 0 KV blocks).
-- CUDA graphs work with this config: `enforce_eager=False`, `CUDAGraphMode.FULL_AND_PIECEWISE`. TPS: 120.9 t/s decode (N=1) / 459.3 t/s agg (N=4). BENCH_23 2026-05-05.
+- CUDA graphs work with this config (`enforce_eager=False`, `CUDAGraphMode.FULL_AND_PIECEWISE`).
+- BENCH_23 best graph-mode run (170250Z): 56.5 t/s agg / 120.9 t/s decode at N=1, 459.3 t/s agg at N=4.
+- Tool-call reliability was unstable across reruns (5/5, 3/5, 4/5), so T_PQ2 Phase 1 remains open.
 
 ### TP=1 gives ~20 t/s instead of ~230 t/s
-- Check if V1 engine is active (`VLLM_USE_V1=0` may not be set)
-- V1 forces eager mode on Blackwell in some configs → 10× penalty
+- Check whether `--enforce-eager` was set (large penalty on coder models)
+- On vLLM 0.20+, V1 is always active and `VLLM_USE_V1=0` is ignored
 
 ### Tool calls returning no_call or format_error
 - Verify `--tool-call-parser` is set correctly (see docs/decisions/models.md parser table)

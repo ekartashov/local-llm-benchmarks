@@ -4,37 +4,6 @@ Full procedures for DONE/CANCELLED/SKIPPED/PUNTED items. This is a grep/ripgrep 
 
 ---
 
-## T_PQ2 Phase 1 — pq2_phase1_coder — DONE ✓ (BENCH_23, 2026-05-05)
-
-**Question:** Does PrismaQuant 4.75bit coder on TP=1 GPU0 (Marlin/FLASHINFER_CUTLASS fallback path) achieve reliable CUDA graphs, tool calls, and reasonable TPS?
-
-**Result:** PASS. CUDA graphs confirmed, 120.9 t/s decode (N=1) / 459.3 t/s agg (N=4), 5/5 tool calls, th02 complete.
-
-**Startup fix (took 3 OOM iterations to resolve):**
-The OOM was in the profiling forward pass (sized by `max_num_seqs`), NOT CUDA graph capture. Default 1024 seqs → ~1.02 GiB needed, 1.01 GiB free = 10 MiB gap. `gpu-mem-util` had zero effect (model weights alone ≈29.4 GiB exceed any budget). Fix:
-```bash
-PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-./infra/scripts/deploy.sh vllm gpu0 rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm \
-  --gpu-mem-util 0.90 --kv-cache-dtype fp8 --max-num-seqs 16 \
-  --tool-call-parser qwen3_coder --reasoning-parser qwen3 --trust-remote-code
-```
-Note: `gpu-mem-util 0.84` (used during OOM debugging) was below the model floor → 0 KV blocks. Use 0.90.
-Note: `VLLM_USE_FLASHINFER_NVFP4=1` is a no-op unknown env var in vLLM 0.20.0 — do not set.
-
-**Findings:**
-1. **CUDA graphs work:** `enforce_eager=False`, `CUDAGraphMode.FULL_AND_PIECEWISE`, capture sizes `[1,2,4,8,16,24,32]`. The earlier 130957Z run had `--enforce-eager` explicitly in the original script — that 12 t/s result was a CLI flag artifact.
-2. **Right kernels selected:** `FlashInferCutlassNvFp4LinearKernel`, `FlashInferCutlassMxfp8LinearKernel`, `FLASHINFER_CUTLASS NvFp4 MoE`.
-3. **TPS:** N=1: 56.5 t/s agg / 120.9 t/s decode (1,413 ms TTFT). N=4: 459.3 t/s agg / 155.4 t/s/seq (335 ms TTFT). PQ TP=1 N=4 exceeds AWQ TP=1 N=4.
-4. **Tool calls:** 5/5 PASS. AWQ baseline 29/30 (96.7%).
-5. **th02 quality:** PASS — complete preemptive EDF, `finish_reason=stop`, 10,338 tokens.
-6. **VRAM:** GPU0 27,896 / 4,182 MiB free at steady state.
-
-**Verdict:** T_PQ2 Phase 1 DONE ✓. Viable as TP=1 coder candidate. AWQ coder (TP=2, 241 t/s) unchanged as production. Phase 2 (NVFP4 MoE grouped GEMM) deferred to FlashInfer #38718 fix, ETA late Q2 2026.
-
-**Artifacts:** `results/BENCH_23_pq2_phase1_coder_20260505T170250Z/`
-
----
-
 ## QX_PRELOAD — convergence_qx_preload — DONE ✓ (BENCH_22, 2026-05-05)
 
 **Question:** Can page-cache pre-warming (QX_PRELOAD) achieve a restore-to-interactive time of 17–20s for the 123GB Convergence GGUF model?

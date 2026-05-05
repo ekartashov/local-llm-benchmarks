@@ -280,7 +280,24 @@ for i in range(1, 6):
 
 th02 = load_json(raw / "th02_response.json")
 choices = th02.get("choices", [{}])
-th02_text = choices[0].get("message", {}).get("content", "ERROR: No response") if choices else "ERROR: Empty response"
+th02_choice = choices[0] if choices else {}
+th02_msg = th02_choice.get("message", {}) if isinstance(th02_choice, dict) else {}
+th02_finish_reason = th02_choice.get("finish_reason", "unknown") if isinstance(th02_choice, dict) else "unknown"
+th02_content = th02_msg.get("content") if isinstance(th02_msg, dict) else None
+
+if isinstance(th02_content, str):
+    th02_text = th02_content
+elif th02_content is None:
+    # Some runs end with reasoning-only output (content=null). Keep summary generation stable.
+    reasoning = th02_msg.get("reasoning") if isinstance(th02_msg, dict) else None
+    if isinstance(reasoning, str) and reasoning:
+        preview = reasoning[:4000]
+        trunc_note = "\n...[truncated reasoning-only output]..." if len(reasoning) > 4000 else ""
+        th02_text = f"[NO_FINAL_CONTENT] finish_reason={th02_finish_reason}\n\n{preview}{trunc_note}"
+    else:
+        th02_text = f"[NO_FINAL_CONTENT] finish_reason={th02_finish_reason}"
+else:
+    th02_text = json.dumps(th02_content, ensure_ascii=False, indent=2)
 
 # Baseline comparison
 AWQ_N1 = 240.9

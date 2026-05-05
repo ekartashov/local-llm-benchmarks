@@ -8,39 +8,36 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 ## Open from testing
 
-*(none — BENCH_10 closed)*
+- BENCH_23 latest completed rerun (`20260505T180500Z`) still failed tool-call closure (4/5) despite reproducible graph-mode TPS. T_PQ2 Phase 1 remains open.
 
-## BENCH_23 COMPLETE (2026-05-05) — T_PQ2 Phase 1 — run 20260505T170250Z
+## BENCH_23 UPDATE (2026-05-05) — T_PQ2 Phase 1 remains OPEN
 
-**Model:** `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` TP=1 GPU0, vLLM 0.20.0 V1.
+**Model:** `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` TP=1 GPU0, vLLM 0.20.0 (V1-only).
 
-**CUDA graphs confirmed.** `enforce_eager=False`, `CUDAGraphMode.FULL_AND_PIECEWISE`, capture sizes `[1,2,4,8,16,24,32]`. The earlier 130957Z run used the original script which still had `--enforce-eager` explicitly — 12 t/s was a CLI flag artifact, not an auto-detection issue.
+**CUDA graphs are confirmed** (`enforce_eager=False`, `CUDAGraphMode.FULL_AND_PIECEWISE`, capture sizes `[1,2,4,8,16,24,32]`), but tool-call reliability is inconsistent across completed runs.
 
-**Startup fix (after 3 OOM iterations):**
+**Completed BENCH_23 runs:**
+| Run | Mode | N=1 | N=4 | Tool calls |
+|---|---|---|---|---|
+| `20260505T130957Z` | eager | 12.0 t/s agg / 17.1 decode | 59.4 t/s agg | 4/5 |
+| `20260505T170250Z` | graphs | 56.5 t/s agg / 120.9 decode | 459.3 t/s agg | 5/5 |
+| `20260505T172451Z` | graphs | 56.4 t/s agg / 197.2 decode | 477.3 t/s agg | 3/5 |
+| `20260505T180500Z` | graphs | 55.3 t/s agg / 117.9 decode | 458.1 t/s agg | 4/5 |
+
+**Startup fix (verified):**
 - `--max-num-seqs 16` — the decisive fix: limits profiling batch size from 1024 → 16, dropping peak VRAM spike from ~30.1 GiB to ~27.7 GiB
 - `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` — reduces fragmentation
 - `--gpu-mem-util 0.90` (model floor ~27.5 GiB; 0.84 was below floor → 0 KV blocks)
 
 *OOM diagnosis:* NOT in CUDA graph capture — in the profiling forward pass sized by `max_num_seqs`. Default 1024 seqs → ~1.02 GiB needed / 1.01 GiB free = 10 MiB gap. `gpu-mem-util` changes had zero effect (model weights exceed any budget target regardless).
 
-*Note:* `VLLM_USE_FLASHINFER_NVFP4=1` was set during the run but is a **no-op** — vLLM 0.20.0 logs "Unknown vLLM environment variable detected: VLLM_USE_FLASHINFER_NVFP4". Removed from script and docs.
-
-**TPS (definitive — CUDA graphs):**
-
-| N | PQ 4.75bit (TP=1, graphs) | AWQ 4bit (TP=2, graphs) | Delta |
-|---|---|---|---|
-| 1 | 56.5 t/s agg / 120.9 t/s decode | 240.9 t/s | -76.5% agg / -49.8% decode |
-| 4 | 459.3 t/s agg (155.4 t/s/seq) | 709.8 t/s | -35.3% |
-
-N=1 agg is TTFT-dominated (1,413 ms TTFT vs 335 ms at N=4). Decode TPS at 120.9 t/s is the real throughput number. PQ TP=1 at N=4 (459 t/s) exceeds AWQ TP=1 at N=4 (~350 t/s from T_PAR1).
+*Note:* `VLLM_USE_FLASHINFER_NVFP4=1` is a no-op in vLLM 0.20.0 (unknown env var warning).
 
 **VRAM at steady state:** GPU0: 27,896 / 4,182 MiB free. Kernels: `FlashInferCutlassNvFp4LinearKernel` + `FlashInferCutlassMxfp8LinearKernel` + `FLASHINFER_CUTLASS NvFp4 MoE`.
 
-**Tool calls:** 5/5 — PASS.
+**th02 quality:** non-deterministic across runs. Latest run (`180500Z`) ended with `finish_reason=length`, `message.content=null` (reasoning-only output), so quality is not closable.
 
-**th02 quality:** PASS — complete correct preemptive EDF implementation, `finish_reason=stop`, 10,338 completion tokens.
-
-**Verdict: T_PQ2 Phase 1 DONE ✓ — CUDA graphs work, 120.9/459.3 t/s, 5/5 tool calls, th02 complete. TPS below AWQ TP=2 (240 t/s N=1) but viable as TP=1 coder. AWQ TP=2 production unchanged.**
+**Verdict:** T_PQ2 Phase 1 remains OPEN. Keep AWQ TP=2 as production coder and rerun for reliability closure.
 
 ---
 
@@ -60,30 +57,12 @@ Per-process at ngl=15: Coder 25,758 MiB (GPU0), Thinker 29,238 MiB (GPU1), Conve
 
 Convergence TPS under co-load: **4.05 t/s warm** (reps 2–3) vs **13.99 t/s isolated** (71% reduction).
 
-**Critical findings:**
-1. **vLLM is 0.20.0**: `VLLM_USE_V1`, `VLLM_ENGINE_ITERATOR_SOURCE` are unknown/ignored env vars. V1 is the only engine. All gotcha #8 / deploy.sh references to "VLLM_USE_V1=0 mandatory" are obsolete.
-2. **Co-load feasible but Convergence TPS degraded at ngl=15**: 4.05 t/s warm vs 3.7 t/s CPU-only — the 15 layers barely help. However: thinker util is NOT constrained by KV pool size (see GDN correction below). Higher ngl is achievable by reducing thinker util.
-3. **Coder TP=1 enforce-eager severe TPS degradation**: 25,800 MiB GPU0 with minimal KV cache. enforce-eager observed to cause up to 20× TPS degradation on the coder model (reason unknown — possibly CUDA graph warm-path vs fallback kernel path). Production coder baseline is TP=2 CUDA-graph at 237 t/s (N=1) / 1205 t/s (N=8); enforce-eager co-load TPS NOT measured in BENCH_21 but expected ~12–60 t/s range. This is a second major degradation in the co-load config alongside Convergence TPS loss.
-4. **Residual margins are razor-thin at util=0.95**: 701/467 MiB free. With thinker util reduced, this relaxes substantially.
+**Critical findings (measured):**
+1. Co-load is feasible at thinker util=0.95 + coder util=0.80 + Convergence `-ngl 15`.
+2. Convergence throughput in this co-load point is 4.05 t/s warm (vs 13.99 t/s isolated at `-ngl 999`).
+3. Residual VRAM at this point is tight: 701 MiB (GPU0) / 467 MiB (GPU1).
 
-**GDN architecture correction (2026-05-05):** The thinker model (Qwen3.6-27B PrismaQuant) uses Gated DeltaNet (GDN) hybrid architecture. GDN layers maintain O(d) recurrent state — they do NOT populate the KV cache regardless of context length. "DeltaNet KV pool ~0 growth with context" (BENCH_20). The 5.92 GiB KV pool at util=0.95 is only for the few traditional attention heads in the hybrid; it is NOT a constraint on reasoning quality at 128K context. This invalidates any analysis that constrained thinker util to preserve KV token capacity.
-
-**Two-point Convergence VRAM model** (ngl=15 measured: 7,942 MiB total; ngl=94 all-layers isolated: ~16,866 MiB):
-- Fixed overhead ≈ 6,247 MiB (KV auto-allocated + shared weights, regardless of ngl)
-- Per additional layer ≈ 113 MiB
-
-| Thinker util | GPU1 free | Convergence budget | Est. max ngl | Est. Convergence TPS |
-|---|---|---|---|---|
-| 0.95 (current) | ~2,832 MiB | ~9,110 MiB total | ~25 | ~4.6 t/s |
-| 0.80 | ~6,026 MiB | ~12,304 MiB total | ~53 | ~6.3 t/s |
-| 0.73 (model floor) | ~8,309 MiB | ~14,587 MiB total | ~73 | ~8.6 t/s |
-
-Model floor: non-KV overhead = 23,218 MiB → min_util = 23,218/32,112 ≈ 0.723. At util=0.73, KV pool ≈ 585 MiB — trivially sufficient for GDN hybrid. TPS from formula TPS(ngl) ≈ 1/(0.07148 + (94−ngl)×0.00211).
-
-**Architecture decision needed (research mode):** Whether to:
-- (A) Accept co-load at ~4 t/s Convergence with current util=0.95 (established, verified)
-- (B) Run BENCH_21b: thinker util=0.73 + CONVERGENCE_NGL=70, targeting ~8.6 t/s (potentially 61% of isolated vs 29% now) — requires verifying thinker loads at util=0.73 and measuring actual ngl ceiling
-- (C) Keep Convergence at ngl=999 (14 t/s) but require CRIU-based swap (option B from before)
+**Open from BENCH_21:** higher-ngl / lower-thinker-util projections were not benchmark-validated and remain OPEN work.
 
 ---
 
@@ -118,7 +97,7 @@ Model floor: non-KV overhead = 23,218 MiB → min_util = 23,218/32,112 ≈ 0.723
 
 - **T_CRIU2 COMPLETE (2026-04-28):** Two findings. (1) --no-mmap: CHECKPOINT_FAILED (SYSTEM_OOM). CRIU dump of a 135 GB anon-RAM process requires VMS to spike to ~351 GB — physically impossible on 188 GB RAM. (2) mmap (--no-mmap removed): RESTORE_OK. Checkpoint 8.7 GB in 7.6 s. Restore 7.3 s. First-inference TTFT 100.56 s (page-fault warmup from NVMe, 123 GB → ~17 s theoretical, but access is demand-paged across the full generation), rep-2 36.1 s, rep-3 7.7 s. **Critical implication:** without QX_PRELOAD, CRIU mmap restore-to-interactive (100 s) is WORSE than cold start (83 s). QX_PRELOAD is now a prerequisite for CRIU to benefit Convergence. With QX_PRELOAD (pre-warm 123 GB into page cache 17 s before restore): projected 14 s restore-to-interactive — 6× improvement. QX_PRELOAD elevated to HIGH priority.
 
-- **BENCH_18 COMPLETE (2026-05-03):** QX_PRELOAD NVMe Checkpoint Pre-warm mechanism verified — on the **Thinker** (vLLM, 31 GB GPU fat checkpoint). **Key architectural clarification:** a fat checkpoint (full GPU memory dump) is the CORRECT approach for actually freeing a GPU slot and restoring it later — the thin 501 MB checkpoint from T_CRIU3 Ph.1 retains GPU state on the card (GPU stays occupied, usable only for pause/resume of the same model). For real swaps, you need the full dump. `posix_fadvise(WILLNEED)` pre-warming of the checkpoint images reduced restore from 19.8s cold to **12.0s warm** (1.65× speedup). Convergence was NOT tested — the Convergence QX_PRELOAD target is different: pre-warming the **GGUF model files** (123 GB) into page cache, since the Convergence CRIU dump is only 8.7 GB (mmap-backed, dirty pages only) but restore hits 100s demand-paging the GGUF files from NVMe. That test is still OPEN.
+- **BENCH_18 COMPLETE (2026-05-03):** QX_PRELOAD NVMe Checkpoint Pre-warm mechanism verified — on the **Thinker** (vLLM, 31 GB GPU fat checkpoint). **Key architectural clarification:** a fat checkpoint (full GPU memory dump) is the CORRECT approach for actually freeing a GPU slot and restoring it later — the thin 501 MB checkpoint from T_CRIU3 Ph.1 retains GPU state on the card (GPU stays occupied, usable only for pause/resume of the same model). For real swaps, you need the full dump. `posix_fadvise(WILLNEED)` pre-warming of the checkpoint images reduced restore from 19.8s cold to **12.0s warm** (1.65× speedup). Convergence follow-up was completed in BENCH_22: GGUF+CRIU prewarm + `GGML_CUDA_NO_PINNED=1` achieved ~12s restore-to-interactive.
 
 - **T_CRIU3 Phase 1 COMPLETE (2026-04-28):** Thinker host-native CRIU success. Restore time **0.43s** (target < 1s). Checkpoint size **501 MB** (CPU state only; GPU state retained via `cuda-checkpoint --toggle`). Post-restore TTFT parity (0.73s vs 0.72s). **Important caveat:** this is a **pause/resume** mechanism — `cuda-checkpoint --toggle` keeps GPU weights resident in VRAM (GPU slot still occupied). This does NOT free the GPU for another model. For real GPU slot swapping (free thinker GPU, load coder, restore thinker later), a fat checkpoint with full GPU dump is required (BENCH_18 path). The 0.43s is the correct number for pause/resume-same-model only.
 
@@ -148,7 +127,7 @@ Model floor: non-KV overhead = 23,218 MiB → min_util = 23,218/32,112 ≈ 0.723
 |------|-------|--------|-----|--------|
 | Arclight Coder | cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit | TP=2 GPU0+1, fp8 KV, ctx 32K | 237 t/s | SETTLED |
 | Arclight Thinker | rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm | TP=1 GPU1, V0 engine, fp8 KV, cp-ON, --max-num-seqs 4, MTP n=3 | 92 t/s | SETTLED (BENCH_19) |
-| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main (merged pr-1288), -ngl 999 --cpu-moe, -np 4, -t 32 | 14 t/s | SETTLED |
+| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main, GGML_CUDA_NO_PINNED=1, `-ngl 999` isolated / `-ngl 15` co-load, `-np 1` | 14 t/s isolated | SETTLED |
 | Extended Arclight | same as Coder, 65K ctx | CRIU hot restore from checkpoint, 0.28s | 238 t/s | SETTLED |
 
 ---
@@ -159,10 +138,10 @@ Model floor: non-KV overhead = 23,218 MiB → min_util = 23,218/32,112 ≈ 0.723
 - **TP=1-per-GPU isolation:** Perfect 1.0× concurrent isolation. Coder=237 t/s (T2.5), Thinker=77.4 t/s (T2.4d).
 - **GDN TP=2 broken (H-TP2 confirmed T2.4g):** Gated DeltaNet recurrent state does NOT commute across TP shards. TP=2 is semantically incorrect for Qwen3.6-27B regardless of chunked-prefill. TP=1 + fp8 KV + cp-ON is the only viable thinker config.
 - **CRIU hot restart:** 0.28s vs 100.2s cold. Host-native only (Podman CDI conflicts). vLLM uvloop must be patched to asyncio. `UV_USE_IO_URING=0` required.
-- **VLLM_USE_V1=0 mandatory:** V1 engine unstable on Blackwell sm_120 for our models. Always set in deploy.sh.
+- **VLLM engine flag is version-scoped:** `VLLM_USE_V1=0` is relevant for vLLM 0.19.x; BENCH_21/23 logs show vLLM 0.20.x treats it as unknown/ignored.
 - **VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 mandatory for TP=2:** Prevents OOM during CUDA graph capture.
 - **--swap-space blocked:** Flag unrecognized in vLLM 0.19.0 (R-V0 engine path). 65K is the hard context ceiling for Extended Arclight.
-- **Convergence always-resident:** 83s cold start is too high for on-demand routing. Keep as always-resident service. Context ceiling 128k tokens. True concurrency = **permanently N=1** (SETTLED FAIL, PR #1288 — Qwen3.5-MoE architectural constraint, not a bug).
+- **Convergence dual-mode:** always-resident (`-ngl 999`) remains max-throughput mode; on-demand CRIU restore is now viable at ~12s (BENCH_22) with `GGML_CUDA_NO_PINNED=1` + prewarm. True concurrency = **permanently N=1** (SETTLED FAIL, PR #1288 — architectural constraint).
 
 ## Known bad / excluded
 
@@ -183,15 +162,21 @@ See `docs/queue/open.md` for full specs. Key items:
 
 | Item | Priority | Status |
 |------|----------|--------|
-| QX_PRELOAD | HIGH | OPEN — BENCH_18 proven posix_fadvise on checkpoint images (31 GB Thinker fat dump: 19.8s→12.0s). Convergence is different: CRIU dump is only 8.7 GB (mmap, dirty pages) but restore hits 100s demand-paging 123 GB GGUF from NVMe. QX_PRELOAD for Convergence must pre-warm the GGUF model files, not the checkpoint images. Never tested. |
+| T_PQ2 | HIGH | OPEN (Ph.1 rerun) — graph-mode throughput reproduced, but tool-call reliability regressed in latest run (3/5). |
 | T_CRIU3 Ph.1 | DONE ✓ | Thinker TP=1: 0.43s restore, 501 MB, TTFT parity. Sequential TP=2 swaps unblocked. |
 | T_CRIU3 Ph.2 | DONE ✗ | Coder TP=2: dump/restore OK (29s/67GB), KV preserved, inference FAIL (SHM IPC broken post-restore). |
 | T_ENGINE_EVAL | DONE ✓ | GLM-4.7-Flash verified on ik_llama.cpp (BENCH_16). |
+| T_CV6 | HIGH | OPEN — Convergence Extended architecture test (`-ngl 999` target under revised co-load topology). |
+| T_CV7 | MEDIUM | OPEN — speculative expert offload engine decision (`llama.cpp` vs `ik_llama.cpp`). |
+| T_CV8 | MEDIUM | OPEN — speculative decoding engine decision (MTP/DFlash). |
+| T_KV4 | HIGH | OPEN — Arclight KV max-size/max-batch vs gpu-mem-util and real MiB usage. |
+| T_KV5 | HIGH | OPEN — Convergence KV precision/context sweep (fp8 vs bf16 up to 256K). |
+| T_ARCH3 | MEDIUM | OPEN — Arclight Full fp16/bf16 KV vs Extended Arclight rationale for GDN workloads. |
 | T2.6 | MEDIUM | OPEN — Behemoth archetype scouting (design item) |
 | T_PAR1 | DONE ✓ | Coder: 240–1205 t/s (N=1–8, no saturation). Thinker: 269 t/s at max-num-seqs=4. Convergence: N≥2 crashes. |
 | T_CRIU2 | DONE ✓ | --no-mmap OOM. mmap: 8.7 GB / 7s restore / 100s first-inference. QX_PRELOAD required. |
 | T_CV5 | DONE ✓ | NGL sweep + MoE offload done. |
-| T3.4 | DONE ✗ | Prefix cache works. Wake broken for Qwen3.6-35B-A3B + --enforce-eager. |
+| QX_PRELOAD | DONE ✓ | BENCH_22 closed: 12s restore-to-interactive via `GGML_CUDA_NO_PINNED=1` + GGUF+CRIU prewarm. |
 
 ---
 

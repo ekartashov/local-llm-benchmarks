@@ -36,75 +36,101 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ## MEDIUM priority
 
-### T_PQ1 — prismaquant_thinker — OPEN (requires CUDA 13.0 container rebuild)
+### T_PQ2 — prismaquant_coder_phase1 — OPEN (stability rerun required)
 
-**Question:** Does rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm give better TPS and/or quality than the current AWQ thinker?
+**Question:** Is `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` stable enough on tool calls to be a viable TP=1 coder fallback?
 
-**Why MEDIUM (not HIGH):** Requires a non-trivial container rebuild (CUDA 13.0 + FlashInfer 0.6.5 SM120 patches). Without the rebuild, the model may still load via compressed-tensors with a cutlass fallback — worth attempting without rebuild first.
+**Current evidence (BENCH_23, completed runs):**
+1. `20260505T130957Z` (eager): 12.0 t/s agg (N=1), tool calls 4/5.
+2. `20260505T170250Z` (graphs): 56.5 t/s agg / 120.9 t/s decode (N=1), 459.3 t/s agg (N=4), tool calls 5/5.
+3. `20260505T172451Z` (graphs): 56.4 t/s agg / 197.2 t/s decode (N=1), 477.3 t/s agg (N=4), tool calls 3/5.
+4. `20260505T180500Z` (graphs): 55.3 t/s agg / 117.9 t/s decode (N=1), 458.1 t/s agg (N=4), tool calls 4/5.
 
-**Two-phase approach:**
-1. **Phase 1 (no rebuild):** Deploy as-is, `VLLM_USE_V1=0`, measure TPS vs AWQ. If compressed-tensors loads and falls back to non-FP4 kernels, quality improvement from GPTQ calibration (0.33× RTN MSE) is still real.
-2. **Phase 2 (after CUDA 13.0 rebuild):** Confirm FlashInfer NVFP4 kernels activate. Compare TPS Phase 1 vs Phase 2.
+**Conclusion:** throughput is good in graph mode, but tool-call reliability is not stable across reruns. Keep AWQ TP=2 production.
 
-**Deploy command (Phase 1):**
+**Critical constraint — NO MTP:** `--speculative-config` must NOT be added to the coder (BENCH_14: 0/3 tool-call failure).
+
+**Deploy command (Ph.1 rerun):**
 ```bash
-VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-./infra/scripts/deploy.sh vllm gpu1 rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm \
-  --trust-remote-code --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
-  --enable-chunked-prefill --max-num-seqs 4 \
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+./infra/scripts/deploy.sh vllm gpu0 rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm \
+  --trust-remote-code --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 --max-num-seqs 16 \
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
 ```
 
-**Metrics:** TPS at N=1, TPS at N=4, quality on th02 (semantic correctness test), VRAM. Compare all vs AWQ baseline.
+**Pass (closure criteria):**
+1. Three consecutive runs with tool-call pass rate 5/5.
+2. th02 quality PASS in each run.
+3. N=1 agg TPS ≥ 50 and N=4 agg TPS ≥ 430 in graph mode.
 
-**Pass:** Quality ≥ 4.875/5 on thinker suite AND TPS within 10% of AWQ (quality win alone is sufficient — PrismaQuant at 5.5bit > AWQ 4bit per-bit quality).
-
-**Deps:** T_MTP1 ✓ DONE (BENCH_19 — MTP n=3 stable, no tool-call breakage).
-
----
-
-### T_PQ2 — prismaquant_coder_phase1 — OPEN (Phase 1: Marlin fallback, no rebuild)
-
-**Question:** Does `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` give better TPS and/or quality than the current AWQ coder (`cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit`)?
-
-**Why MEDIUM (Phase 1 only):** MoE NVFP4 grouped GEMM is blocked by FlashInfer #38718 (compute_120a vs compute_120f for TMA WS grouped GEMM on SM120). Community Docker fix exists; upstream ETA late Q2 2026. Phase 1 uses compressed-tensors Marlin fallback — no CUDA rebuild needed. This is exactly the path T_PQ1 / BENCH_12 used for the thinker (validated approach).
-
-**Critical constraint — NO MTP:** `--speculative-config` must NOT be added to the coder. BENCH_14 (2026-05-01) proved MTP breaks tool-call generation for A3B MoE coder (0/3 probes). Do not add speculative config regardless of what the PrismaQuant README suggests.
-
-**Deploy command (Phase 1):**
-```bash
-VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
-./infra/scripts/deploy.sh vllm tp2a rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm \
-  --trust-remote-code --gpu-mem-util 0.90 --ctx 32768 --kv-cache-dtype fp8 \
-  --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
-```
-
-**Metrics:** TPS at N=1, TPS at N=4, tool-call pass rate (5 probes), quality on th02. Compare vs AWQ baseline (237 t/s N=1 / 1205 t/s N=8).
-
-**Pass:** tool-call pass rate ≥ 95% AND quality ≥ AWQ on th02. TPS is informational in Phase 1 (Marlin fallback expected slightly slower than AWQ; Phase 2 NVFP4 may recover the gap).
-
-**Deps:** T_MTP2 ✓ CLOSED FAIL (MTP excluded from coder). T_PQ1 ✓ DONE (confirms Phase 1 Marlin fallback works).
+**Deps:** T_MTP2 ✓ CLOSED FAIL (MTP excluded).
 
 ---
 
-### T3.4 — prefix_cache_survival_across_sleep — OPEN (scope updated)
+### T_CV6 — convergence_extended_architecture_ngl999 — OPEN
 
-**Original question:** Does vLLM's CPU-offloaded prefix cache survive a sleep/wake cycle at level=1?
+**Question:** Can we free one Arclight GPU path and run Convergence at/near `-ngl 999` while still keeping thinker availability?
 
-**Updated scope with CRIU context:** CRIU checkpoints all process memory (including CPU-side prefix cache, since it lives in anonymous process RAM). Prefix cache survival across CRIU restore is expected by construction — but needs empirical verification. Run this test against both sleep/wake AND CRIU restore to understand the full picture.
+**Scope:**
+1. Test topology variants: thinker + Convergence (`-ngl 999`), thinker + Convergence (`-ngl` sweep), and thinker swap to Arclight Full when needed.
+2. Keep `-np 1` for Convergence (architectural limit).
+3. Record Convergence TPS + VRAM + impact on thinker latency.
 
-**Procedure:**
-1. Deploy any model with `--enable-prefix-caching --cpu-offload-gb 8`, TP=2.
-2. Send 4k-token prompt, record prefill time.
-3. Send same prompt again — verify cache hit (prefill time drops).
-4a. `POST /sleep?level=1`, then `POST /wake_up`. Send same prompt, measure prefill time.
-4b. CRIU checkpoint the process. Restore. Send same prompt, measure prefill time.
+**Pass:** find a topology with Convergence TPS ≥ 10 t/s and no thinker correctness regression.
 
-**Pass:** CRIU restore preserves prefix cache (prefill ≈ cached time). Sleep/wake result may differ.
+---
 
-**What failure means (sleep):** Prefix cache flushed on sleep → user-visible latency on first post-wake request. Note in `docs/arch/current.md`. Does not affect CRIU path.
+### T_CV7 — convergence_speculative_expert_offload_engine_eval — OPEN
 
-**Deps:** T1.1 ✓. Script at `benchmarks/queue/T3.4_prefix_cache_survival.sh` (verify exists or create).
+**Question:** For speculative expert offload, should we use upstream `llama.cpp` or `ik_llama.cpp`?
+
+**Scope:**
+1. Feature audit (flags + architecture support) on both engines.
+2. Run identical Convergence/Singularity prompts on both.
+3. Compare correctness, TPS, and operational stability.
+
+**Pass:** one engine selected with explicit rationale and benchmark deltas.
+
+---
+
+### T_CV8 — convergence_speculative_decoding_engine_eval — OPEN
+
+**Question:** For speculative decoding (MTP / DFlash), should we use `llama.cpp` or `ik_llama.cpp`?
+
+**Scope:** capability check, then A/B benchmark on same model + prompts.
+
+**Pass:** one engine selected with evidence for both throughput and output correctness.
+
+---
+
+### T_KV4 — arclight_kv_batch_utilization_matrix — OPEN
+
+**Question:** What are max KV cache size and max batch limits for Arclight coder/thinker versus GPU utilization, including actual MiB usage (max/avg/steady)?
+
+**Scope:** sweep `gpu-mem-util` and batch/seq settings on both roles; record KV pool and real process memory.
+
+**Pass:** publish operating envelopes with safe default + aggressive profile.
+
+---
+
+### T_KV5 — convergence_kv_fp8_bf16_256k — OPEN
+
+**Question:** What is the practical Convergence KV ceiling for fp8 vs bf16 up to 256K context?
+
+**Scope:** context ramp with fixed prompt and deterministic sampling; track OOM point, TPS decay, and memory growth.
+
+**Pass:** choose default KV precision for long-context Convergence.
+
+---
+
+### T_ARCH3 — arclight_full_vs_extended_gdn_rationale — OPEN
+
+**Question:** Is Extended Arclight still rational for GDN thinker workloads, or should Arclight Full with fp16/bf16 KV be the primary long-context strategy?
+
+**Scope:** compare quality/latency/VRAM for Extended vs Full under the same long-context task set.
+
+**Pass:** document a settled architectural recommendation and demote the losing mode.
 
 ---
 
@@ -121,36 +147,6 @@ VLLM_USE_V1=0 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 
 ---
 
-
-### QX_PRELOAD — nvme_checkpoint_preload_mechanism — OPEN (design + implement)
-
-**Context:** BENCH_18 (2026-05-03) proved posix_fadvise pre-warming works for fat checkpoints: Thinker 31GB fat dump (full GPU state) reduced from 19.8s cold to 12.0s warm (1.65×). **Convergence is a different case:** the Convergence CRIU dump is only 8.7GB (mmap, dirty pages only), but restore hits 100s first-inference due to demand-paging of the 123GB GGUF model files from NVMe. QX_PRELOAD for Convergence must pre-warm the GGUF model files, not the checkpoint images. This has not been tested.
-
-**Hardware:** Lexar NM790 4TB (7,400 MB/s read). Loading 135GB → ~18s. Router needs ~10s advance notice to trigger pre-warm before the switch is visible to the user.
-
-**Pre-warm mechanism (Convergence — mmap confirmed T_CRIU2):**
-```bash
-# T_CRIU2 confirmed Convergence uses mmap (--no-mmap removed) for CRIU.
-# GGUF pages are file-backed and served directly from page cache.
-# Pre-warming the GGUF files populates page cache → eliminates 100s NVMe demand-paging.
-# Pre-warm all 4 GGUF shards (~123GB total):
-GGUF_DIR=/srv/ai/models/hub/models--unsloth--Qwen3.5-397B-A17B-GGUF/snapshots/da33c16fa4440f831149fcf53b98a22bc07785e5/UD-IQ2_M
-cat "${GGUF_DIR}"/*.gguf > /dev/null &
-PREWARM_PID=$!
-# Expected: ~17s at 7,400 MB/s. Also warm the CRIU checkpoint (8.7GB, trivial):
-cat /srv/ai/checkpoints/convergence/*.tar* > /dev/null &
-```
-
-**Router integration points:**
-- OpenCode routing: "next task invokes Convergence" → trigger pre-warm of Convergence checkpoint
-- Context growth triggers: token count approaching 30K → pre-warm extended-coder checkpoint
-- Subagent dispatch: explicit @thinker routing → pre-warm thinker checkpoint
-
-**Pass:** warm restore ≤ 1s for checkpoints whose pre-warm completed. Cold restore time documented per checkpoint type.
-
-**Deps:** T_CRIU3 (checkpoint library standardization). NVMe hardware already in place.
-
----
 
 ## LOW priority (optimization tier — pending settled roles)
 

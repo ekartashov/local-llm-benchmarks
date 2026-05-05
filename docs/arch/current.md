@@ -1,6 +1,6 @@
 # Architecture: Current Deployment
 
-> **Status (R31, 2026-05-02):** Arclight hot-pair settled. Extended Arclight (65K ctx, 0.28s CRIU restart) settled. Convergence always-resident settled. Thinker 128K context verified (SETTLED via ik_llama.cpp main). Core RETIRED.
+> **Status (R35, 2026-05-05):** Arclight hot-pair settled. Extended Arclight (65K ctx, 0.28s CRIU restart) settled. Convergence dual-mode settled: always-resident (max TPS) or on-demand CRIU restore (~12s, BENCH_22). Thinker 128K context verified (SETTLED via ik_llama.cpp main). Core RETIRED.
 
 ---
 
@@ -88,13 +88,13 @@ See [extended-arclight.md](extended-arclight.md) for full procedure.
 
 **Thinker Extended mode:** SETTLED (BENCH_15). Qwen3.6-27B (dense) fully supported at 128K context via ik_llama.cpp `main` branch using layer-split parallelism (`--tensor-split`).
 
-### Convergence — ik_llama.cpp, always-resident (policy under review)
+### Convergence — ik_llama.cpp, dual-mode (settled)
 See [convergence.md](convergence.md) for full guide.
-- Currently always-resident (83s cold start is CPU-bound, too high for on-demand). Never kill without planning restart time.
-- `-ngl 999 --cpu-moe`: attention/norm/embed on GPU, MoE experts in RAM. 13.99 t/s.
+- Always-resident mode: `-ngl 999 --cpu-moe` (13.99 t/s isolate).
+- On-demand mode: CRIU restore is viable (~12s restore-to-interactive) when using `GGML_CUDA_NO_PINNED=1` + GGUF/CRIU prewarm (BENCH_22).
+- Co-load profile uses reduced offload (e.g., `-ngl 15`) to fit alongside Arclight.
 - Context ceiling: **128k tokens** (T_CV1). Beyond this requires Singularity.
-- Concurrent clients: **N=1 currently** (prior `main` branch fix investigating if resolves N≥2). `-np 4` is sequential pipelining only.
-- **Always-resident policy may change** if T_CRIU2 confirms CRIU works for ik_llama.cpp. CRIU restore bypasses the CPU-bound 83s model construction phase; with mmap (removing `--no-mmap`), checkpoint is small and restore may be sub-second. This would free 12GB GPU VRAM when Convergence is idle.
+- Concurrent clients: **N=1** (architectural limit, PR #1288). `-np 4` is sequential pipelining only.
 
 ---
 
