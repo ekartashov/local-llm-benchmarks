@@ -19,6 +19,7 @@ sudo make install    # binary → /usr/local/bin/ + CRIU plugin → /usr/lib/cri
 
 # 3. Checkpoint directory
 mkdir -p /srv/ai/checkpoints/coder-tp2
+mkdir -p /srv/ai/checkpoints/convergence
 
 # Prerequisites: driver ≥ 570, newuidmap/newgidmap installed
 ```
@@ -60,6 +61,7 @@ at the C level as a belt-and-suspenders defense for any code path that bypasses 
 Always export before any CRIU operation:
 ```bash
 export UV_USE_IO_URING=0   # prevents libuv from creating io_uring rings even if uvloop is imported
+export GGML_CUDA_NO_PINNED=1 # REQUIRED for Convergence (keeps experts file-backed)
 ```
 
 ---
@@ -126,6 +128,9 @@ Without this, the next vLLM deploy may OOM even though nvidia-smi shows capacity
 | TP=2 coder | Cold start | ~100s | — |
 | TP=2 coder | Checkpoint dump | ~29s | **67 GB** |
 | TP=2 coder | Hot restore | ~24–26s | — |
+| 397B Convergence | Cold start | ~83s | — |
+| 397B Convergence | Checkpoint dump | ~4s | **8 GB** (mmap) |
+| 397B Convergence | Hot restore | **~1s** sync (+11s 1st inf) | — |
 
 **TP=1 only.** TP=2 restore has a 4× speedup over cold start but fails at post-restore inference
 due to SHM IPC incompatibility (see Failure modes). Do not attempt CRIU for TP=2.
@@ -157,5 +162,7 @@ Error toggling CUDA in process ID <PID>: "OS call failed or operation not suppor
 | Restore succeeds but inference is wrong | Checkpoint corrupted or CUDA state mismatch | Do NOT use; report to vLLM issue tracker |
 | OOM after restore | Ghost VRAM from previous failed restore | `sudo nvidia-smi --gpu-reset -i 1` then retry |
 | Checkpoint CDI mount errors | Running inside container instead of host | Run CRIU operations on host only |
+| 397B restore takes > 90s | Experts are in pinned anonymous RAM | Ensure `GGML_CUDA_NO_PINNED=1` is set before start |
+| 397B first TTFT is > 100s | Weights are not pre-warmed | Run `cat` on GGUF shards before restore (QX_PRELOAD) |
 | CRIU fails in rootless Podman | CDI/namespace conflicts | Confirmed: host-native is the only working path |
 | `TimeoutError: RPC call to execute_model timed out` (TP=2 only) | SHM broadcast IPC broken post-restore — workers cannot see EngineCore writes to `ShmRingBuffer`. Blackwell forces V1 engine (SHM path) regardless of `VLLM_USE_V1=0`. | **Do not use CRIU for TP=2.** This is a settled architectural incompatibility (T_CRIU3 Phase 2, 2026-04-30). Use prefix cache prefill for KV continuity instead. |

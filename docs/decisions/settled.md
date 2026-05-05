@@ -41,7 +41,7 @@ SETTLED (T2.4d, R17, 2026-04-25). 4.875/5 quality, 77.4 t/s. Config: TP=1 GPU1, 
 **max-num-seqs upgraded 1→4 (T_PAR1, R30, 2026-04-30):** BENCH_02/03 confirmed max-num-seqs=4 is safe: 269.4 t/s aggregate at N=4 (3.5× vs seqs=1), VRAM delta 4 MiB. The seqs=1 constraint was conservative and empirically unnecessary. At seqs=4, TTFT for N=1 requests is unchanged (73 ms). Production deploy should use `--max-num-seqs 4`.
 
 ### Convergence: Qwen3.5-397B-A17B UD-IQ2_M
-SETTLED (R12, 2026-04-20). ~123GB, always-resident. Engine: ik_llama.cpp main (merged DeltaNet support).
+SETTLED (R12, updated BENCH_22 2026-05-05). ~123GB. Engine: ik_llama.cpp main. Supports **CRIU On-Demand Restore (12s)** when configured with `GGML_CUDA_NO_PINNED=1`.
 
 ### Core (80B): RETIRED
 SETTLED (R19, 2026-04-25). Extended Arclight fills the role. 80B model suspended. Re-evaluate only if Extended Arclight proves insufficient after T_KV1/T_KV3.
@@ -104,8 +104,12 @@ CRIU restore of vLLM TP=2 on Blackwell (sm_120) is broken at the SHM broadcast l
 - Even if fixed: 26s restore time vs ~100s cold start is only 4× — not worth the complexity.
   vLLM preallocates all KV blocks at startup, so a "clean" checkpoint is still ~67 GB.
 
-**Do not attempt CRIU for vLLM TP=2. Use prefix cache prefill (13.9× speedup, T3.4) for KV
-continuity after a coder context switch.**
+### TP=397B (Convergence): SETTLED PASS (BENCH_22, 2026-05-05)
+**12s restore-to-interactive achieved.**
+- **Configuration**: `GGML_CUDA_NO_PINNED=1` (keeps MoE experts file-backed).
+- **Checkpoint**: 8.0 GB (reduced from 122 GB).
+- **Optimization**: `QX_PRELOAD` pre-warms GGUF weights + CRIU images into page cache.
+- **Result**: ~1s restore + ~11s first-inference TTFT. Validates on-demand restoration for king-behemoth models.
 
 ---
 
@@ -118,10 +122,10 @@ SETTLED. Coder TP=2 at fp8 KV: **65,536 tokens max context** without swap. 238.2
 ## Convergence operational parameters (T_CV1–T_CV4, 2026-04-26)
 
 SETTLED. See docs/arch/convergence.md for numbers. Summary:
-- Always-resident (83s cold start → never on-demand)
-- Production config: `-ngl 999 --cpu-moe -t 32 -np 4` at 13.99 t/s
-- Context ceiling: 128k tokens
-- **-np 4 is sequential pipelining, NOT true concurrency** — concurrent HTTP to Convergence is permanently limited to N=1. **SETTLED FAIL (PR #1288):** Qwen3.5-MoE has an architectural constraint preventing more than one concurrent sequence. This is not a bug; it is a model design property. No upstream fix expected.
+- **On-Demand viable (12s)** or Always-resident (83s cold start).
+- Production config: `GGML_CUDA_NO_PINNED=1`, `-ngl 15 --cpu-moe -t 32 -np 1`.
+- Context ceiling: 128k tokens.
+- **-np 1 enforced for stability** (N≥2 concurrent HTTP requests are permanently limited to N=1 by architectural constraint PR #1288).
 
 ---
 

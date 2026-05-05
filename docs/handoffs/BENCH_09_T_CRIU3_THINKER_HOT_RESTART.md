@@ -20,7 +20,7 @@ T_KV2 proved 0.28s hot restart for vLLM TP=2 (coder). The thinker uses TP=1 on G
 Before running anything, read these files in order:
 
 1. `docs/INDEX.md` — current production config, gotchas, port assignments
-2. `docs/procedures/criu-ops.md` — CRIU procedure, cuda-checkpoint, UV_USE_IO_URING=0 requirement
+2. `docs/procedures/.md` — CRIU procedure, cuda-checkpoint, UV_USE_IO_URING=0 requirement
 3. `docs/procedures/vllm-deploy.md` — deploy commands for thinker
 
 ## Prerequisites
@@ -40,7 +40,7 @@ ls /usr/local/lib/criu/cuda-checkpoint.so 2>/dev/null \
 # If T_KV2 passed, this is in place. Verify once:
 podman inspect $(podman ps --format "{{.Names}}" | grep -i "thinker" | head -1) \
   --format '{{.Config.Env}}' | tr ' ' '\n' | grep -i uv || echo "(env not shown by inspect)"
-# Check criu-ops.md if uncertain.
+# Check .md if uncertain.
 
 # 4. Free disk space (~25 GB needed)
 df -h /srv/ai/checkpoints 2>/dev/null || df -h /srv/ai
@@ -305,7 +305,7 @@ RESTORE_OK / CHECKPOINT_FAILED / RESTORE_FAILED
 - **You may record** checkpoint size, checkpoint time, restore time, and inference correctness.
 - **You may note** whether restore time matches the T_KV2 coder baseline (~0.28s).
 - **You may NOT** add the thinker to the production CRIU checkpoint library policy.
-- **You may NOT** update `docs/arch/current.md` or `docs/procedures/criu-ops.md`.
+- **You may NOT** update `docs/arch/current.md` or `docs/procedures/.md`.
 
 ## Stop condition
 
@@ -313,5 +313,5 @@ RESTORE_OK / CHECKPOINT_FAILED / RESTORE_FAILED
 
 **Abnormal:** write `## Open from testing` in `RESEARCH_STATE.md` if:
 - Checkpoint fails with `Unknown shit 600 (anon_inode:[io_uring])` — uvloop patch is missing from the thinker's vLLM image; research mode required to verify patch location.
-- Checkpoint fails with an unfamiliar fd type not in `docs/procedures/criu-ops.md` — unknown failure mode; research required.
+- Checkpoint fails with an unfamiliar fd type not in `docs/procedures/.md` — unknown failure mode; research required.
 - Restore exits 0 but `/health` never returns within 60 s — may be a CUDA context reinitializataion issue specific to TP=1; record GPU state and VRAM.

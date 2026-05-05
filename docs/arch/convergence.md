@@ -1,6 +1,6 @@
 # Convergence + Singularity Operational Guide
 
-> **Summary:** Qwen3.5-397B-A17B UD-IQ2_M always-resident in RAM. Production: `-ngl 999 --cpu-moe -t 32 -np 4`. 13.99 t/s single-seq (T_CV3), 15.6 t/s sequential pipelining (T_CV4). ⚠ True concurrent HTTP N≥2: **SETTLED FAIL** — PR #1288 architectural limit (Qwen3.5-MoE cannot exceed 1 concurrent sequence). 128K context ceiling (T_CV1). 83s cold start → always-on policy.
+> **Summary:** Qwen3.5-397B-A17B UD-IQ2_M. Production: `ik_llama.cpp` main, `-ngl 15 --cpu-moe -t 32 -np 1`. 13.99 t/s single-seq. 83s cold start OR **12s CRIU restore** (BENCH_22). ⚠ True concurrent HTTP N≥2: **SETTLED FAIL** (PR #1288).
 
 ---
 
@@ -18,8 +18,9 @@
 | Sequential pipelining (-np 4) | **15.6 t/s aggregate** | T_CV4 |
 | True concurrent HTTP (N≥2) | ❌ **SETTLED FAIL** — architectural limit (PR #1288: Qwen3.5-MoE cannot exceed 1 concurrent sequence) | T_PAR1 |
 | GPU VRAM consumed (hybrid) | ~12GB split across both 5090s | T_CV3 |
+| CRIU Restore (Warm) | **~12s** (1s sync + 11s 1st inference) | BENCH_22 |
 
-**Policy:** Always-resident (current). Never on-demand in this mode. The 83s cold start is too high for transparent routing. Convergence must be running before any request that might escalate to it.
+**Policy:** On-demand Restore (preferred). The 12s restore time (BENCH_22) enables transparent routing. Convergence can be started on-demand when a request escalates from Arclight, saving 123GB of RAM during idle periods.
 
 **T_CRIU2 results (2026-04-28):**
 - `--no-mmap` (current): CRIU dump **impossible** on this hardware. CRIU's parasite injection causes VMS to spike to ~351 GB during dump; OOM killer fires. 188 GB RAM is not enough to hold 135 GB anon-RAM model + CRIU dump overhead simultaneously.
@@ -27,25 +28,37 @@
 
 **Critical finding:** Without QX_PRELOAD, CRIU mmap is **slower** than cold start (100 s vs 83 s restore-to-interactive). Always-resident policy remains correct until QX_PRELOAD is implemented.
 
-**With QX_PRELOAD:** `posix_fadvise(POSIX_FADV_WILLNEED)` warms 123 GB into page cache ~17 s before restore. Projected restore-to-interactive: ~14 s (6× improvement over cold start). QX_PRELOAD is now HIGH priority — it is the prerequisite for making CRIU viable for Convergence.
+**With QX_PRELOAD (BENCH_22, 2026-05-05):** 
+Success achieved via **`GGML_CUDA_NO_PINNED=1`**. By disabling pinned host memory, MoE experts (113 GB) remain file-backed.
+- **Checkpoint size:** 8.0 GB (reduced from 122 GB).
+- **Pre-warm:** `cat` GGUF files + CRIU images into page cache (~37s).
+- **Restore-to-Interactive:** **12.0s total**.
+This makes on-demand CRIU restoration **VIABLE** and preferred over always-resident mode for RAM-heavy multi-model co-loads.
 
 ---
 
-## Production launch command
+## Production launch commands
 
+### Option A: Always-Resident (Max Performance)
+*Best for dedicated sessions. No swap overhead.*
 ```bash
 /srv/ai/projects/ik_llama.cpp/build/bin/llama-server \
   -m /srv/ai/models/hub/models--unsloth--Qwen3.5-397B-A17B-GGUF/snapshots/da33c16fa4440f831149fcf53b98a22bc07785e5/UD-IQ2_M/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf \
-  -ngl 999 \
-  --cpu-moe \
-  --no-mmap \
-  -b 4096 -ub 2048 \
-  -t 32 \
-  -np 4 \
-  -c 131072 \
-  --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 \
-  --jinja \
-  --host 0.0.0.0 --port 8002
+  -ngl 999 --cpu-moe --no-mmap \
+  -b 4096 -ub 2048 -t 32 -np 1 --jinja --host 0.0.0.0 --port 8002
+```
+
+### Option B: On-Demand Restore (CRIU Viable)
+*Best for co-load environments. 12s wake time.*
+```bash
+# Required environment
+export GGML_CUDA_NO_PINNED=1
+export UV_USE_IO_URING=0
+
+/srv/ai/projects/ik_llama.cpp/build/bin/llama-server \
+  -m /srv/ai/models/hub/models--unsloth--Qwen3.5-397B-A17B-GGUF/snapshots/da33c16fa4440f831149fcf53b98a22bc07785e5/UD-IQ2_M/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf \
+  -ngl 15 --cpu-moe \
+  -b 4096 -ub 2048 -t 32 -np 1 --jinja --host 0.0.0.0 --port 8002
 ```
 
 **Model path:** 4 split files must all be in the same directory. Reference only `00001-of-00004.gguf`; loader finds the rest automatically.
@@ -120,8 +133,8 @@ DDR5 bandwidth is the bottleneck: ~83 GB/s actual. Per-token read ≈ 2.3GB of e
 
 **This rationale becomes obsolete with CRIU (T_CRIU3):** Once CRIU replaces vLLM sleep mode, Arclight sleep weights (~44GB) no longer reside in RAM. Available headroom becomes 192 − 4 = 188GB → UD-IQ3_XXS (~140GB) fits comfortably. Quality upgrade from IQ2→IQ3 is meaningful for orchestration tasks. Revisit quant selection after T_CRIU2 + T_CRIU3 settle.
 
-**`--no-mmap` vs mmap trade-off for CRIU (measured 2026-04-28):**
-- `--no-mmap` (current): CRIU checkpoint impossible — OOM during dump (see T_CRIU2 above). No path forward with current hardware.
-- mmap (remove `--no-mmap`): Checkpoint 8.7 GB, restore 7.3 s. First-inference 100 s (page-fault warmup, worse than 83 s cold start). With QX_PRELOAD pre-warming page cache: projected ~14 s restore-to-interactive. `--no-mmap` must be removed to enable any CRIU path for Convergence. Switch is safe for inference correctness (text output identical pre/post restore at temperature=0.0).
+**`--no-mmap` vs mmap trade-off for CRIU (Settled BENCH_22):**
+- `--no-mmap`: CRIU checkpoint impossible (OOM during dump). **RETIRED.**
+- mmap (remove `--no-mmap` + **`GGML_CUDA_NO_PINNED=1`**): **VIABLE.** Restore-to-interactive in 12s. This is the new production standard for Convergence when not in always-resident mode. Text output is 100% deterministic pre/post restore.
 
 **Why 397B over 122B:** TAU2 gap +14.7 points (86.7 vs ~72) in multi-step agentic orchestration — exactly what Convergence is invoked for.

@@ -11,9 +11,9 @@
 | Arclight Coder | Qwen3.6-35B-A3B-AWQ | vLLM TP=2 GPU0+1, fp8 KV, ctx=32768 | 30000 | 232 t/s | SETTLED |
 | Arclight Thinker | Qwen3.6-27B PrismaQuant-5.5bit (rdtand) | vLLM TP=1 GPU1, V0 engine, fp8 KV, cp-ON, max-num-seqs 4, MTP n=3 | 30001 | 92 t/s seq=1 / 315 t/s N=4 | SETTLED (BENCH_19) |
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
-| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main (merged DeltaNet support), -ngl 999 --cpu-moe, -np 4, -t 32 | 8002 | 14 t/s | SETTLED |
+| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main, GGML_CUDA_NO_PINNED=1, -ngl 15, -np 1 | 8002 | 14 t/s | SETTLED (BENCH_22) |
 
-**Open questions:** T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder (0/3 probes). QX_PRELOAD HIGH — CRIU on Convergence (100s first-inference without pre-warm). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp). T_HARD1 CLOSED — PQ 41/50 vs AWQ 42/50 on hard suite, statistical tie; production choice on TPS grounds. Next deploy: add --max-model-len 131072 (free on DeltaNet hybrid).
+**Open questions:** T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder (0/3 probes). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp). T_HARD1 CLOSED — PQ 41/50 vs AWQ 42/50 on hard suite, statistical tie; production choice on TPS grounds. Next deploy: add --max-model-len 131072 (free on DeltaNet hybrid).
 
 ---
 
@@ -27,8 +27,8 @@
   - *Summary:* Thinker sleeps → coder spans TP=2 at 65K ctx. Hot-restart via CRIU+cuda-checkpoint.
   - *Grep for:* CRIU procedure, uvloop patch, UV_USE_IO_URING, ghost VRAM, 65K context numbers
 - **[docs/arch/convergence.md](arch/convergence.md)** — Convergence + Singularity operational guide
-  - *Summary:* 397B always-resident at 13.99 t/s hybrid. 83s cold start → always-on policy. Concurrent-request capacity: permanently N=1 (SETTLED FAIL, PR #1288 architectural limit).
-  - *Grep for:* launch command, -np caveat, DeltaNet crash, DDR5 bandwidth ceiling, model path
+  - *Summary:* 397B always-resident or CRIU-restored (12s). ik_llama.cpp main branch.
+  - *Grep for:* launch command, -np caveat, DeltaNet crash, DDR5 bandwidth ceiling, model path, GGML_CUDA_NO_PINNED
 
 ### Decisions
 - **[docs/decisions/settled.md](decisions/settled.md)** — All SETTLED decisions, most recent first
@@ -82,7 +82,7 @@
 4. **vLLM uvloop patch is mandatory for CRIU** — do not revert `api_server.py` / `v1/utils.py` asyncio changes; always export `UV_USE_IO_URING=0`.
 5. **`--reasoning-parser` must NOT be combined with tool-call parser for models that skip thinking** — causes all-`no_call` on Gemma4, Core/80B, and any model that emits tool calls directly. Use `--tool-call-parser X` alone.
 6. **T_CV4 15.6 t/s is sequential pipelining, not true concurrency** — concurrent HTTP to Convergence is permanently limited to N=1 (SETTLED FAIL, PR #1288: Qwen3.5-MoE architectural constraint, not a bug).
-7. **Convergence always-resident** — 83s cold start; never on-demand. Always start before Arclight if doing a full system restart.
+7. **Convergence On-Demand viable (12s)** — Success via CRIU + `GGML_CUDA_NO_PINNED=1` + QX_PRELOAD (BENCH_22). Preferred over always-resident mode for co-load RAM efficiency.
 8. **VLLM_USE_V1=0 is required** — V1 engine causes 10× TPS regression in eager mode and CUDA graph instability on Blackwell.
 9. **VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 required for coder TP=2** — prevents OOM during CUDA graph capture.
 10. **After a failed CRIU restore: `sudo nvidia-smi --gpu-reset -i 1`** — clears ghost VRAM leaks.

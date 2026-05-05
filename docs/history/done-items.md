@@ -4,6 +4,31 @@ Full procedures for DONE/CANCELLED/SKIPPED/PUNTED items. This is a grep/ripgrep 
 
 ---
 
+## QX_PRELOAD — convergence_qx_preload — DONE ✓ (BENCH_22, 2026-05-05)
+
+**Question:** Can page-cache pre-warming (QX_PRELOAD) achieve a restore-to-interactive time of 17–20s for the 123GB Convergence GGUF model?
+
+**Result:** **SUCCESS (12s)**. Achieving the target required a critical configuration change: **`GGML_CUDA_NO_PINNED=1`**.
+
+**Findings:**
+1. **The Pinned RAM Bottleneck:** By default, MoE experts (113 GB) are in pinned anonymous RAM, forcing a 122 GB CRIU checkpoint and causing RAM saturation (122 GB + 123 GB weights > 188 GB RAM).
+2. **The mmap Fix:** Disabling pinned memory keeps experts file-backed. CRIU checkpoint drops to **8.0 GB** (15× reduction).
+3. **Double Pre-warming:** Pre-warming both the GGUF model files (123 GB) and the CRIU image files (8.0 GB) into the page cache makes the restoration near-instant.
+4. **Performance:** 
+   - **Restore Time:** ~1s (CRIU sync).
+   - **First Inference TTFT:** **11.07s** (fully warm page cache).
+   - **Total Restore-to-Interactive:** **~12s**.
+
+**Stability Fixes:**
+- Enforced `-ngl 15` to avoid VRAM OOM during co-loads.
+- Disabled Flash Attention (`-fa off`) to prevent `GGML_ASSERT(S > 0)` crashes on sm_120.
+- Restricted to single sequence (`-np 1`) due to PR #1288 architectural constraints.
+- Integrated `LD_PRELOAD` io_uring shim to stabilize CRIU restoration.
+
+**Artifacts:** `results/BENCH_22_qx_preload_convergence_20260505T120017Z/`
+
+---
+
 ## T_HARD1 — thinker_hard_suite — DONE ✓ (BENCH_20, 2026-05-03)
 
 **Question:** Does PrismaQuant's GPTQ calibration produce measurably better reasoning than AWQ on hard multi-step systems engineering tasks?

@@ -66,6 +66,8 @@ log = open('${RESULTS_DIR}/convergence_host.log', 'w')
 env = os.environ.copy()
 env['UV_USE_IO_URING'] = '0'
 env['LD_PRELOAD'] = '${IO_URING_SHIM}'
+# Disable pinned memory for MoE experts to keep them file-backed (smaller checkpoint)
+env['GGML_CUDA_NO_PINNED'] = '1'
 # Set LD_LIBRARY_PATH for ik-llama.cpp shared libs
 env['LD_LIBRARY_PATH'] = f'{os.environ.get(\"LD_LIBRARY_PATH\", \"\")}:${IK_BUILD}/src:${IK_BUILD}/ggml/src:${IK_BUILD}/examples/mtmd:/usr/local/cuda/targets/x86_64-linux/lib'
 
@@ -250,9 +252,9 @@ echo "[BENCH_22] Page cache dropped (pre-warm starting point)."
 
 # Pre-warm: cat all shards into /dev/null
 PREWARM_START_MS=$(date +%s%3N)
-echo "[BENCH_22] Pre-warming ${GGUF_DIR}/*.gguf into page cache..."
-# Use cat on all shards
-cat ${GGUF_FILES} > /dev/null
+echo "[BENCH_22] Pre-warming ${GGUF_DIR}/*.gguf and CRIU images into page cache..."
+# Use cat on all shards and checkpoint images
+cat ${GGUF_FILES} "${CHECKPOINT_DIR}"/*.img > /dev/null 2>&1 || true
 PREWARM_END_MS=$(date +%s%3N)
 PREWARM_ELAPSED_S=$(python3 -c "print(round(($PREWARM_END_MS - $PREWARM_START_MS) / 1000.0, 1))")
 echo "[BENCH_22] Pre-warm complete: ${PREWARM_ELAPSED_S}s"
@@ -304,6 +306,9 @@ for REP in 1 2 3; do
 done
 
 # --- Step 5: Production Restore ---
+echo "[BENCH_22] Stopping benchmark process..."
+sudo fuser -k "${PORT}/tcp" >/dev/null 2>&1 || true
+sleep 2
 
 echo "[BENCH_22] Restoring production Convergence (container mode)..."
 "${REPO_ROOT}/infra/scripts/deploy.sh" ikllamacpp convergence

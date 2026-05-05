@@ -60,7 +60,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CRIU3 Ph.2 | DONE ✗ | Coder TP=2: dump/restore OK (29s/67GB), KV preserved in VRAM, inference FAIL — SHM IPC broken post-restore (Blackwell forces V1 engine, ShmRingBuffer cross-process writes invisible after CRIU). 26s restore = 4× cold start. Not viable. |
 | T_CV5 | DONE ✓ | NGL sweep complete. Expert offload (no --cpu-moe) OOMs as expected. |
 | T_ENGINE_EVAL | DONE ✓ | GLM-4.7-Flash re-evaluation: SETTLED (2026-05-02) — ik_llama.cpp resolves MLA instability. 176 t/s. |
-| QX_PRELOAD | OPEN (HIGH) | BENCH_18 proven posix_fadvise on Thinker fat checkpoint (31GB: 19.8s→12s). Convergence target is different: must pre-warm GGUF model files (123GB) not checkpoint images (mmap dump is only 8.7GB). Never tested on Convergence. |
+| QX_PRELOAD | DONE ✓ | BENCH_22 2026-05-05. **VIABLE (12s)**. Success via `GGML_CUDA_NO_PINNED=1` (file-backed experts) and double pre-warm (GGUF + CRIU images). Breakthrough: restore-to-interactive time reduced from 100s to 12s. |
 | T_MTP1 | DONE ✓ | BENCH_19 2026-05-03. PrismaQuant MTP n=3 optimal: 91.9 t/s N=1 (+79.1%), 314.8 t/s N=4 (+58.3%). VRAM stable. th02 reasoning intact. Tool calls: 5/5 PASS (unlike coder). MTP n=3 promoted to production. |
 | T_MTP2 | DONE ✗ | BENCH_14 2026-05-01. MTP breaks tool-call generation on A3B MoE coder (0/3 probes). TPS delta +4-7% irrelevant. Do not enable on coder. |
 | T_PQ1 | DONE ✓ | BENCH_12 2026-05-01. Quality parity confirmed (7/8 tasks; th02 correct). TPS -26 to -33% vs AWQ but quality accepted. Promoted to production thinker. |
