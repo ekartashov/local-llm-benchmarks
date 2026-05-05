@@ -113,14 +113,127 @@ models:
       bf16_entries: 274
       calibration: "GPTQ-OBS + closed-form scale sweep, 0.33× RTN MSE"
     measured:
-      single_gpu_seq1_tps: 60.5    # BENCH_23a
-      tool_call_pass_rate: 1.00    # BENCH_23/23a
+      single_gpu_seq1_tps_agg: 56.5   # BENCH_23 170250Z (aggregate incl. TTFT)
+      single_gpu_seq1_tps_dec: 120.9  # BENCH_23 170250Z (decode only)
+      n4_agg_tps: 459.3               # BENCH_23 170250Z
+      n4_per_req_tps: 115.4           # 459.3 / 4
+      mtp_n1_seq1_tps: 34.7           # BENCH_23b (-38.6%)
+      mtp_n1_n4_tps: 227.2            # BENCH_23c tuned (-50.6% vs no-MTP)
+      tool_call_pass_rate: 1.00       # BENCH_23b 5/5
     notes: >
-      35B-A3B MoE-hybrid. SETTLED as production coder 2026-05-05.
+      35B-A3B MoE-hybrid. SETTLED as production coder 2026-05-05 (BENCH_23/23b).
       Successfully resolved the TP=1 "Reasoning Collapse" by enforcing the V1 engine
-      path with CUDA graph capture. MTP (speculative decoding) was found to be
-      logically stable at TP=1 (tool calls intact) but currently yields a 40%
-      throughput regression (35 t/s). Production config uses No-MTP (60 t/s).
+      path with CUDA graph capture. MTP (speculative decoding) is logically stable
+      at TP=1 (5/5 tool calls, BENCH_23b) but incurs a 38-51% throughput regression.
+      Production config uses No-MTP (56.5 t/s agg N=1, 459 t/s agg N=4).
+      AWQ TP=1 V1 fails tool calls (2/5, BENCH_23a) — PrismaQuant+V1 is the only
+      reliable TP=1 configuration for this model family.
+
+  # ── CANDIDATE coder: APEX GGUF variants (ik_llama.cpp, T_APEX1/T_APEX2) ─────
+  #   APEX = Adaptive Precision for EXpert Models. MoE-aware mixed-precision GGUF.
+  #   I-series = imatrix calibration (code+reasoning+tool-call data, not wikitext).
+  #   Bypasses FlashInfer SM120 grouped GEMM bottleneck (uses ik_llama.cpp mul_mat).
+  #   Engine: ik_llama.cpp main. All variants fit on GPU0 (32 GB) at ngl=999 (full GPU).
+  #   Tool-call risk: must verify grammar/template-based think+tool parsing in ik_llama.cpp.
+  qwen36_35b_a3b_apex_compact:
+    status: CANDIDATE
+    role: coder
+    hf_repo: mudler/Qwen3.6-35B-A3B-APEX-GGUF
+    quant: APEX-I-Compact
+    format: gguf
+    vram_gb: 17.3          # ngl=999 (all layers on GPU0). Leaves ~14.7 GB headroom.
+    ctx_default: 32768
+    engines: [ik_llama.cpp]
+    flags:
+      ik_llama: "-ngl 999 -t 32 -np 1 --no-mmap --kv-type q8_0"
+      # --kv-type q8_0: fp8 KV cache (halves KV memory vs fp16, frees GPU0 for Convergence layers)
+      # -ngl 999: all layers on GPU0 (model fits; 32 GB GDDR7 with ~14 GB headroom at q8_0 KV)
+      # do NOT use -rtr: forces MoE mul_mat to CPU path (ik_llama.cpp known issue)
+    apex_variant: I-Compact
+    apex_kl_max: ~6.7_ppl   # beats UD-Q3_K_M quality
+    bw_ceiling_tps: 103     # 1790 GB/s / 17.3 GB; actual ~80-95% of ceiling
+    coload_projection:
+      # with fp8 KV (~1.0 GB), GPU0 total: ~18.5 GB, headroom ~13.0 GB
+      # GPU1 thinker headroom: ~2.5 GB (BENCH_21 measured)
+      # combined Convergence VRAM: ~15.5 GB → ngl ≈ 81 layers
+      convergence_ngl_est: 81
+      convergence_tps_est: 10.0   # ~71% of isolated 13.99 t/s
+    test_items: [T_APEX1, T_APEX2]
+    notes: >
+      PRIMARY optimization target (locked 2026-05-05). I-Compact + fp8 KV (q8_0) on GPU0.
+      BW ceiling 103 t/s vs PQ vLLM 64 t/s; bypasses FlashInfer SM120 grouped GEMM
+      bottleneck. With fp8 KV: GPU0 headroom ~13 GB + GPU1 headroom ~2.5 GB = ~15.5 GB
+      for Convergence → ngl ≈ 81 layers → ~10 t/s (2.5× better than current 4.05 t/s
+      co-load). Key risk: ik_llama.cpp think+tool parsing for Qwen3.6 (untested).
+
+  qwen36_35b_a3b_apex_mini:
+    status: CANDIDATE
+    role: coder
+    hf_repo: mudler/Qwen3.6-35B-A3B-APEX-GGUF
+    quant: APEX-I-Mini
+    format: gguf
+    vram_gb: 14.3          # ngl=999. Leaves ~17.7 GB headroom — near full Convergence fit.
+    ctx_default: 32768
+    engines: [ik_llama.cpp]
+    flags:
+      ik_llama: "-ngl 999 -t 32 -np 1 --no-mmap"
+    apex_variant: I-Mini
+    bw_ceiling_tps: 125    # 1790 GB/s / 14.3 GB; most aggressive quality compression
+    coload_projection:
+      gpu0_headroom_mib: 17469
+      convergence_ngl_est: 94    # ALL attention layers fit alongside I-Mini coder!
+      convergence_tps_est: 13.5  # near-isolated performance
+    test_items: [T_APEX1, T_APEX2]
+    notes: >
+      Stretch candidate. If quality (th02 + tool calls) holds, I-Mini enables the
+      "golden topology": GPU0 = coder 14.3 GB + Convergence all-layers 16.9 GB = 31.2 GB
+      (tight but fits). All three models at near-isolated TPS simultaneously.
+      Quality floor unknown — must validate before promotion.
+
+  qwen36_35b_a3b_apex_balanced:
+    status: CANDIDATE
+    role: coder
+    hf_repo: mudler/Qwen3.6-35B-A3B-APEX-GGUF
+    quant: APEX-I-Balanced
+    format: gguf
+    vram_gb: 25.6          # ngl=999. Largest; leaves ~6.4 GB for KV only.
+    ctx_default: 32768
+    engines: [ik_llama.cpp]
+    flags:
+      ik_llama: "-ngl 999 -t 32 -np 1 --no-mmap"
+    apex_variant: I-Balanced
+    apex_kl_max: 4.53      # best quality (beats Q8_0 on downstream tasks)
+    bw_ceiling_tps: 70     # 1790 GB/s / 25.6 GB — similar to PQ ceiling
+    test_items: [T_APEX1]
+    notes: >
+      Fallback if I-Compact quality is insufficient. Offers the lowest KL worst-case
+      (4.53 — better than Q8_0 on downstream tasks). BW ceiling similar to PQ so
+      TPS upside is smaller. Limited co-load headroom (~6.4 GB GPU0 headroom after
+      model weights). Test only if I-Compact fails quality gate.
+
+  # ── DEFERRED Convergence APEX (quality evaluation, post-T_APEX1) ────────────
+  convergence_apex_397b:
+    status: DEFERRED
+    role: convergence
+    hf_repo: mudler/Qwen3.5-397B-A17B-APEX-GGUF
+    quant: APEX-non-I-variants
+    format: gguf
+    engines: [ik_llama.cpp]
+    file_sizes:
+      Compact: 187_GB    # start here if activated
+      Quality: 243_GB
+      Balanced: 289_GB
+    tps_projection:
+      # all variants larger than UD-IQ2_M (123 GB) → slower with --cpu-moe (DDR5 bound)
+      Compact_tps: 9.2   # 13.99 × (123/187)
+      Quality_tps: 7.1   # 13.99 × (123/243)
+      Balanced_tps: 6.0  # 13.99 × (123/289)
+    defer_reason: >
+      Quality evaluation only — TPS will be 34-57% lower than UD-IQ2_M due to larger
+      expert weights and DDR5 bandwidth limit. Worth testing only if Convergence output
+      quality becomes a production bottleneck. Activate T_APEX4 when that threshold is hit.
+      Start with Compact (187 GB, least TPS penalty). Do not download before T_APEX1 settled.
+    test_items: [T_APEX4]
 
   # ── SUPERSEDED: old Qwen3.5-35B-A3B (kept as historical record only) ────
   qwen35_35b_a3b_awq:
@@ -186,14 +299,12 @@ models:
     format: compressed-tensors   # NVFP4/MXFP8/BF16 mixed via vLLM compressed-tensors
     vram_gb: 27                  # measured runtime (27,612 MiB delta); 19 GB disk
     ctx_default: 32768
-    engines: [vllm]              # vLLM 0.19.x with compressed-tensors; V0 engine required
+    engines: [vllm]              # vLLM 0.20.0 (V1 only engine); VLLM_USE_V1 env var is unknown/ignored
     flags:
       vllm: "--kv-cache-dtype fp8 --enable-chunked-prefill --max-num-seqs 4 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice --hf-overrides '{\"architectures\":[\"Qwen3_5ForCausalLM\"]}' --speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":3}'"
       # --hf-overrides: REQUIRED — model config.json declares VL architecture; overrides to
       #   text-only to prevent vision encoder init (causes compressed-tensors NotImplementedError)
-      # VLLM_USE_V1=0 + VLLM_ENGINE_ITERATOR_SOURCE=LEGACY: set in deploy env; V0 required for
-      #   compressed-tensors support (V1 engine does not support it as of vLLM 0.19.x)
-      env: "VLLM_USE_V1=0 VLLM_ENGINE_ITERATOR_SOURCE=LEGACY"
+      env: ""  # No V0/V1 flag needed — vLLM 0.20.0 only has V1; VLLM_USE_V1=0 is ignored
     quant_details:
       nvfp4_linears: 349
       mxfp8_linears: 35
@@ -210,8 +321,8 @@ models:
       cuda: ">=13.0 for full NVFP4 kernel path (compute_120f) — without it falls back to marlin/cutlass"
       flashinfer: "0.6.5 with SM120 patches for optimal NVFP4 GEMM"
     measured:
-      single_gpu_seq1_tps: 91.9    # BENCH_19 (V0 engine, MTP n=3)
-      single_gpu_seq4_tps: 314.8   # BENCH_19 (V0 engine, MTP n=3)
+      single_gpu_seq1_tps: 91.9    # BENCH_19 (MTP n=3)
+      single_gpu_seq4_tps: 314.8   # BENCH_19 (MTP n=3)
       quality_mean_7task: null     # human_review.md scores not filled; qualitative parity confirmed
       th02_correct: true           # BENCH_19 verified reasoning not corrupted by MTP
       tool_call_pass_rate: 1.00    # BENCH_19 verified 5/5 pass under MTP
@@ -220,8 +331,9 @@ models:
       27B dense, GDN hybrid. SETTLED as production thinker (BENCH_12, updated BENCH_19).
       Supersedes Qwen3.6-27B-AWQ: quality at parity or better (sharper th02 EDF reasoning).
       BENCH_19 confirmed MTP n=3 completely erases the previous TPS regression (+79% gain)
-      and critically does NOT break tool calling (unlike the Coder model). Currently running
-      V0 engine path (marlin/cutlass fallback) — full NVFP4 path will further boost TPS.
+      and critically does NOT break tool calling (unlike the Coder at TP=2 in BENCH_14).
+      Running on vLLM 0.20.0 V1 engine (only engine available). Full NVFP4 path will
+      further boost TPS when CUDA 13.0 FlashInfer SM120 kernel matures.
 
   # ── CANDIDATE thinker ──────────────────────────────────────────────────
   glm45_air_awq:

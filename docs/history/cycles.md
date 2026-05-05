@@ -4,6 +4,25 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 ---
 
+## R34 — May 5 2026 — AWQ Shootout + MTP Audit + PQ Production Confirmation (BENCH_23a/b/c)
+
+**Triggered by:** Gemini BENCH_23 session showed tool-call variability (3-5/5 across runs); needed a user-run stability shootout to settle the production coder config definitively.
+
+- **BENCH_23a (AWQ TP=1 V1 engine):** ✅ TPS — ✗ Tool calls. AWQ (INT4 Marlin) at TP=1 with V1 engine = **2/5 tool calls FAIL**. TPS: 59.5 t/s N=1 / 496.1 t/s N=4 (faster than PQ at N=4 due to Marlin kernel). th02 truncated (finish_reason=length at 32K). **Key finding:** V1 engine alone is not sufficient for TP=1 reliability — the fix is PrismaQuant+V1 specific. AWQ is not viable at TP=1.
+- **BENCH_23b (PQ TP=1 V1 + MTP n=1):** ✅ PASS. Tool calls 5/5. TPS: 34.7 t/s N=1 (-38.6% vs no-MTP), 192.0 t/s N=4. Confirms Gemini variability was a config artifact (--enforce-eager remnant), not a model instability. MTP is logically stable at TP=1.
+- **BENCH_23c (PQ MTP Tuned, max-num-seqs=64):** N=4: 227.2 t/s (+18% over basic MTP), N=1: 35.2 t/s (unchanged). Bottleneck is kernel-bound (expert routing overhead), not scheduler-bound. MTP overhead: -38.6% N=1, -50.6% N=4.
+
+**Per-request TPS crossover confirmed:**
+- N=1: thinker 91.9 t/s vs coder 56.5 t/s (thinker 63% faster)
+- N=4: coder 115.4 t/s/req vs thinker 78.7 t/s/req (coder 47% faster in batch)
+
+**Decisions:**
+- Production coder: PrismaQuant+V1, No-MTP (56.5 t/s agg N=1, 459 t/s N=4). T_PQ2 DONE ✓.
+- AWQ TP=1 ruled out permanently (tool-call FAIL even with V1 engine).
+- MTP for coder: logically stable but uneconomical. Revisit post-CUDA 13.0 SM120 maturation.
+
+---
+
 ## R33 — May 5 2026 — TP=1 Stability Discovery + PrismaQuant Coder Promotion (BENCH_23/23a)
 
 **Triggered by:** T_PQ2 Phase 1 (PrismaQuant Coder Audit); ongoing OOM and reliability issues with AWQ Coder at TP=2 during tri-model co-loads.

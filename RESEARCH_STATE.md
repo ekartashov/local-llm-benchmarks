@@ -2,7 +2,7 @@
 
 Living document. Current-state summary only. Full cycle log: `docs/history/cycles.md`.
 
-**Last complete cycle:** R33 (2026-05-05) — BENCH_23/23a: T_PQ2 Phase 1 closed. Arclight Coder settled at TP=1 on V1 engine. MTP logically stable but incurs 40% speed penalty; production config is No-MTP (60 t/s).
+**Last complete cycle:** R34 (2026-05-05) — BENCH_23a/b/c: AWQ TP=1 V1 fails tool calls (2/5). PrismaQuant+V1 confirmed 5/5 (BENCH_23b). MTP at TP=1: -38.6% N=1, -50.6% N=4 tuned. Production: No-MTP (56.5 t/s N=1 agg, 459 t/s N=4).
 
 **Current mode:** Research
 
@@ -10,19 +10,44 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 (None)
 
-## R33 — Arclight Coder TP=1 Stability (2026-05-05)
+## R34 — Arclight Coder: AWQ Shootout + MTP Audit (2026-05-05, BENCH_23a/b/c)
+
+Three follow-up benchmarks run after Gemini's BENCH_23 session to settle the production coder config.
+
+**BENCH_23a — AWQ TP=1 V1 Engine (user-run):**
+- AWQ (INT4 Marlin) at TP=1 with V1 engine: **2/5 tool calls (FAIL)**, th02 truncated (finish_reason=length).
+- TPS: 59.5 t/s (N=1) / 496.1 t/s (N=4) — faster than PQ at N=4 (496 vs 459) but not viable.
+- **Critical finding:** AWQ TP=1 fails tool calls even with V1 engine. The TP=1 stability fix is PrismaQuant+V1 specific — V1 alone is not sufficient.
+
+**BENCH_23b — PrismaQuant TP=1 V1 + MTP n=1 (user-run):**
+- Tool calls: **5/5 PASS** (confirms V1+graphs is stable; Gemini variability was config artifact).
+- TPS: 34.7 t/s (N=1, **-38.6%** vs no-MTP), 192.0 t/s (N=4).
+- MTP is logically stable at TP=1 for PrismaQuant but has severe throughput penalty.
+
+**BENCH_23c — PrismaQuant TP=1 V1 + MTP Tuned (max-num-seqs=64, user-run):**
+- TPS: 35.2 t/s (N=1), 227.2 t/s (N=4) — N=4 improved +18% over basic MTP (192→227) but N=1 unchanged.
+- N=4 overhead vs no-MTP: **-50.6%** (227 vs 459 t/s). Bottleneck is kernel-bound (expert routing), not scheduler.
+- Production config confirmed: **No-MTP** (56.5 t/s N=1, 459 t/s N=4).
+
+**Per-request TPS comparison (as of R34):**
+| Mode | N=1 TPS | N=4 per-req TPS | N=4 aggregate |
+|------|---------|-----------------|----------------|
+| Coder (PQ, no-MTP) | 56.5 t/s | **115.4 t/s** | 459.3 t/s |
+| Thinker (PQ, MTP n=3) | **91.9 t/s** | 78.7 t/s | 314.8 t/s |
+- Coder is 52% SLOWER at N=1 but 47% FASTER per-request at N=4. Coder benefits from batching far more than thinker.
+
+---
+
+## R33 — Arclight Coder TP=1 Stability (2026-05-05, BENCH_23)
 
 **Model:** `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm` TP=1 GPU0, vLLM V1 Engine.
 
 **Summary:**
 Successfully stabilized the MoE Coder on a single GPU. The "Reasoning Collapse" was confirmed as an engine-path artifact of the V0/Eager-mode kernels. Moving to **V1 Engine + CUDA Graphs** restored perfect logical consistency.
 
-**MTP Discovery:**
-Speculative decoding (MTP n=1) was tested at TP=1. Unlike the previous TP=2 tests, **tool-calls remained stable (5/5 PASS)**. However, MTP currently incurs a **~40% speed tax** (35 t/s vs 60 t/s) due to the overhead of expert verification on the current V1 kernel stack.
+**Startup fix:** `--max-num-seqs 16` (decisive: limits profiling batch), `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, `--gpu-mem-util 0.90`. VRAM: 27,896 MiB used / 4,182 MiB free. Note: `VLLM_USE_FLASHINFER_NVFP4=1` is a no-op in vLLM 0.20.0.
 
-**Final Production Config:**
-- PrismaQuant 4.75bit, TP=1, VLLM_USE_V1=1, enforce_eager=False.
-- Throughput: ~60 t/s (N=1).
+**Key TPS (BENCH_23 170250Z):** 56.5 t/s agg / 120.9 t/s decode (N=1) / 459.3 t/s agg (N=4). Tool calls 5/5. th02 PASS.
 
 ---
 
@@ -111,7 +136,7 @@ Convergence TPS under co-load: **4.05 t/s warm** (reps 2–3) vs **13.99 t/s iso
 | Tier | Model | Config | TPS | Status |
 |------|-------|--------|-----|--------|
 | Arclight Coder | rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm | TP=1 GPU0, V1 Engine, fp8 KV, ctx 32K | 60 t/s | SETTLED (BENCH_23) |
-| Arclight Thinker | rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm | TP=1 GPU1, V0 engine, fp8 KV, cp-ON, --max-num-seqs 4, MTP n=3 | 92 t/s | SETTLED (BENCH_19) |
+| Arclight Thinker | rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm | TP=1 GPU1, V1 engine (0.20.0), fp8 KV, cp-ON, --max-num-seqs 4, MTP n=3 | 92 t/s | SETTLED (BENCH_19) |
 | Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main, GGML_CUDA_NO_PINNED=1, `-ngl 999` isolated / `-ngl 15` co-load, `-np 1` | 14 t/s isolated | SETTLED |
 | Extended Arclight | same as Coder, 65K ctx | CRIU hot restore from checkpoint, 0.28s | 238 t/s | SETTLED |
 
@@ -138,6 +163,38 @@ Convergence TPS under co-load: **4.05 t/s warm** (reps 2–3) vs **13.99 t/s iso
 - kvcached T1.5 Phase B: GDN/DeltaNet unsupported in v0.1.5. Deferred indefinitely.
 - SGLang for AWQ MoE: KeyError in qwen3_5.py:1662 (per-expert vs fused tensor format). Permanent incompatibility. Punted.
 - **CRIU KV-cache preservation for vLLM TP=2 (T_CRIU3 Phase 2):** SHM broadcast IPC (`ShmRingBuffer`) is broken after CRIU restore for multi-process configurations. Workers cannot see EngineCore writes to SHM slots. Blackwell sm_120 forces V1 engine regardless of `VLLM_USE_V1=0`, making the SHM path unavoidable. Additionally, TP=2 checkpoint is 67 GB (26s restore) — only ~4× faster than cold start. Not worth fixing. TP=1 CRIU (Phase 1) is unaffected.
+
+---
+
+## R35 — APEX GGUF Coder Research (2026-05-05, research mode)
+
+New research direction opened: APEX GGUF variants of Qwen3.6-35B-A3B as a potential replacement or supplement to the vLLM PrismaQuant coder.
+
+**Core hypothesis:** The SM120 FlashInfer grouped GEMM bottleneck (compute_120a vs compute_120f) that caps PQ vLLM at 56.5 t/s does NOT affect ik_llama.cpp's mul_mat CUDA kernels. APEX GGUF on ik_llama.cpp could deliver 2× TPS while using less VRAM — enabling a "golden topology" where all three models run simultaneously at full performance.
+
+**APEX format summary:**
+- MoE-aware mixed-precision GGUF. Edge layers (first/last 5) get Q6_K; middle routed experts get Q4-Q6; shared experts Q8_0.
+- I-series (imatrix): calibrated on code+reasoning+tool-calling data. Dramatically better KL worst-case vs standard wikitext calibration.
+- I-Compact (17.3 GB): beats UD-Q3_K_M at same size. BW ceiling 103 t/s.
+- I-Mini (14.3 GB): most aggressive; BW ceiling 125 t/s.
+
+**Target topology (locked — I-Compact + fp8 KV):**
+```
+GPU0: APEX I-Compact coder (17.3 GB weights + ~1.0 GB KV q8_0)  ≈ 18.5 GB
+    + Convergence ngl auto-alloc GPU0 (~13.0 GB headroom)
+GPU1: Thinker PQ MTP-n3 (29.3 GB, ~2.5 GB free)
+    + Convergence ngl auto-alloc GPU1 (~2.5 GB headroom)
+→ Combined Convergence VRAM: ~15.5 GB → ngl ≈ 81 layers → ~10 t/s (2.5× co-load improvement)
+```
+
+**Convergence APEX — SETTLED DEFERRED (assessed 2026-05-05):**
+Actual file sizes: Compact 187 GB, Quality 243 GB, Balanced 289 GB. ALL larger than UD-IQ2_M (123 GB). With --cpu-moe, larger model = more DDR5 BW per token = slower TPS. Projected: Compact 9.2 t/s (−34% vs UD-IQ2_M). Not worth downloading.
+
+**Key risk remaining:** ik_llama.cpp think+tool parsing for Qwen3.6 (no prior test — GLM passed 5/5 but no extended thinking).
+
+**Queue:** T_APEX1 (HIGH, download + first bench) → T_APEX2 (co-load with fp8 KV) → T_APEX3 (MTP if heads in GGUF). T_APEX4 SETTLED DEFERRED.
+
+**First action for testing mode:** `pyenv activate hf && HF_HOME=/srv/ai/models hf download mudler/Qwen3.6-35B-A3B-APEX-GGUF --include "*I-Compact*"` (~17 GB). Then follow T_APEX1 handoff.
 
 ---
 

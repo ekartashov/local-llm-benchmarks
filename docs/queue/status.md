@@ -50,9 +50,13 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CV2 | DONE ✓ | 32 threads optimal. PP scales linearly (62 t/s vs 29 t/s at 16 threads). |
 | T_CV3 | DONE ✓ | 13.99 t/s Singularity mode (-ngl 999 --cpu-moe). 3.75× speedup. |
 | T_CV4 | DONE ✓ | 15.6 t/s sequential pipelining at -np 4 (1.12× scaling). Concurrent HTTP: crashes at N≥2 (T_PAR1). |
+| T_APEX1 | OPEN | APEX GGUF coder viability: I-Compact first (17.3 GB, ~103 t/s BW ceiling). Tool calls + th02 + TPS vs PQ 56.5 t/s. |
+| T_APEX2 | OPEN (dep: T_APEX1) | Tri-model co-load with APEX coder: I-Compact (ngl≈72, 8.4 t/s) or I-Mini (ngl≈94, 13.5 t/s) Convergence alongside. |
+| T_APEX3 | OPEN (dep: T_APEX1) | Coder MTP on ik_llama.cpp: check APEX GGUF for MTP heads, bench if present. |
+| T_APEX4 | SETTLED DEFERRED | Convergence APEX: files exist (Compact 187 GB, Quality 243 GB, Balanced 289 GB) but ALL larger than UD-IQ2_M (123 GB) → slower TPS (Compact ~9.2 t/s vs 13.99 t/s). Not worth downloading. |
 | T_CV6 | OPEN | Convergence Extended architecture: free one Arclight GPU and test Convergence at/near -ngl 999 with thinker still live. |
-| T_CV7 | OPEN | Convergence/Singularity speculative expert offload: decide llama.cpp vs ik_llama.cpp with feature+TPS evidence. |
-| T_CV8 | OPEN | Convergence/Singularity speculative decoding (MTP/DFlash): decide llama.cpp vs ik_llama.cpp with correctness evidence. |
+| T_CV7 | OPEN | Convergence/Singularity speculative expert offload: ik_llama.cpp vs llama.cpp; includes APEX interaction check. |
+| T_CV8 | OPEN | Convergence/Singularity speculative decoding (MTP/DFlash): check UD-IQ2_M for MTP heads; llama.cpp vs ik_llama.cpp. |
 | T_KV1 | DONE ✓ | 65K context, 238.2 t/s, 3022ms TTFT. --swap-space blocked (flag unrecognized in 0.19.0). |
 | T_KV2 | DONE ✓ | 0.28s hot restart (358× vs 100.2s cold). CRIU + cuda-checkpoint settled. |
 | T_KV3 | DONE ✓ | 128K context verified (1,892 t/s prefill, 49 t/s decode). Qwen3.6-27B (dense) fully supported via ik_llama.cpp main. |
@@ -68,7 +72,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_ENGINE_EVAL | DONE ✓ | GLM-4.7-Flash re-evaluation: SETTLED (2026-05-02) — ik_llama.cpp resolves MLA instability. 176 t/s. |
 | QX_PRELOAD | DONE ✓ | BENCH_22 2026-05-05. **VIABLE (12s)**. Success via `GGML_CUDA_NO_PINNED=1` (file-backed experts) and double pre-warm (GGUF + CRIU images). Breakthrough: restore-to-interactive time reduced from 100s to 12s. |
 | T_MTP1 | DONE ✓ | BENCH_19 2026-05-03. PrismaQuant MTP n=3 optimal: 91.9 t/s N=1 (+79.1%), 314.8 t/s N=4 (+58.3%). VRAM stable. th02 reasoning intact. Tool calls: 5/5 PASS (unlike coder). MTP n=3 promoted to production. |
-| T_MTP2 | DONE ✗ | BENCH_14 2026-05-01. MTP breaks tool-call generation on A3B MoE coder (0/3 probes). TPS delta +4-7% irrelevant. Do not enable on coder. |
+| T_MTP2 | DONE ✗ | BENCH_14 2026-05-01. MTP breaks tool-call generation on A3B MoE coder at TP=2 (0/3 probes). Note: at TP=1 (BENCH_23b), MTP is logically stable (5/5 tools) but incurs -38-51% TPS penalty. Production: No-MTP. |
 | T_PQ1 | DONE ✓ | BENCH_12 2026-05-01. Quality parity confirmed (7/8 tasks; th02 correct). TPS -26 to -33% vs AWQ but quality accepted. Promoted to production thinker. |
-| T_PQ2 | DONE ✓ | BENCH_23 2026-05-05. TP=1 PrismaQuant Coder settled via vLLM V1. Logic stable, MTP logically compatible but slow (35 t/s). Production: No-MTP (60 t/s). |
+| T_PQ2 | DONE ✓ | BENCH_23/23b 2026-05-05. PrismaQuant TP=1 V1 engine settled: 56.5 t/s agg N=1 (120.9 decode), 459 t/s N=4. MTP stable (5/5 tools BENCH_23b) but -38.6% N=1 / -50.6% N=4. AWQ TP=1 V1 = FAIL (2/5 tools, BENCH_23a). Production: No-MTP PQ. |
 | T_HARD1 | DONE ✓ | BENCH_20 2026-05-03. PQ 41/50, AWQ 42/50 — statistical tie. PQ task 03 (Raft) truncated at 28K reasoning tokens (finish_reason=length); complete prior-run response scores 5/5 → PQ 43 vs AWQ 42. Production rationale unchanged: PQ+MTP at 92 t/s vs AWQ 77 t/s. **Lesson:** hard reasoning tasks need max_tokens≥32K and --max-model-len 131072. |

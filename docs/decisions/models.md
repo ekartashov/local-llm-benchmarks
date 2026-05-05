@@ -58,6 +58,29 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
 
 ---
 
+## Active candidates under evaluation
+
+### Coder candidate: Qwen3.6-35B-A3B APEX GGUF (mudler) — T_APEX1/T_APEX2
+**Status:** CANDIDATE (2026-05-05). Engine: ik_llama.cpp main.
+
+**Rationale for investigation:** Current PQ coder is bottlenecked at ~57 t/s (N=1) by FlashInfer SM120 compute_120a vs compute_120f grouped GEMM issue. ik_llama.cpp uses its own CUDA mul_mat kernels, bypassing this bottleneck entirely. APEX GGUF adds MoE-aware mixed precision (higher quality per bit than uniform K-quants).
+
+**Variants and VRAM:**
+| Variant | Disk/VRAM | BW ceiling | Co-load headroom (GPU0) |
+|---------|-----------|-----------|------------------------|
+| I-Balanced | 25.6 GB | ~70 t/s | ~5.9 GB (Convergence ngl≈0) |
+| I-Quality | 22.8 GB | ~79 t/s | ~8.8 GB (Convergence ngl≈22) |
+| **I-Compact** | **17.3 GB** | **~103 t/s** | **~14.4 GB (ngl≈72, 8.4 t/s)** |
+| **I-Mini** | **14.3 GB** | **~125 t/s** | **~17.5 GB (ngl≈94, 13.5 t/s)** |
+
+**Key risks:**
+1. Tool-call parsing: ik_llama.cpp grammar/template approach differs from vLLM's `qwen3_coder` parser. Think+tool mode is more complex than GLM (which passed 5/5 BENCH_16 but doesn't use extended thinking).
+2. Quality floor for I-Mini: most aggressive compression — must validate th02 + tool calls before promoting.
+
+**Test plan:** T_APEX1 (viability, tool calls, th02) → T_APEX2 (co-load VRAM bench) → T_APEX3 (MTP if heads present).
+
+---
+
 ## Suspended / retired roles
 
 ### Core (80B): Qwen3-Next-80B-A3B-AWQ (cyankiwi) — SUSPENDED

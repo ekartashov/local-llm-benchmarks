@@ -8,6 +8,92 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ## HIGH priority
 
+### T_APEX1 — apex_gguf_coder_viability — OPEN (research first, then bench)
+
+**Question:** Can APEX GGUF variants of Qwen3.6-35B-A3B on ik_llama.cpp replace or outperform the current vLLM PrismaQuant coder (56.5 t/s agg N=1, 459 t/s N=4)?
+
+**Background — APEX format:**
+APEX (Adaptive Precision for EXpert Models) is MoE-aware mixed-precision GGUF. Unlike uniform quants (Q4_K_M, IQ2_M), it applies higher precision to edge layers (first/last 5) and shared experts, and aggressive compression to middle-layer routed experts. The "I-series" uses diverse imatrix calibration (code + reasoning + tool-calling data, NOT wikitext) → dramatically lower KL worst-case than uniform quants.
+
+**Available variants** (`mudler/Qwen3.6-35B-A3B-APEX-GGUF`, all I-series):
+
+| Variant | Disk / VRAM (ngl=999) | BW ceiling (1790 GB/s) | KL max | vs UD-Q3_K_M |
+|---------|----------------------|----------------------|--------|--------------|
+| I-Balanced | 25.6 GB | ~70 t/s | 4.53 | better |
+| I-Quality | 22.8 GB | ~79 t/s | 5.69 | better |
+| I-Compact | 17.3 GB | ~103 t/s | ~6.7 ppl | beats UD-Q3_K_M |
+| I-Mini | 14.3 GB | ~125 t/s | published 74 t/s on consumer HW | smallest viable |
+
+BW ceiling = 1790 GB/s ÷ model_size. Actual decode TPS will be 70-90% of ceiling due to compute overhead. Current PQ ceiling: 1790/27.9 ≈ 64 t/s, aligns with measured 56.5 t/s.
+
+**Critical advantage over vLLM PrismaQuant:** ik_llama.cpp does NOT use FlashInfer CUTLASS grouped GEMM — it uses its own CUDA mul_mat kernels, bypassing the compute_120a vs compute_120f SM120 bottleneck entirely. At ngl=999 (all layers on single GPU0), APEX GGUF should be significantly faster than PQ on vLLM.
+
+**Tool-call risk (HIGH):** vLLM uses the `qwen3_coder` parser. ik_llama.cpp uses grammar/template-based structured output. Qwen3.6 coder needs think+tool parsing — more complex than GLM-4.7-Flash (5/5 tool calls BENCH_16, but no extended thinking). This is the primary unknown.
+
+**Target config (locked):** I-Compact + fp8 KV (`--kv-type q8_0`). fp8 KV halves the KV memory cost vs default fp16, freeing additional GPU0 VRAM for Convergence layers without sacrificing reasoning precision for the coder's 32K context.
+
+**VRAM projection with fp8 KV:**
+- I-Compact weights: 17,715 MiB
+- KV cache at q8_0 / 32K ctx: ~800–1,200 MiB (half of fp16; exact depends on n_kv_heads and layer count)
+- Total GPU0 estimated: ~19,000–19,500 MiB
+- GPU0 headroom for Convergence: ~12,600–13,100 MiB
+- GPU1 headroom (thinker at util=0.95): ~2,500 MiB (measured BENCH_21)
+- **Combined Convergence VRAM: ~15,100–15,600 MiB**
+- Convergence layers that fit: (15,100 − 6,247) / 113 ≈ **78–83 layers** across both GPUs
+- Convergence TPS at ngl≈80: ~10 t/s (vs 4.05 t/s current co-load, vs 13.99 t/s isolated)
+
+**Scope:**
+1. Pre-bench: confirm APEX GGUF loads on current ik_llama.cpp main build. Check GGUF metadata for MTP draft heads (for T_APEX3). Note: do NOT use `-rtr` flag — forces mul_mat to CPU for MoE (ik_llama.cpp known issue).
+2. Deploy I-Compact with `--kv-type q8_0 -ngl 999 -t 32 -np 1`. Measure: startup, VRAM, N=1 TPS, N=4 TPS.
+3. Tool-call probe: 5× tool-call prompts with thinking enabled. Use JSON grammar or Qwen3 chat template approach (not vLLM `qwen3_coder` parser — different system).
+4. Quality probe: th02 EDF task. Compare vs PQ BENCH_23 170250Z (finish_reason=stop, 10,338 tokens).
+5. Record exact VRAM used — feeds directly into T_APEX2 Convergence co-load math.
+
+**Pass:** TPS ≥ 56.5 t/s N=1 AND tool-call pass rate ≥ 4/5 AND th02 reasoning intact.
+**Fail triggers:** tool calls < 3/5 → one grammar-tuning retry; TPS < 40 t/s → note and consider I-Balanced; startup crash → check ik_llama.cpp build compatibility with APEX format.
+
+**Deps:** ik_llama.cpp main build confirmed working (BENCH_16 ✓). Download: `pyenv activate hf && HF_HOME=/srv/ai/models hf download mudler/Qwen3.6-35B-A3B-APEX-GGUF --include "*I-Compact*"` (~17 GB).
+
+---
+
+### T_APEX2 — apex_coder_convergence_coload_matrix — OPEN (depends on T_APEX1 variant selection)
+
+**Question:** With an APEX coder on GPU0 (smaller footprint than PQ's 27.9 GB), how much of Convergence can we fit on GPU0 alongside it — and does this achieve the T_CV6 goal of near-isolated Convergence TPS?
+
+**Pre-bench VRAM projection** (using BENCH_21 Convergence model: 6,247 MiB fixed + 113 MiB/layer, all 94 layers for full ngl=999):
+
+| APEX Variant | VRAM Used | GPU0 Headroom | Convergence ngl | Est. Convergence TPS |
+|-------------|-----------|--------------|-----------------|----------------------|
+| I-Balanced (25.6 GB) | 26,214 MiB | ~5,898 MiB | ~0 extra layers (fixed overhead only) | ~4.0 t/s |
+| I-Quality (22.8 GB) | 23,347 MiB | ~8,765 MiB | ~22 layers | ~4.5 t/s |
+| I-Compact (17.3 GB) | 17,715 MiB | ~14,397 MiB | ~72 layers | **~8.4 t/s** |
+| I-Mini (14.3 GB) | 14,643 MiB | ~17,469 MiB | ~98 layers (all!) | **~13.5 t/s** |
+
+Formula: ngl = (headroom_MiB − 6,247) / 113. TPS(ngl): 1/(0.07148 + (94−ngl)×0.00211).
+
+**Target topology (locked — I-Compact + fp8 KV):**
+```
+GPU0: APEX I-Compact coder  17.3 GB weights + ~1.0 GB KV (q8_0, 32K ctx)  ≈ 18.5 GB
+      + Convergence layers    split across GPU0 (~13 GB headroom) + GPU1 (~2.5 GB headroom)
+GPU1: Thinker PQ MTP-n3     29.3 GB (util=0.95, ~2.5 GB free — measured BENCH_21)
+```
+Combined Convergence VRAM: ~15.5 GB → ngl ≈ 81 layers → **~10 t/s** (2.5× better than current co-load 4.05 t/s, 71% of isolated 13.99 t/s).
+
+ik_llama.cpp auto-distributes Convergence layers across both GPUs by available free space. Let it auto-allocate; record the actual split.
+
+**Scope:**
+1. Load I-Compact coder (from T_APEX1) on GPU0 with `--kv-type q8_0`. Record exact VRAM used.
+2. Start Convergence with `--device cuda:0,cuda:1` (or equivalent multi-GPU flag) and no fixed ngl — let auto-alloc fill available VRAM. Record: actual ngl split per GPU, total VRAM.
+3. Run Convergence generation (same prompt as T_CV3 baseline). Measure TPS warm.
+4. Verify thinker is unaffected: run th02 on thinker while Convergence is loaded.
+5. Bandwidth contention test: coder tool-call + simultaneous Convergence decode. Record TPS degradation on both sides.
+
+**Pass:** Convergence TPS ≥ 10 t/s warm with I-Compact coder resident + thinker on GPU1 with no correctness regression.
+
+**Deps:** T_APEX1 PASS. No additional downloads (same I-Compact binary).
+
+---
+
 ### T_CRIU3 — criu_universal_checkpoint_library — OPEN (design + implement)
 
 **Question:** Standardize CRIU checkpointing for ALL vLLM processes, not just coder-tp2. Enable the model checkpoint library concept.
@@ -41,37 +127,119 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ### T_CV6 — convergence_extended_architecture_ngl999 — OPEN
 
-**Question:** Can we free one Arclight GPU path and run Convergence at/near `-ngl 999` while still keeping thinker availability?
+**Question:** Can we remove the coder from GPU0 and run Convergence at full `-ngl 94` (all attention layers) on GPU0 alone while keeping thinker on GPU1?
+
+**Pre-bench research (BENCH_21 data):**
+Convergence VRAM model: fixed overhead ≈ 6,247 MiB + per-layer ≈ 113 MiB. At ngl=94 (all 94 transformer layers): **6,247 + 94×113 = ~16,869 MiB ≈ 16.9 GB**. GPU0 has 32 GB GDDR7 → this fits comfortably with 15 GB headroom. Expected TPS ≈ **13.99 t/s** (same as isolated `-ngl 999` measured in T_CV3, no GPU contention with thinker).
+
+**Proposed production topology:**
+```
+GPU0: ik_llama.cpp Convergence  -ngl 94 --cpu-moe  (~17 GB VRAM)
+GPU1: vLLM Thinker TP=1                             (~22-29 GB VRAM)
+(Coder removed from hot-pair; available via CRIU swap from Extended Arclight)
+```
 
 **Scope:**
-1. Test topology variants: thinker + Convergence (`-ngl 999`), thinker + Convergence (`-ngl` sweep), and thinker swap to Arclight Full when needed.
-2. Keep `-np 1` for Convergence (architectural limit).
-3. Record Convergence TPS + VRAM + impact on thinker latency.
+1. Launch Convergence on GPU0 only at ngl=94 with thinker on GPU1. Measure Convergence TPS + VRAM.
+2. Confirm thinker correctness is unaffected (no PCIe contention impact on GDN recurrent state).
+3. Measure thinker VRAM headroom: at util=0.95, ~2.8 GB KV free. With coder gone, can thinker run at lower util and get fp16 KV with equivalent or better quality?
+4. Measure coder boot time from CRIU checkpoint when needed (Extended Arclight mode).
 
-**Pass:** find a topology with Convergence TPS ≥ 10 t/s and no thinker correctness regression.
+**Coder/thinker per-request TPS context:**
+- N=1: thinker 91.9 t/s vs coder 56.5 t/s (thinker 63% faster single-request)
+- N=4: thinker 78.7 t/s/req vs coder 115.4 t/s/req (coder 47% faster in batch)
+- Removing coder from hot-pair degrades agentic batch workloads but coder can be restored via CRIU.
+
+**Pass:** Convergence TPS ≥ 12 t/s at ngl=94 with thinker unaffected; confirm coder CRIU restore time < 15s.
 
 ---
 
 ### T_CV7 — convergence_speculative_expert_offload_engine_eval — OPEN
 
-**Question:** For speculative expert offload, should we use upstream `llama.cpp` or `ik_llama.cpp`?
+**Question:** For speculative expert offload on Convergence, should we use upstream `llama.cpp` or `ik_llama.cpp`? Does the APEX GGUF format change the answer?
+
+**Background on speculative expert offloading:**
+Standard --cpu-moe keeps ALL expert weights in CPU RAM; expert computation happens on CPU. Speculative expert offloading (SEO) predicts which experts will be activated on the NEXT token and preloads them to VRAM during the current token's computation, overlapping PCIe transfer with GPU compute. This is different from MTP (speculative decoding). ik_llama.cpp has a tuned offload batch threshold: `32 × (total_experts / active_experts)` — for Convergence (512 experts, 10 active) this is 32 × 51.2 ≈ 1638 tokens before switching to GPU offload path. Standard llama.cpp uses a fixed 32-token threshold.
+
+**APEX + SEO interaction:** APEX's per-expert mixed precision (Q6_K edge, Q4-Q6 middle routed) means the preloaded expert weights are smaller on average vs standard K-quants → faster PCIe transfer during preload → potentially higher SEO throughput gains. This interaction is untested.
 
 **Scope:**
-1. Feature audit (flags + architecture support) on both engines.
-2. Run identical Convergence/Singularity prompts on both.
-3. Compare correctness, TPS, and operational stability.
+1. Feature audit: what SEO flags exist in ik_llama.cpp vs upstream llama.cpp (`--expert-offload`, `--lookup-cache-static`, etc.)?
+2. Baseline Convergence TPS on both engines at current config (UD-IQ2_M, ngl=15, thinker co-load).
+3. Enable SEO on each engine. Measure TPS delta and output correctness (same prompt set).
+4. If T_APEX4 has APEX Convergence available: repeat with APEX variant.
+5. Flag: do NOT use `-rtr` (row-tile-repack) flag with MoE experts on CPU — forces all mul_mat to CPU path (ik_llama.cpp bug).
 
-**Pass:** one engine selected with explicit rationale and benchmark deltas.
+**Pass:** one engine selected with explicit TPS delta from SEO and verified output correctness.
 
 ---
 
 ### T_CV8 — convergence_speculative_decoding_engine_eval — OPEN
 
-**Question:** For speculative decoding (MTP / DFlash), should we use `llama.cpp` or `ik_llama.cpp`?
+**Question:** For speculative decoding (MTP/DFlash) on Convergence/Singularity, which engine? Does Convergence GGUF (UD-IQ2_M or APEX) include MTP draft heads?
 
-**Scope:** capability check, then A/B benchmark on same model + prompts.
+**Background:**
+MTP in llama.cpp/ik_llama.cpp requires trained MTP heads in the GGUF checkpoint. Qwen3.5-397B-A17B was trained with MTP heads. Whether UD-IQ2_M (unsloth) or APEX (mudler, if available) exports these heads is unknown — must check the GGUF file metadata.
+- ik_llama.cpp MTP flag: `--draft-max N` or `--speculative-max-tokens N`
+- llama.cpp MTP flag: speculative via separate draft model or `--draft-model` if heads are embedded
 
-**Pass:** one engine selected with evidence for both throughput and output correctness.
+**Scope:**
+1. Check UD-IQ2_M GGUF metadata for MTP head tensors (`gguf-dump` or Python `gguf` library).
+2. If heads present: enable MTP on ik_llama.cpp with N=1, N=3. Measure TPS delta on Convergence prompts.
+3. If not present: document as SKIPPED (no heads in this quant). Flag for re-test if APEX Convergence ships with heads.
+4. DFlash (speculative draft model): research whether a small Qwen3.5-MoE draft model is available or practical.
+
+**Pass:** one path selected (MTP if heads found, DFlash if viable small draft exists) with measured TPS delta ≥ +20% vs baseline.
+
+---
+
+### T_APEX3 — apex_coder_mtp_ik_llama — OPEN (depends on T_APEX1)
+
+**Question:** Does the APEX GGUF export of Qwen3.6-35B-A3B include MTP draft heads? If so, what TPS gain does ik_llama.cpp MTP deliver — and does it exceed the vLLM MTP penalty (-38.6% at N=1)?
+
+**Background:**
+Qwen3.6-35B-A3B was trained with MTP heads (confirmed by vLLM MTP working at TP=1 in BENCH_23b). Whether mudler's APEX GGUF export includes these heads is unknown. If present, ik_llama.cpp MTP would differ from vLLM in two ways:
+1. No FlashInfer SM120 grouped GEMM bottleneck → expert verification overhead is lower
+2. GGUF MTP implementation may have different acceptance rate characteristics than vLLM's
+
+In vLLM MTP at TP=1: -38.6% N=1, -50.6% N=4. The overhead was expert-routing verification (kernel-bound). On ik_llama.cpp with native CUDA kernels, verification overhead should be lower → MTP may be net-positive.
+
+**Scope:**
+1. `gguf-dump` or Python `gguf` library: check for tensor names matching `model.layers.*.mlp.draft*` or similar MTP head naming.
+2. If heads present: `ik_llama.cpp` with `--draft-max 1` and `--draft-max 3`. Measure N=1 and N=4 TPS vs no-MTP baseline from T_APEX1.
+3. Tool-call probe (5× probes) with MTP enabled.
+4. If MTP is net-positive on ik_llama.cpp (unlike vLLM), document as preferred config.
+
+**Pass:** MTP TPS ≥ no-MTP TPS from T_APEX1 AND tool calls ≥ 4/5. If heads absent: close as SKIPPED.
+
+**Deps:** T_APEX1 PASS. Same binary/config — no additional download needed.
+
+---
+
+### T_APEX4 — convergence_apex_gguf_viability — DEFERRED (quality evaluation, post-T_APEX1)
+
+**Question:** Does APEX Convergence deliver meaningfully better output quality than UD-IQ2_M, and is the TPS trade-off acceptable?
+
+**Context:** APEX 397B variants are larger than UD-IQ2_M and will be slower due to DDR5 bandwidth. This is a quality trade-off evaluation, not a TPS optimisation. Only worth pursuing once Convergence quality becomes the binding constraint.
+
+**Actual file sizes** (`mudler/Qwen3.5-397B-A17B-APEX-GGUF`, confirmed 2026-05-05):
+- APEX-Compact: **187 GB** (+52% vs UD-IQ2_M 123 GB)
+- APEX-Quality: **243 GB** (+98%)
+- APEX-Balanced: **289 GB** (+135%)
+
+**TPS cost** (DDR5 ceiling ~83 GB/s, with --cpu-moe):
+- APEX Compact: 13.99 × (123/187) ≈ **9.2 t/s** (−34%)
+- APEX Quality: 13.99 × (123/243) ≈ **7.1 t/s** (−49%)
+- APEX Balanced: 13.99 × (123/289) ≈ **6.0 t/s** (−57%)
+
+**Scope (when activated):**
+1. Start with Compact (smallest download, best TPS of the three). Run standard Convergence task set vs UD-IQ2_M baseline.
+2. Score quality on reasoning depth, factual accuracy, instruction following. If quality gap is clear and meaningful, accept the TPS cost.
+3. If Compact quality is not better enough: skip Quality and Balanced (larger, slower, marginal gain).
+
+**Activation criterion:** Convergence output quality identified as a blocker in production use. Not before.
+
+**Deps:** T_APEX1 settled (engine path confirmed). Storage: 187 GB free on NVMe (3,000 TBW budget: 187 GB once = negligible).
 
 ---
 
@@ -97,11 +265,20 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ### T_ARCH3 — arclight_full_vs_extended_gdn_rationale — OPEN
 
-**Question:** Is Extended Arclight still rational for GDN thinker workloads, or should Arclight Full with fp16/bf16 KV be the primary long-context strategy?
+**Question:** Is Extended Arclight (coder TP=2, 65K ctx) still rational? And is "Arclight Full" (thinker with fp16 KV) even meaningful given GDN architecture?
 
-**Scope:** compare quality/latency/VRAM for Extended vs Full under the same long-context task set.
+**Pre-research analysis:**
+- **Extended Arclight** frees GPU1 (thinker sleeping) and gives coder TP=2 at 65K context. This makes sense for deep single-context **coding** tasks that exceed 32K tokens.
+- **Arclight Full** concept = run thinker with fp16 KV instead of fp8, using the freed GPU0 space (if coder removed). But **GDN (Gated DeltaNet) barely uses KV cache**: O(d) recurrent state per layer, not O(n) KV tokens. Measured in T3.1: 0 MiB KV delta at 50K context. So fp16 KV gives **negligible quality benefit** for the thinker — the precision change affects only the few traditional attention heads in the hybrid, not the GDN layers.
+- **Hypothesis:** Arclight Full is architecturally questionable for the thinker. It should be documented as SETTLED ILLOGICAL for GDN models.
 
-**Pass:** document a settled architectural recommendation and demote the losing mode.
+**Scope:**
+1. Confirm: at thinker util=0.73 (model floor, 23,218 MiB), how much KV pool remains? (~585 MiB per BENCH_21 projections.) How many tokens does 585 MiB fp16 vs fp8 KV support?
+2. Run th02 + 1 hard thinker task at fp16 KV with small pool vs fp8 KV at standard pool. Measure quality delta.
+3. For Extended Arclight: run coder at TP=2 with a 64K context task. Confirm 238 t/s decode and correctness.
+4. Document final recommendation: Extended Arclight = LOGICAL for long-context coding. Arclight Full (thinker fp16 KV) = SETTLED ILLOGICAL for GDN (KV precision immaterial; GDN recurrent state is fp32 by default regardless).
+
+**Pass:** explicit SETTLED recommendation for both modes with evidence from the GDN KV measurement.
 
 ---
 
