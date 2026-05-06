@@ -52,7 +52,7 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CV4 | DONE ✓ | 15.6 t/s sequential pipelining at -np 4 (1.12× scaling). Concurrent HTTP: crashes at N≥2 (T_PAR1). |
 | T_APEX1 | DONE ✓ | APEX I-Compact: 185.0 t/s N=1, 217.1 t/s N=4, 5/5 tool calls, ~18.5 GB VRAM. BENCH_24 PASS. |
 | T_APEX2 | DONE ✓ | Co-load: Convergence 13.8 t/s (98% isolated), GPU0=24.3 GB, GPU1=30.8 GB. BENCH_25 PASS. Promoted to production. |
-| T_APEX3 | OPEN (dep: T_APEX1) | Coder MTP on ik_llama.cpp: check APEX GGUF for MTP heads, bench if present. |
+| T_APEX3 | SKIPPED | No MTP heads in APEX I-Compact GGUF model. |
 | T_APEX4 | SETTLED DEFERRED | Convergence APEX: files exist (Compact 187 GB, Quality 243 GB, Balanced 289 GB) but ALL larger than UD-IQ2_M (123 GB) → slower TPS (Compact ~9.2 t/s vs 13.99 t/s). Not worth downloading. |
 | T_CV6 | OPEN | Convergence Extended architecture: free one Arclight GPU and test Convergence at/near -ngl 999 with thinker still live. |
 | T_CV7 | OPEN | Convergence/Singularity speculative expert offload: ik_llama.cpp vs llama.cpp; includes APEX interaction check. |
