@@ -4,6 +4,22 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 ---
 
+## R36 — May 6 2026 — GPTQ-Int4 + Marlin Coder (BENCH_33, T_PQ3)
+
+**Triggered by:** Need to resolve the N=4 aggregate throughput bottleneck in the APEX GGUF stack (217 t/s) while maintaining single-GPU TP=1 footprint.
+
+- **BENCH_33 (GPTQ-Int4 Viability):** ✅ SUCCESS. `groxaxo/Qwen3.6-35B-A3B-GPTQ-Pro-FOEM-4bit-g128` (Patched) achieved **103.2 t/s** (N=1) and **502.9 t/s** (N=4).
+- **Aggregate Performance:** **2.3× speedup** over APEX GGUF aggregate throughput.
+- **Reliability:** **5/5 tool-calling probes PASS**. th02 EDF quality probe PASS.
+- **Marlin Kernels:** Confirmed engagement of Blackwell-optimized Marlin kernels (`gptq_marlin`) via host-native vLLM 0.20.1.
+
+**Decisions:**
+- **GPTQ-Int4 + vLLM (Marlin) PROMOTED to Production Coder.**
+- **APEX GGUF retired** to cold-storage fallback.
+- **Metadata Patching:** Manual injection of `quantization_config` into `config.json` is a prerequisite for community-sourced GPTQ models on vLLM.
+
+---
+
 ## R35 — May 6 2026 — APEX GGUF Coder & Golden Topology (BENCH_24/25, T_APEX1/2)
 
 **Triggered by:** Need to resolve the SM120 FlashInfer bottleneck (57 t/s) and reclaim VRAM for Convergence co-load.

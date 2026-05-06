@@ -14,23 +14,18 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 ## R36 — Host-Native vLLM + SM120 MoE Path Research (2026-05-06)
 
-**Context:** APEX ik_llama.cpp coder (185 t/s N=1) has poor N=4 batching (217 t/s aggregate, 1.17× scaling). vLLM PQ has excellent N=4 (459 t/s, 8.1× scaling) but poor N=1 (56.5 t/s). The move to host-native (CRIU requires no containers) opens pyenv-based vLLM install without podman overhead.
+**Context:** APEX ik_llama.cpp coder (185 t/s N=1) has poor N=4 batching (217 t/s aggregate). vLLM PQ has excellent N=4 (459 t/s) but poor N=1 (56.5 t/s). This research explored GPTQ-Int4 as the "Goldilocks" path.
 
-**Finding 1 — SM120 FP8 MoE fix is live in vLLM 0.20.0 + cu130:**
-CUDA 13.0 (cu130) became the default for vLLM 0.20.0. The compute_120f fix for SM120 Blackwell desktop GPUs is included. The FlashInfer grouped GEMM issue (compute_120a vs compute_120f producing slower fallback for non-NVFP4 MoE, and garbage output for NVFP4) is resolved in this path. Host-native install: `pip install vllm` in a pyenv virtualenv (dead-simple, no container rebuild).
+**Finding 1 — GPTQ-Int4 + Marlin is the optimal Coder path (BENCH_33):**
+- **Results:** 103.2 t/s (N=1), **502.9 t/s (N=4)**.
+- **Reliability:** **5/5 tool calls**, th02 PASS.
+- **Decision:** **PROMOTED TO PRODUCTION**. GPTQ-Int4 resolves the aggregate throughput bottleneck (+131% over APEX) while maintaining 100+ t/s latency and perfect tool-call reliability. SM120 Marlin kernels successfully engaged.
 
-**Finding 2 — FP8 model path (TP=2, Extended Arclight only):**
-`Qwen/Qwen3.6-35B-A3B-FP8` exists on HuggingFace. Community reports on RTX PRO 6000 (SM120, 96 GB) show ~208 t/s decode N=1 with `--tool-call-parser qwen3_coder` confirmed working. FP8 uses Blackwell native FP8 tensor cores, bypassing FlashInfer CUTLASS entirely. **Blocker:** FP8 weights for 35B params ≈ 35+ GB — does not fit on a single RTX 5090 (32 GB). Requires TP=2 → Extended Arclight only. Convergence VRAM co-load not possible while TP=2 occupies both GPUs.
+**Finding 2 — Community Model Metadata Patching:**
+`groxaxo/Qwen3.6-35B-A3B-GPTQ` required a manual `config.json` patch to add `quantization_config`. Without this, vLLM V1 defaults to unquantized and OOMs. Patching is now a standard prep step for community GPTQ models.
 
-**Finding 3 — GPTQ-Int4 path (TP=1, Arclight hot-pair preserved) — OPEN:**
-`Qwen/Qwen3.5-35B-A3B-GPTQ-Int4` confirmed on HuggingFace. Community report: **194–197 t/s decode on single RTX 5090 (32 GB, TP=1)** via vLLM. INT4 weights ≈ 17.5 GB → fits on GPU0 alongside thinker on GPU1. Uses Marlin kernels (not FlashInfer CUTLASS) — same kernel path that avoids the SM120 grouped GEMM bottleneck. With vLLM continuous batching, N=4 aggregate should scale toward 400–500 t/s (vs APEX 217 t/s). **Critical unknown:** tool-call pass rate. AWQ (also INT4 Marlin) failed 2/5 at TP=1 V1 (BENCH_23a), but GPTQ and AWQ are different formats with different weight packing — failure mode may not transfer.
-
-**Finding 4 — Qwen3.6-35B-A3B-GPTQ-Int4 may also exist:**
-`Qwen/Qwen3.6-35B-A3B-FP8` exists (confirmed), so Qwen3.6 variants are published. A Qwen3.6 GPTQ-Int4 may also be available; if so, prefer it over 3.5 for architecture parity with current production coder. Agent should attempt download of 3.6 first, fall back to 3.5.
-
-**Driver requirement:** CUDA 13.0 runtime requires NVIDIA driver ≥ 575.xx on Linux. RTX 5090 Blackwell production drivers satisfy this.
-
-**T_PQ3 queued:** GPTQ-Int4 coder viability (BENCH_33). PRIMARY GATE: tool-call pass rate. If ≥ 4/5, GPTQ-Int4 becomes the new coder — resolves both N=1 latency AND N=4 throughput on a single GPU. If < 3/5, same failure mode as AWQ at INT4 precision; CLOSE and pivot to FP8 TP=2 (Extended Arclight) path instead.
+**Finding 3 — VRAM Footprint:**
+Weights (22.4 GB) + KV Cache (32K ctx) fits on a single RTX 5090 (32GB) at `--gpu-memory-utilization 0.80`. Provides headroom for engine profiling.
 
 ## R34 — Arclight Coder: AWQ Shootout + MTP Audit (2026-05-05, BENCH_23a/b/c)
 

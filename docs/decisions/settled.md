@@ -35,12 +35,19 @@ SETTLED (BENCH_12 2026-05-01, updated BENCH_19 2026-05-03, hard suite BENCH_20 2
 
 **Co-load measured point (BENCH_21, 2026-05-05):** Three-way co-load was verified at thinker util=0.95 + coder util=0.80 + Convergence `-ngl 15`, with 701 MiB (GPU0) / 467 MiB (GPU1) headroom and Convergence warm TPS 4.05 t/s. Any higher-ngl / lower-util extrapolation remains OPEN until directly benchmarked.
 
-### Arclight Coder: Qwen3.6-35B-A3B PrismaQuant-4.75bit — CURRENT PRODUCTION
-SETTLED (BENCH_23 2026-05-05, confirmed BENCH_23b 2026-05-05). T_PQ2 Phase 1 complete. CUDA graphs confirmed (`enforce_eager=False`, `CUDAGraphMode.FULL_AND_PIECEWISE`, capture sizes `[1,2,4,8,16,24,32]`). **TPS: 56.5 t/s agg / 120.9 t/s decode (N=1, TTFT-dominated at 1,413 ms) / 459.3 t/s agg at N=4 (115 t/s/req).** Tool calls 5/5 PASS (BENCH_23b MTP run; Gemini BENCH_23 variability was attributed to mid-session config remnants). th02 EDF: PASS (BENCH_23 170250Z: complete, finish_reason=stop, 10,338 tokens). Config: `rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm`, TP=1 GPU0, V1 engine, fp8 KV, `--max-num-seqs 16`, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`. VRAM: ~27,900 MiB used / ~4,200 MiB free. TPS cap (~60 t/s) is SM120 grouped GEMM software maturity; fix requires CUDA 13.0+ FlashInfer kernel maturation.
+### Arclight Coder: Qwen3.6-35B-A3B GPTQ-Int4 (groxaxo) — CURRENT PRODUCTION
+SETTLED (BENCH_33, 2026-05-06). **SUCCESS.** This config resolves the N=4 aggregate throughput bottleneck of the APEX GGUF stack (217 → 503 t/s) while maintaining a TP=1 footprint. 
+- **TPS:** **103.2 t/s (N=1) / 502.9 t/s (N=4)**.
+- **Reliability:** **5/5 tool calls PASS**; th02 quality probe PASS.
+- **Engine:** vLLM 0.20.1 (Host-Native), Marlin kernels (`gptq_marlin`) confirmed active on SM120.
+- **Config:** `groxaxo/Qwen3.6-35B-A3B-GPTQ-Pro-FOEM-4bit-g128`, TP=1 GPU0, `--max-num-seqs 8`, `--gpu-memory-utilization 0.80`, `--quantization gptq`.
+- **Note:** Requires manual `config.json` patch to include `quantization_config` block for correct loader engagement.
 
-**Gemini BENCH_23 run variability (historical):** During Gemini's testing session, tool-call reliability varied across reruns (130957Z: 4/5, 170250Z: 5/5, 172451Z: 3/5, 180500Z: 4/5). Root cause: the 130957Z run still had `--enforce-eager` from the original script (the explicit flag, which overrides V1's CUDA graph capture). The post-130957Z runs removed this flag; BENCH_23b (user-run, BENCH_23a AWQ shootout already done) showed clean 5/5 tool calls confirming V1+CUDA graphs is stable.
+### Arclight Coder: Qwen3.6-35B-A3B PrismaQuant-4.75bit — SUPERSEDED 2026-05-06
+SETTLED (BENCH_23 2026-05-05). Superseded by GPTQ-Int4 (BENCH_33) which provides identical reliability with significantly better aggregate throughput (+9% N=4, but more importantly, runs on the stable Marlin path rather than the experimental SM120 FlashInfer path).
 
-**MTP at TP=1 (BENCH_23b/c, 2026-05-05):** Speculative decoding (MTP n=1) is logically stable at TP=1 (5/5 tool calls, BENCH_23b). Speed penalty: **-38.6% at N=1** (34.7 vs 56.5 t/s), **-50.6% at N=4** (227.2 tuned vs 459.3 t/s no-MTP). Tuned config (max-num-seqs=64 + max-batched-tokens=8192, BENCH_23c) improves N=4 from 192→227 t/s but N=1 is unchanged (35.2 t/s). Bottleneck is expert routing kernel overhead (kernel-bound, not scheduler-bound). Production config: **No-MTP (56.5 t/s N=1, 459 t/s N=4)**. MTP revisit deferred to CUDA 13.0 SM120 grouped GEMM maturation.
+### Arclight Coder: Qwen3.6-35B-A3B APEX GGUF (mudler) — SUPERSEDED 2026-05-06
+SETTLED (BENCH_24, 2026-05-06). Superseded by GPTQ-Int4 (BENCH_33). While APEX was faster at N=1 (185 vs 103 t/s), it failed to scale at N=4 (217 vs 503 t/s). GPTQ-Int4 is the superior choice for high-throughput agentic workflows.
 
 ### Arclight Thinker: Qwen3.6-27B-AWQ — SUPERSEDED 2026-05-01
 SETTLED (T2.4d, R17, 2026-04-25). 4.875/5 quality, 77.4 t/s. Config: TP=1 GPU1, fp8 KV, `--enable-chunked-prefill --max-num-seqs 4 --tool-call-parser qwen3_coder --reasoning-parser qwen3`. Requires `transformers>=5.5.4`. Reference numbers valid for comparisons.

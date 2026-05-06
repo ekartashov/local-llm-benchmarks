@@ -7,24 +7,30 @@ Use `rg "<model-name>" docs/decisions/models.md` to find any model quickly.
 
 ## Active roles
 
-### Arclight Coder: Qwen3.6-35B-A3B PrismaQuant-4.75bit (rdtand)
-**SETTLED (BENCH_23, 2026-05-05).** Supersedes AWQ baseline.
-- **Performance:** 56.5 - 59.5 t/s seq=1 (TP=1, V1 Engine).
-- **Quality:** Stable reasoning trace on th02. 100% logical coherence in graph mode.
+### Arclight Coder: Qwen3.6-35B-A3B GPTQ-Int4 (groxaxo)
+**SETTLED (BENCH_33, 2026-05-06).** Resolves the APEX GGUF N=4 scaling bottleneck.
+- **Performance:** **103.2 t/s (N=1) / 502.9 t/s aggregate (N=4)**.
+- **Quality:** th02 correct, 5/5 tool calls PASS.
 - **Production config:**
   ```
-  Model: rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm
+  Model: groxaxo/Qwen3.6-35B-A3B-GPTQ-Pro-FOEM-4bit-g128
   TP=1, GPU0
-  --gpu-memory-utilization 0.90
-  --kv-cache-dtype fp8
-  --max-num-seqs 16
+  --gpu-memory-utilization 0.80
+  --max-num-seqs 8
+  --quantization gptq
   --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-auto-tool-choice
-  env: VLLM_USE_V1=1  # MANDATORY for TP=1 stability
-  env: PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+  env: VLLM_USE_V1=1  # Recommended for SM120 stability
   ```
-- **Why TP=1 is now viable:** Discovery in BENCH_23/23a confirmed that Reasoning Collapse was an artifact of the V0/Eager-mode kernel path. The **vLLM V1 Engine** with **CUDA graphs** provides a logically stable execution path even for a single-shard MoE model.
-- **MTP Finding:** Speculative decoding (MTP n=1) is **logically stable** at TP=1 (5/5 tool calls passed). However, it currently incurs a **~40% speed tax** (35 t/s vs 60 t/s) because the expert verification cost on the V1 kernel path exceeds the speed gain from speculation.
-- **Why it is "slow":** Grouped GEMM software for MoE models on SM120 is immature. FlashInfer falls back to `compute_120a` instead of `compute_120f`. Production config remains **No-MTP** until software maturity improves.
+- **Metadata Patch:** Requires manual injection of `quantization_config` into `config.json`.
+- **Why it wins:** Combines the high single-GPU aggregate throughput of vLLM (Marlin kernels) with the perfect tool-call reliability (unlike AWQ). Provides a **2.3× scaling jump** over the previous APEX GGUF stack.
+
+### Arclight Coder: Qwen3.6-35B-A3B PrismaQuant-4.75bit (rdtand) — SUPERSEDED 2026-05-06
+- **Status:** SUPERSEDED by GPTQ-Int4 (BENCH_33).
+- **Reason:** Identical reliability but GPTQ-Int4 provides significantly better aggregate throughput (+9% at N=4) and runs on the mature Marlin kernel path rather than the experimental SM120 FlashInfer path.
+
+### Arclight Coder: Qwen3.6-35B-A3B APEX GGUF (mudler) — SUPERSEDED 2026-05-06
+- **Status:** SUPERSEDED by GPTQ-Int4 (BENCH_33).
+- **Reason:** APEX was faster at N=1 (185 vs 103 t/s) but failed to scale at N=4 (217 vs 503 t/s). GPTQ-Int4 is the superior choice for high-throughput agentic workflows.
 
 ### Arclight Thinker: Qwen3.6-27B-PrismaQuant-5.5bit (rdtand)
 **SETTLED (BENCH_12 2026-05-01, updated BENCH_19 2026-05-03).** Supersedes Qwen3.6-27B-AWQ.

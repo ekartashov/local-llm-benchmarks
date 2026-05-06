@@ -4,16 +4,16 @@
 
 ---
 
-## Current production configuration (R35, 2026-05-06)
+## Current production configuration (R36, 2026-05-06)
 
 | Role | Model | Config | Port | TPS | Status |
 |------|-------|--------|------|-----|--------|
-| Arclight Coder | Qwen3.6-35B-A3B APEX GGUF (mudler) | ik_llama.cpp, -ngl 999, fp8 KV, -np 4, ctx=32768 | 8080 | 185 t/s | SETTLED (BENCH_24) |
+| Arclight Coder | Qwen3.6-35B-A3B GPTQ-Int4 (groxaxo) | vLLM TP=1 GPU0, Marlin kernels, --max-num-seqs 8, ctx=32768 | 8080 | 103 t/s seq=1 / 503 t/s N=4 | SETTLED (BENCH_33) |
 | Arclight Thinker | Qwen3.6-27B PrismaQuant-5.5bit (rdtand) | vLLM TP=1 GPU1, V1 engine, fp8 KV, cp-ON, --max-num-seqs 4, MTP n=3 | 30001 | 92 t/s seq=1 / 315 t/s N=4 | SETTLED (BENCH_19) |
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
 | Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main, GGML_CUDA_NO_PINNED=1, `-ngl 999` (auto-allocate) | 8002 | 13.8 t/s (co-load) | SETTLED (BENCH_25) |
 
-**Open questions:** **T_APEX1/2 SETTLED SUCCESS (BENCH_24/25)** — APEX GGUF coder on ik_llama.cpp delivers 3.2x TPS over vLLM PrismaQuant baseline by bypassing the SM120 FlashInfer bottleneck. Convergence co-load performance restored to 98% of isolated speed (13.8 t/s vs 14.0 t/s) via VRAM reclamation. T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder. T_KV1 swap blocked. T_KV3 SETTLED — 128K context verified. T_HARD1 CLOSED — PQ/AWQ statistical tie on hard suite.
+**Open questions:** **T_PQ3 SETTLED SUCCESS (BENCH_33)** — GPTQ-Int4 + Marlin on vLLM resolves the N=4 throughput bottleneck, achieving 503 t/s aggregate (+131% over APEX). Tool-calling reliability confirmed at 5/5. APEX retained as cold-storage fallback. T_MTP2 CLOSED FAIL. T_KV1 swap blocked. T_KV3 SETTLED. T_HARD1 CLOSED.
 
 ---
 
