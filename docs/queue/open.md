@@ -8,6 +8,30 @@ Legend: **OPEN** = ready to run (deps met). **BLOCKED** = deps or research neede
 
 ## HIGH priority
 
+### T_PQ3 — gptq_int4_coder_viability — OPEN
+
+**Question:** Does GPTQ-Int4 on host-native vLLM 0.20.0 (cu130, Marlin kernels) give 185+ t/s N=1 AND pass 5/5 tool calls at TP=1? If yes, it replaces APEX ik_llama.cpp with a single engine that wins at both N=1 latency and N=4 throughput.
+
+**Background:**
+APEX ik_llama.cpp (current production coder, BENCH_24): 185 t/s N=1, 217 t/s N=4 aggregate (1.17× scaling — poor batching). vLLM PQ (previous coder, BENCH_23): 56.5 t/s N=1, 459 t/s N=4 (8.1× scaling). The N=4 gap exists because ik_llama.cpp doesn't do continuous batching across sequences; vLLM does.
+
+GPTQ-Int4 on a single RTX 5090 (TP=1): community-measured 194–197 t/s N=1 (source: HuggingFace `Qwen/Qwen3.5-35B-A3B-GPTQ-Int4` discussion). INT4 ≈ 17.5 GB weights (fits GPU0 alongside thinker). Uses Marlin kernels — same path that avoids the SM120 FlashInfer CUTLASS grouped GEMM bottleneck. With vLLM continuous batching, N=4 aggregate should scale toward 400–500 t/s.
+
+**Critical risk:** AWQ (also INT4 Marlin) failed 2/5 tool calls at TP=1 V1 (BENCH_23a). GPTQ uses different weight packing. Whether the failure was precision-related (INT4 affecting tool-call structure generation) or AWQ-format-specific is unknown. This is the primary gate.
+
+**vLLM + CUDA requirement:** vLLM 0.20.0 with cu130 (CUDA 13.0 default). Host-native pyenv install — no container. NVIDIA driver ≥ 575.xx required for CUDA 13.0 runtime.
+
+**Model priority:**
+1. `Qwen/Qwen3.6-35B-A3B-GPTQ-Int4` — try first (architecture parity with current coder)
+2. `Qwen/Qwen3.5-35B-A3B-GPTQ-Int4` — fallback (confirmed to exist, benchmarked on RTX 5090)
+
+**Pass:** TPS N=1 ≥ 150 t/s AND tool-call rate ≥ 4/5.
+**Fail — tool calls < 3/5:** CLOSE (INT4 precision insufficient for tool-call generation, same as AWQ). Pivot to T_PQ4 (FP8 TP=2, Extended Arclight only).
+
+**Deps:** Host-native vLLM 0.20.0 + CUDA 13.0 environment. No other deps.
+
+---
+
 ### T_CRIU3 — criu_universal_checkpoint_library — OPEN (design + implement)
 
 **Question:** Standardize CRIU checkpointing for ALL vLLM processes, not just coder-tp2. Enable the model checkpoint library concept.
