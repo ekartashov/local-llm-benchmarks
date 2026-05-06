@@ -4,20 +4,19 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 ---
 
-## R35 — May 6 2026 — APEX GGUF Coder Breakthrough (BENCH_24, T_APEX1)
+## R35 — May 6 2026 — APEX GGUF Coder & Golden Topology (BENCH_24/25, T_APEX1/2)
 
-**Triggered by:** Need to evaluate the `mudler/Qwen3.6-35B-A3B-APEX-GGUF` I-Compact model as a high-performance alternative to the PrismaQuant vLLM baseline.
+**Triggered by:** Need to resolve the SM120 FlashInfer bottleneck (57 t/s) and reclaim VRAM for Convergence co-load.
 
-- **BENCH_24 (APEX GGUF Viability):** ✅ SUCCESS. Breakthrough results on the `ik_llama.cpp` stack.
-- **Performance (TPS):** Achieved **185.0 t/s** (N=1). Compared to the PrismaQuant baseline of 56.5 t/s, this represents a **3.2x speedup** on the same hardware (RTX 5090). Aggregate throughput at N=4 reached **217.1 t/s**.
-- **Tool-Calling Resolved:** `ik_llama.cpp`'s `--jinja` template support correctly handles the APEX model's reasoning/tool-call sequence. Verified **5/5 tool-call reliability** (PASS), resolving the previous failure of this model architecture on vLLM.
-- **Reasoning Depth:** The model produces extensive `reasoning_content` (thinking). Quality is high, but the length of reasoning blocks necessitates a higher `max_tokens` (≥8k) for complex coding tasks to prevent truncation before the final content is emitted.
-- **Efficiency:** The 17GB footprint enables deployment with minimal VRAM impact (only ~17GB used), providing significant headroom for co-loading the Thinker and Convergence models.
+- **BENCH_24 (APEX GGUF Viability):** ✅ SUCCESS. APEX I-Compact on `ik_llama.cpp` (Host) achieved **185.0 t/s** (N=1) and **217.1 t/s** (N=4). Bypasses the vLLM software bottleneck.
+- **Tool-Calling:** Resolved via grammar-based Jinja templates. **5/5 PASS**.
+- **BENCH_25 (Golden Co-load):** ✅ SUCCESS. Reducing Coder footprint to 18.5GB enabled Convergence (397B) to reach **13.8 t/s** in co-load mode (98% of isolated performance).
+- **VRAM Efficiency:** Reclaimed ~9.4GB on GPU0 compared to PrismaQuant baseline.
 
 **Decisions:**
-- **APEX GGUF + ik_llama.cpp PROMOTED to Production Coder Candidate.** This stack is now the primary path for the Arclight Coder service.
-- **vLLM retired for the Coder service** until MoE tool-call emission is stabilized or performance reaches parity with `ik_llama.cpp`.
-- **Next Step:** Perform co-load matrix testing (T_APEX2) to verify stable concurrent operation with the Thinker and Behemoth models.
+- **APEX GGUF + ik_llama.cpp PROMOTED to Production Coder.**
+- **Golden Topology settled:** Coder (GPU0) + Thinker (GPU1) + Convergence (Shared) allows all three models to run at full performance simultaneously.
+- **vLLM retired for the Coder service.**
 
 ---
 

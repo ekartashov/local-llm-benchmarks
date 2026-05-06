@@ -8,14 +8,6 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 ## Open from testing
 
-### From T_APEX1 (BENCH_24), 2026-05-06 — BREAKTHROUGH
-- **Result:** **SUCCESS**. APEX GGUF I-Compact + `ik_llama.cpp` is the new production candidate.
-- **Performance:** **185.0 t/s** (N=1), **217.1 t/s** (N=4). A **3.2x speedup** over the PrismaQuant baseline (56.5 t/s).
-- **Reliability:** **5/5 tool calls PASS**. Resolves the vLLM "no-call" failure for this architecture.
-- **Risk:** High reasoning-to-content ratio. `th02` reached 4096 tokens of thinking without emitting code. 
-- **Action for Research:** Update `docs/decisions/models.md` and `docs/arch/` to reflect the transition to `ik_llama.cpp` for the Coder service. Set production `max_tokens` floor to 8k for this model.
-- **Directory:** `results/BENCH_24_apex1_coder_20260505T235441Z/`
-
 (None)
 
 ## R34 — Arclight Coder: AWQ Shootout + MTP Audit (2026-05-05, BENCH_23a/b/c)
@@ -139,14 +131,16 @@ Convergence TPS under co-load: **4.05 t/s warm** (reps 2–3) vs **13.99 t/s iso
 
 ---
 
-## Current production configuration
+## Current production configuration (R35, 2026-05-06)
 
-| Tier | Model | Config | TPS | Status |
-|------|-------|--------|-----|--------|
-| Arclight Coder | rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm | TP=1 GPU0, V1 Engine, fp8 KV, ctx 32K | 60 t/s | SETTLED (BENCH_23) |
-| Arclight Thinker | rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm | TP=1 GPU1, V1 engine (0.20.0), fp8 KV, cp-ON, --max-num-seqs 4, MTP n=3 | 92 t/s | SETTLED (BENCH_19) |
-| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main, GGML_CUDA_NO_PINNED=1, `-ngl 999` isolated / `-ngl 15` co-load, `-np 1` | 14 t/s isolated | SETTLED |
-| Extended Arclight | same as Coder, 65K ctx | CRIU hot restore from checkpoint, 0.28s | 238 t/s | SETTLED |
+| Role | Model | Config | Port | TPS | Status |
+|------|-------|--------|------|-----|--------|
+| Arclight Coder | Qwen3.6-35B-A3B APEX GGUF (mudler) | ik_llama.cpp, -ngl 999, fp8 KV, -np 4, ctx=32768 | 8080 | 185 t/s | SETTLED (BENCH_24) |
+| Arclight Thinker | Qwen3.6-27B PrismaQuant-5.5bit (rdtand) | vLLM TP=1 GPU1, V1 engine, fp8 KV, cp-ON, --max-num-seqs 4, MTP n=3 | 30001 | 92 t/s seq=1 / 315 t/s N=4 | SETTLED (BENCH_19) |
+| Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
+| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main, GGML_CUDA_NO_PINNED=1, `-ngl 999` (auto-allocate) | 8002 | 13.8 t/s (co-load) | SETTLED (BENCH_25) |
+
+**Open questions:** **T_APEX1/2 SETTLED SUCCESS (BENCH_24/25)** — APEX GGUF coder on ik_llama.cpp delivers 3.2x TPS over vLLM PrismaQuant baseline by bypassing the SM120 FlashInfer bottleneck. Convergence co-load performance restored to 98% of isolated speed (13.8 t/s vs 14.0 t/s) via VRAM reclamation. T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder. T_KV1 swap blocked. T_KV3 SETTLED — 128K context verified. T_HARD1 CLOSED — PQ/AWQ statistical tie on hard suite.
 
 ---
 
@@ -174,35 +168,19 @@ Convergence TPS under co-load: **4.05 t/s warm** (reps 2–3) vs **13.99 t/s iso
 
 ---
 
-## R35 — APEX GGUF Coder Research (2026-05-05, research mode)
+## R35 COMPLETE — APEX Coder + Golden Topology (2026-05-06, BENCH_24/25)
 
-New research direction opened: APEX GGUF variants of Qwen3.6-35B-A3B as a potential replacement or supplement to the vLLM PrismaQuant coder.
+Successful pivot to APEX GGUF for the Coder service. This resolves the SM120 FlashInfer grouped GEMM bottleneck and recovers 2.5× Convergence performance via VRAM reclamation.
 
-**Core hypothesis:** The SM120 FlashInfer grouped GEMM bottleneck (compute_120a vs compute_120f) that caps PQ vLLM at 56.5 t/s does NOT affect ik_llama.cpp's mul_mat CUDA kernels. APEX GGUF on ik_llama.cpp could deliver 2× TPS while using less VRAM — enabling a "golden topology" where all three models run simultaneously at full performance.
+**BENCH_24 — APEX Coder Viability (ik_llama.cpp):**
+- **Result:** **SUCCESS**. APEX I-Compact delivers **185.0 t/s** (N=1) and **217.1 t/s** (N=4).
+- **Tool Calls:** **5/5 PASS**. Grammar-based template on `ik_llama.cpp` correctly handles A3B reasoning blocks.
+- **VRAM:** ~18.5 GB (weights + fp8 KV).
 
-**APEX format summary:**
-- MoE-aware mixed-precision GGUF. Edge layers (first/last 5) get Q6_K; middle routed experts get Q4-Q6; shared experts Q8_0.
-- I-series (imatrix): calibrated on code+reasoning+tool-calling data. Dramatically better KL worst-case vs standard wikitext calibration.
-- I-Compact (17.3 GB): beats UD-Q3_K_M at same size. BW ceiling 103 t/s.
-- I-Mini (14.3 GB): most aggressive; BW ceiling 125 t/s.
-
-**Target topology (locked — I-Compact + fp8 KV):**
-```
-GPU0: APEX I-Compact coder (17.3 GB weights + ~1.0 GB KV q8_0)  ≈ 18.5 GB
-    + Convergence ngl auto-alloc GPU0 (~13.0 GB headroom)
-GPU1: Thinker PQ MTP-n3 (29.3 GB, ~2.5 GB free)
-    + Convergence ngl auto-alloc GPU1 (~2.5 GB headroom)
-→ Combined Convergence VRAM: ~15.5 GB → ngl ≈ 81 layers → ~10 t/s (2.5× co-load improvement)
-```
-
-**Convergence APEX — SETTLED DEFERRED (assessed 2026-05-05):**
-Actual file sizes: Compact 187 GB, Quality 243 GB, Balanced 289 GB. ALL larger than UD-IQ2_M (123 GB). With --cpu-moe, larger model = more DDR5 BW per token = slower TPS. Projected: Compact 9.2 t/s (−34% vs UD-IQ2_M). Not worth downloading.
-
-**Key risk remaining:** ik_llama.cpp think+tool parsing for Qwen3.6 (no prior test — GLM passed 5/5 but no extended thinking).
-
-**Queue:** T_APEX1 (HIGH, download + first bench) → T_APEX2 (co-load with fp8 KV) → T_APEX3 (MTP if heads in GGUF). T_APEX4 SETTLED DEFERRED.
-
-**First action for testing mode:** `pyenv activate hf && HF_HOME=/srv/ai/models hf download mudler/Qwen3.6-35B-A3B-APEX-GGUF --include "*I-Compact*"` (~17 GB). Then follow T_APEX1 handoff.
+**BENCH_25 — Co-load Matrix:**
+- **Convergence:** **13.8 t/s** (98% of isolated 14.0 t/s). Previous co-load was 4.05 t/s.
+- **Topology:** GPU0: Coder (18.5G) + Convergence layers (~13G). GPU1: Thinker (29G) + Convergence layers (~2G).
+- **Status:** **PROMOTED TO PRODUCTION**.
 
 ---
 

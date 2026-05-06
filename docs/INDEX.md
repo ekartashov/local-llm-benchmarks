@@ -4,16 +4,16 @@
 
 ---
 
-## Current production configuration (R32, 2026-05-04)
+## Current production configuration (R35, 2026-05-06)
 
 | Role | Model | Config | Port | TPS | Status |
 |------|-------|--------|------|-----|--------|
-| Arclight Coder | Qwen3.6-35B-A3B PrismaQuant-4.75bit (rdtand) | vLLM TP=1 GPU0, V1 engine, fp8 KV, ctx=32768 | 30000 | 57 t/s | SETTLED (BENCH_23) |
-| Arclight Thinker | Qwen3.6-27B PrismaQuant-5.5bit (rdtand) | vLLM TP=1 GPU1, V1 engine (0.20.0), fp8 KV, cp-ON, max-num-seqs 4, MTP n=3 | 30001 | 92 t/s seq=1 / 315 t/s N=4 | SETTLED (BENCH_19) |
+| Arclight Coder | Qwen3.6-35B-A3B APEX GGUF (mudler) | ik_llama.cpp, -ngl 999, fp8 KV, -np 4, ctx=32768 | 8080 | 185 t/s | SETTLED (BENCH_24) |
+| Arclight Thinker | Qwen3.6-27B PrismaQuant-5.5bit (rdtand) | vLLM TP=1 GPU1, V1 engine, fp8 KV, cp-ON, --max-num-seqs 4, MTP n=3 | 30001 | 92 t/s seq=1 / 315 t/s N=4 | SETTLED (BENCH_19) |
 | Extended Arclight | Coder as TP=2 (thinker sleeping) | ctx=65536, CRIU hot-restart 0.28s | 30000 | 238 t/s | SETTLED |
-| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main, GGML_CUDA_NO_PINNED=1, `-ngl 999` (singularity) / `-ngl 15` (co-load), `-np 1` | 8002 | 14 t/s isolated | SETTLED (BENCH_22) |
+| Convergence | unsloth/Qwen3.5-397B-A17B UD-IQ2_M | ik_llama.cpp main, GGML_CUDA_NO_PINNED=1, `-ngl 999` (auto-allocate) | 8002 | 13.8 t/s (co-load) | SETTLED (BENCH_25) |
 
-**Open questions:** T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder (0/3 probes). T_KV1 swap blocked (vLLM 0.19 flag issue). T_KV3 SETTLED — 128K context verified (1,892 t/s prefill, 49 t/s decode, Path B ik_llama.cpp). T_HARD1 CLOSED — PQ 41/50 vs AWQ 42/50 on hard suite, statistical tie; production choice on TPS grounds. **T_PQ2 Ph.1 SETTLED PASS (BENCH_23/23a)** — Logical stability confirmed on V1 engine at TP=1. Reasoning collapse is an engine-path artifact (V0/Eager), not a sharding defect. PrismaQuant promoted to production for precision/VRAM benefits. **MTP at TP=1** is logically stable (5/5 tools) but currently incurs a **40% speed tax** (35 t/s vs 60 t/s) due to expert verification overhead on SM120. Production config remains No-MTP.
+**Open questions:** **T_APEX1/2 SETTLED SUCCESS (BENCH_24/25)** — APEX GGUF coder on ik_llama.cpp delivers 3.2x TPS over vLLM PrismaQuant baseline by bypassing the SM120 FlashInfer bottleneck. Convergence co-load performance restored to 98% of isolated speed (13.8 t/s vs 14.0 t/s) via VRAM reclamation. T_MTP2 CLOSED FAIL — MTP breaks tool-call generation on A3B MoE coder. T_KV1 swap blocked. T_KV3 SETTLED — 128K context verified. T_HARD1 CLOSED — PQ/AWQ statistical tie on hard suite.
 
 ---
 
