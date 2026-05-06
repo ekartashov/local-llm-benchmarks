@@ -8,6 +8,14 @@ Living document. Current-state summary only. Full cycle log: `docs/history/cycle
 
 ## Open from testing
 
+### From T_APEX1 (BENCH_24), 2026-05-06 — BREAKTHROUGH
+- **Result:** **SUCCESS**. APEX GGUF I-Compact + `ik_llama.cpp` is the new production candidate.
+- **Performance:** **185.0 t/s** (N=1), **217.1 t/s** (N=4). A **3.2x speedup** over the PrismaQuant baseline (56.5 t/s).
+- **Reliability:** **5/5 tool calls PASS**. Resolves the vLLM "no-call" failure for this architecture.
+- **Risk:** High reasoning-to-content ratio. `th02` reached 4096 tokens of thinking without emitting code. 
+- **Action for Research:** Update `docs/decisions/models.md` and `docs/arch/` to reflect the transition to `ik_llama.cpp` for the Coder service. Set production `max_tokens` floor to 8k for this model.
+- **Directory:** `results/BENCH_24_apex1_coder_20260505T235441Z/`
+
 (None)
 
 ## R34 — Arclight Coder: AWQ Shootout + MTP Audit (2026-05-05, BENCH_23a/b/c)

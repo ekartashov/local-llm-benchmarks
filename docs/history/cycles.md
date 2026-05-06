@@ -4,6 +4,23 @@ Full log of research ↔ testing cycles, newest first. This is a grep/ripgrep ta
 
 ---
 
+## R35 — May 6 2026 — APEX GGUF Coder Breakthrough (BENCH_24, T_APEX1)
+
+**Triggered by:** Need to evaluate the `mudler/Qwen3.6-35B-A3B-APEX-GGUF` I-Compact model as a high-performance alternative to the PrismaQuant vLLM baseline.
+
+- **BENCH_24 (APEX GGUF Viability):** ✅ SUCCESS. Breakthrough results on the `ik_llama.cpp` stack.
+- **Performance (TPS):** Achieved **185.0 t/s** (N=1). Compared to the PrismaQuant baseline of 56.5 t/s, this represents a **3.2x speedup** on the same hardware (RTX 5090). Aggregate throughput at N=4 reached **217.1 t/s**.
+- **Tool-Calling Resolved:** `ik_llama.cpp`'s `--jinja` template support correctly handles the APEX model's reasoning/tool-call sequence. Verified **5/5 tool-call reliability** (PASS), resolving the previous failure of this model architecture on vLLM.
+- **Reasoning Depth:** The model produces extensive `reasoning_content` (thinking). Quality is high, but the length of reasoning blocks necessitates a higher `max_tokens` (≥8k) for complex coding tasks to prevent truncation before the final content is emitted.
+- **Efficiency:** The 17GB footprint enables deployment with minimal VRAM impact (only ~17GB used), providing significant headroom for co-loading the Thinker and Convergence models.
+
+**Decisions:**
+- **APEX GGUF + ik_llama.cpp PROMOTED to Production Coder Candidate.** This stack is now the primary path for the Arclight Coder service.
+- **vLLM retired for the Coder service** until MoE tool-call emission is stabilized or performance reaches parity with `ik_llama.cpp`.
+- **Next Step:** Perform co-load matrix testing (T_APEX2) to verify stable concurrent operation with the Thinker and Behemoth models.
+
+---
+
 ## R34 — May 5 2026 — AWQ Shootout + MTP Audit + PQ Production Confirmation (BENCH_23a/b/c)
 
 **Triggered by:** Gemini BENCH_23 session showed tool-call variability (3-5/5 across runs); needed a user-run stability shootout to settle the production coder config definitively.

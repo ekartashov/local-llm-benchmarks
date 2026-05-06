@@ -4,6 +4,28 @@ Full procedures for DONE/CANCELLED/SKIPPED/PUNTED items. This is a grep/ripgrep 
 
 ---
 
+## T_APEX1 — apex_gguf_coder_viability — DONE ✓ (BENCH_24, 2026-05-06)
+
+**Question:** Can the `mudler/Qwen3.6-35B-A3B-APEX-GGUF` I-Compact model on `ik_llama.cpp` provide a superior performance/reliability tradeoff compared to the PrismaQuant vLLM baseline?
+
+**Result:** **SUCCESS**. Breakthrough performance and tool-call reliability achieved.
+
+**Findings:**
+1. **TPS Breakthrough:** Achieved **185.0 t/s** (N=1) and **217.1 t/s** (N=4) aggregate decode speed. This is a **3.2x improvement** over the PrismaQuant/vLLM baseline (56.5 t/s).
+2. **Tool-Call Reliability (5/5):** The model correctly emits structured tool calls on the `ik_llama.cpp` engine using `--jinja` templates. This resolves the 0/3 failure previously seen on the vLLM stack for this architecture.
+3. **Reasoning-to-Content Ratio:** The model produces extensive `reasoning_content` (thinking). On complex tasks, it can reach the `max_tokens` limit solely with reasoning. Production config requires high `max_tokens` (≥8k) or conciseness prompting.
+4. **Efficiency:** The 17GB I-Compact GGUF fits comfortably in a single GPU (RTX 5090) with ~15GB headroom, enabling dense co-loads with other models.
+
+**Production Config:**
+- **Engine:** `ik_llama.cpp` (server)
+- **Model:** `mudler/Qwen3.6-35B-A3B-APEX-GGUF` (I-Compact)
+- **Flags:** `-ngl 999 -t 32 -np 4 -c 32768 --jinja --no-mmap -ctk q8_0 -ctv q8_0`
+- **Placement:** GPU0.
+
+**Artifacts:** `results/BENCH_24_apex1_coder_20260505T235441Z/`
+
+---
+
 ## T_PQ2 — prismaquant_coder_audit — DONE ✓ (BENCH_23, 2026-05-05)
 
 **Question:** Can the 35B-A3B MoE Coder be stabilized on a single GPU (TP=1) using PrismaQuant and the vLLM V1 engine?
