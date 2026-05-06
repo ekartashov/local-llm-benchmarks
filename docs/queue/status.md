@@ -50,8 +50,8 @@ Full procedures for DONE items: docs/history/done-items.md
 | T_CV2 | DONE ✓ | 32 threads optimal. PP scales linearly (62 t/s vs 29 t/s at 16 threads). |
 | T_CV3 | DONE ✓ | 13.99 t/s Singularity mode (-ngl 999 --cpu-moe). 3.75× speedup. |
 | T_CV4 | DONE ✓ | 15.6 t/s sequential pipelining at -np 4 (1.12× scaling). Concurrent HTTP: crashes at N≥2 (T_PAR1). |
-| T_APEX1 | OPEN | APEX GGUF coder viability: I-Compact first (17.3 GB, ~103 t/s BW ceiling). Tool calls + th02 + TPS vs PQ 56.5 t/s. |
-| T_APEX2 | OPEN (dep: T_APEX1) | Tri-model co-load with APEX coder: I-Compact (ngl≈72, 8.4 t/s) or I-Mini (ngl≈94, 13.5 t/s) Convergence alongside. |
+| T_APEX1 | DONE ✓ | APEX I-Compact: 185.0 t/s N=1, 217.1 t/s N=4, 5/5 tool calls, ~18.5 GB VRAM. BENCH_24 PASS. |
+| T_APEX2 | DONE ✓ | Co-load: Convergence 13.8 t/s (98% isolated), GPU0=24.3 GB, GPU1=30.8 GB. BENCH_25 PASS. Promoted to production. |
 | T_APEX3 | OPEN (dep: T_APEX1) | Coder MTP on ik_llama.cpp: check APEX GGUF for MTP heads, bench if present. |
 | T_APEX4 | SETTLED DEFERRED | Convergence APEX: files exist (Compact 187 GB, Quality 243 GB, Balanced 289 GB) but ALL larger than UD-IQ2_M (123 GB) → slower TPS (Compact ~9.2 t/s vs 13.99 t/s). Not worth downloading. |
 | T_CV6 | OPEN | Convergence Extended architecture: free one Arclight GPU and test Convergence at/near -ngl 999 with thinker still live. |
